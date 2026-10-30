@@ -17,6 +17,7 @@ jobs:
           node-version: 24
       - name: Validate configured secrets and account access
         env:
+          CONFIGURED_SECRETS: ${{ toJSON(secrets) }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
