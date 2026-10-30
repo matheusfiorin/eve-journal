@@ -20,6 +20,7 @@ let subdomain;
 try{subdomain=await cf('/workers/subdomain');}catch(error){if(error.status!==404||!error.codes.includes(10007))throw error;console.log('This account has no workers.dev subdomain yet; registering one.');}
 if(!subdomain?.subdomain)subdomain=await cf('/workers/subdomain','PUT',{subdomain:`eve-pilots-${randomBytes(4).toString('hex')}`});
 const url=`https://${name}.${subdomain.subdomain}.workers.dev`;
+console.log(`Worker target: ${url}`);
 await mkdir('.cloudflare',{recursive:true});
 const config={name,main:resolve('worker/index.js'),compatibility_date:'2025-09-01',workers_dev:true,observability:{enabled:false},vars:{FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:clientId},d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid,migrations_dir:resolve('worker/migrations')}],triggers:{crons:['*/30 * * * *']}};
 const configPath=resolve('.cloudflare/wrangler.json');await writeFile(configPath,JSON.stringify(config,null,2));
@@ -36,11 +37,12 @@ if(!secrets.some(item=>item.name==='TOKEN_ENCRYPTION_KEY')){
 }
 await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'EVE_CLIENT_SECRET',type:'secret_text',text:eveSecret});
 console.log('EVE client secret configured in Cloudflare.');
-let healthy=false;
-for(let attempt=0;attempt<15;attempt++){
- try{const r=await fetch(`${url}/health`,{signal:AbortSignal.timeout(15000)});healthy=r.ok&&(await r.json()).ready;}catch{}
- if(healthy)break;await new Promise(r=>setTimeout(r,2000));
+let healthy=false,lastHealth={};
+for(let attempt=0;attempt<30;attempt++){
+ try{const r=await fetch(`${url}/health`,{signal:AbortSignal.timeout(15000)});lastHealth={status:r.status};const body=await r.json();lastHealth={status:r.status,ready:body.ready,database:body.database,error:body.error};healthy=r.ok&&body.ready;}catch(error){lastHealth={networkError:error.code||error.cause?.code||error.name};}
+ if(healthy)break;await new Promise(r=>setTimeout(r,3000));
 }
+if(!healthy)console.error(`Health diagnostic: ${JSON.stringify(lastHealth)}`);
 if(!healthy)throw new Error('Worker health check failed after deployment. Check the Worker and D1 binding in Cloudflare.');
 if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`url=${url}\n`);
 if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## EVE backend deployed\n\n- API: ${url}\n- **Set the EVE application callback to: ${url}/auth/callback**\n- Refresh schedule: every 30 minutes.\n- Skill totals and queue are published only after each pilot confirms sharing consent.\n- Wallet, ship, location, and industry data require that pilot's private dashboard session.\n`);
