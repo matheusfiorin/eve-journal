@@ -202,8 +202,8 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/api/market'&&request.method==='GET'){
   const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots').all();
   const parsed=rows.results.map(row=>({region:row.region_id,updatedAt:row.updated_at,data:JSON.parse(row.data)}));
-  // Region 0 holds shared metadata: item names, volumes, recipes and skill IDs.
-  return response({meta:parsed.find(r=>r.region===0)||null,regions:parsed.filter(r=>r.region!==0)},200,{'Cache-Control':'public, max-age=300'});
+  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations.
+  return response({meta:parsed.find(r=>r.region===0)||null,universe:parsed.find(r=>r.region===1)?.data||null,regions:parsed.filter(r=>r.region>1)},200,{'Cache-Control':'public, max-age=300'});
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);

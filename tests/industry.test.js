@@ -55,3 +55,9 @@ test('stage and next skills follow the wallet and alpha limits',()=>{
  const alpha=nextSkills({industry:3,massProduction:3,science:3,brokerRelations:2},true);
  assert.ok(alpha.every(s=>!s.omega));assert.deepEqual(alpha.map(s=>s.key),['industry','science']);
 });
+test('sells at the hub with the most volume and fetches materials where the main input is cheapest',()=>{
+ const twoHubs=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:100,s:[[1,9000,5]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]}}}},
+  {data:{name:'Domain',stations:{2:[30002187,'Amarr']},types:{2454:{d:5000,s:[[2,11000,50]],b:[]},34:{d:1e6,s:[[2,6,1e7]],b:[]}}}}]);
+ const r=evaluate(hob,{book:twoHubs,adjusted:new Map(),fees});
+ assert.equal(r.sell.loc,2);assert.ok(Math.abs(r.revenue-11000*0.895)<1e-9);assert.equal(r.materialsAt,1);
+});

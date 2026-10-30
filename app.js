@@ -2,6 +2,7 @@ import {BackendClient} from './backend.js';
 import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress, queueState, pilotRoles, pilotTitle, assetHoldings, shares, compactNumber} from './model.js';
 import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
 import {skillLevels, isAlpha, slots, evaluate, rank, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
+import {graph, leg, facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from './route.js';
 import {JournalStore} from './storage.js';
 
 const $ = selector => document.querySelector(selector);
@@ -513,6 +514,19 @@ async function renderMarket() {
    ${meta.recipesError ? empty(esc(meta.recipesError)) : buildRows.length ? `<ol class="opps">${buildRows.map((b, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(b.type))}</b><small>sells at ${esc(station(b.loc))} ${b.j === undefined || b.j === null ? '' : jumpTag(b.j)} · ${Math.round(b.daily).toLocaleString()}/day</small></div><div class="opp-route"><span>Materials ${format(b.materials, 'isk')} · job ${format(b.job, 'isk')}</span><span>Revenue ${format(b.revenue, 'isk')}</span></div><div class="opp-profit"><b class="${b.profit > 0 ? 'pos' : 'neg'}">${b.profit > 0 ? '+' : ''}${format(b.profit, 'isk')}</b><small>${(b.margin * 100).toFixed(1)}% margin</small></div></li>`).join('')}</ol>` : empty('No manufacturing data yet.')}
   </article>`;
 }
+let graphCache = null;
+const universeGraph = () => {
+  const src = marketData?.universe;
+  if (!src) return null;
+  if (graphCache?.src !== src) graphCache = {src, g:graph(src)};
+  return graphCache.g;
+};
+const hop = s => `<li class="sec-${secClass(s.sec)}" title="${esc(s.name)} · security ${secShown(s.sec).toFixed(1)}"><span>${secShown(s.sec).toFixed(1)}</span>${esc(s.name)}</li>`;
+function legHtml(title, place, route, extra = '') {
+  if (!route) return `<div class="leg"><div class="leg-head"><b>${title}</b><span>${esc(place || '')}</span><small>No gate route found from here.</small></div></div>`;
+  const names = route.systems.map(s => s.name);
+  return `<div class="leg"><div class="leg-head"><b>${title}</b><span>${esc(place)}</span><small>${route.jumps ? `${route.jumps} ${route.jumps === 1 ? 'jump' : 'jumps'}` : 'same system'}${route.risky ? ` · <span class="neg">${route.risky} low-sec</span>` : ''}${extra}</small><a href="${route.jumps ? dotlanRoute(names) : dotlanSystem(names[0])}" target="_blank" rel="noopener noreferrer">Map ↗</a></div>${route.jumps ? `<ol class="hops">${route.systems.map(hop).join('')}</ol>` : ''}</div>`;
+}
 async function renderIndustry() {
   const status = $('#industry-status'), content = $('#industry-content');
   if (!backend) { status.textContent = 'Industry planning needs the backend.'; return; }
@@ -529,9 +543,30 @@ async function renderIndustry() {
   const budgetInput = $('#industry-budget');
   if (!budgetInput.dataset.touched && x.wallet !== undefined) budgetInput.value = Math.floor(x.wallet);
   const budget = budgetInput.value === '' ? undefined : Number(budgetInput.value);
-  const picks = rank(catalog.map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:idx.manufacturing || 0, researchIndex:idx.researching_material_efficiency || 0, levels, alpha})), budget).slice(0, 10);
-  const cheapest = options.map(([id, label]) => ({id, label, index:costIndices.get(id)?.manufacturing})).filter(c => Number.isFinite(c.index)).sort((a, b) => a.index - b.index)[0];
-  const jobTax = (idx.manufacturing || 0) + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
+  // Plan around the cheapest safe NPC factory and lab near the starting system.
+  const g = universeGraph(), cache = new Map(), here = g?.systems.get(system);
+  const factories = g ? facilities(g, system, 1, id => costIndices.get(id)?.manufacturing) : [];
+  const labs = g ? facilities(g, system, 2, id => costIndices.get(id)?.researching_material_efficiency) : [];
+  const factory = factories[0], lab = labs[0];
+  const buildIndex = factory?.index ?? idx.manufacturing ?? 0, researchIndex = lab?.index ?? idx.researching_material_efficiency ?? 0;
+  const picks = rank(catalog.map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:buildIndex, researchIndex, levels, alpha})), budget).slice(0, 10);
+  const jobTax = buildIndex + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
+  const at = loc => { const st = marketBook.stations.get(loc); return {loc, system:st?.system, name:st?.name || `Station ${loc}`}; };
+  const trip = pick => {
+    if (!g) return '<p class="hint">Routes appear after the next market pipeline run.</p>';
+    const npc = (marketBook.items.get(pick.bp)?.sells || []).filter(o => o.price <= pick.price * 1.1).map(o => ({...at(o.loc), price:o.price}));
+    const seller = nearest(g, system, npc, cache), start = seller?.place.system ?? system;
+    const mats = at(pick.materialsAt), hub = at(pick.sell.loc);
+    const legs = [seller ? legHtml('Buy the blueprint', seller.place.name, seller.route, ` · ${format(seller.place.price, 'isk')}`)
+      : `<div class="leg"><div class="leg-head"><b>Buy the blueprint</b><span>Not seeded in the scanned hubs</span><small>Search “${esc(pick.n)} Blueprint” on the in-game market.</small></div></div>`];
+    if (lab) legs.push(legHtml(`Research to ME ${pick.me}`, lab.station.name, leg(g, start, lab.system.id, cache), ` · ME index ${pct(lab.index)}`));
+    legs.push(legHtml('Buy materials', mats.name, leg(g, lab?.system.id ?? start, mats.system, cache), ' · cheapest main input'));
+    if (factory) legs.push(legHtml('Build', factory.station.name, leg(g, mats.system ?? start, factory.system.id, cache), ` · index ${pct(factory.index)}`));
+    legs.push(legHtml('Sell', hub.name, leg(g, factory?.system.id ?? mats.system ?? start, hub.system, cache), ` · lowest ask ${format(pick.sell.price, 'isk')}`));
+    const stops = [system, seller?.place.system, lab?.system.id, mats.system, factory?.system.id, hub.system].filter(Boolean).filter((id, i, a) => id !== a[i - 1]).map(id => g.systems.get(id)?.name).filter(Boolean);
+    return `<ol class="legs">${legs.map(l => `<li>${l}</li>`).join('')}</ol>${stops.length > 1 ? `<a class="trip-link" href="${dotlanRoute(stops)}" target="_blank" rel="noopener noreferrer">Open the whole trip on Dotlan ↗</a>` : ''}`;
+  };
+  const facilityList = (list, kind) => list.length ? `<ol class="facilities">${list.map((x, i) => `<li>${i ? '' : '<span class="tag">Best</span> '}<a href="${dotlanSystem(x.system.name)}" target="_blank" rel="noopener noreferrer">${esc(x.station.name)}</a><small><span class="sec sec-${secClass(x.system.sec)}">${secShown(x.system.sec).toFixed(1)}</span> ${esc(x.system.name)} · ${x.jumps ? `${x.jumps} ${x.jumps === 1 ? 'jump' : 'jumps'}` : 'here'} · ${kind} index ${pct(x.index)} · job tax ${pct(x.index + NPC_FACILITY_TAX + (kind === 'ME' ? SCC.research : SCC.manufacturing) + (alpha ? ALPHA_TAX : 0))}</small>${x.jumps ? `<details><summary>Route</summary>${legHtml('', x.station.name, leg(g, system, x.system.id, cache))}</details>` : ''}</li>`).join('')}</ol>` : '<p class="hint">No high-sec NPC station with this service within 10 jumps.</p>';
   const plan = stage(x.wallet), next = nextSkills(levels, alpha), known = Boolean(x.skills?.skills);
   const affordable = picks.filter(pick => pick.affordable);
   const owner = pick => o ? (affordable.indexOf(pick) % 2 ? o : p) : p;
@@ -541,9 +576,9 @@ async function renderIndustry() {
   content.innerHTML = `
   <div class="grid">
     <article class="card reveal" style="--i:1"><h3>Your industry setup</h3>
-      <dl class="facts">${fact('Clone', known ? (alpha ? 'Alpha<small>4 build · 1 research slot max</small>' : 'Omega') : '—')}${fact('Build slots', known ? s.build : '—')}${fact('Research slots', known ? s.science : '—')}${fact('Job tax here', `${pct(jobTax)}<small>index ${pct(idx.manufacturing || 0)} + facility + SCC${alpha ? ' + alpha' : ''}</small>`)}${fact('Selling fees', `${pct(f.salesTax + f.brokerFee)}<small>sales ${pct(f.salesTax)} · broker ${pct(f.brokerFee)}</small>`)}${fact('Budget', format(budget, 'isk'))}</dl>
+      <dl class="facts">${fact('Clone', known ? (alpha ? 'Alpha<small>4 build · 1 research slot max</small>' : 'Omega') : '—')}${fact('Build slots', known ? s.build : '—')}${fact('Research slots', known ? s.science : '—')}${fact('Job tax', `${pct(jobTax)}<small>${factory ? `at ${esc(factory.system.name)}: ` : ''}index ${pct(buildIndex)} + facility + SCC${alpha ? ' + alpha' : ''}</small>`)}${fact('Selling fees', `${pct(f.salesTax + f.brokerFee)}<small>sales ${pct(f.salesTax)} · broker ${pct(f.brokerFee)}</small>`)}${fact('Budget', format(budget, 'isk'))}</dl>
       ${known ? '' : `<p class="hint">Connect ${esc(p?.name || 'your pilot')} to plan with real skills, slots and wallet.</p>`}
-      ${cheapest && cheapest.id !== system && cheapest.index < (idx.manufacturing || 0) * 0.8 ? `<p class="alert warn">Building in ${esc(cheapest.label.split(' · ')[0])} is cheaper: ${pct(cheapest.index)} index vs ${pct(idx.manufacturing || 0)} here.</p>` : ''}
+      ${factory && factory.system.id !== system && factory.index < (idx.manufacturing ?? Infinity) * 0.8 ? `<p class="alert warn">Building in ${esc(factory.system.name)} (${factory.jumps} jumps) is cheaper: ${pct(factory.index)} index vs ${pct(idx.manufacturing || 0)} here.</p>` : ''}
     </article>
     <article class="card reveal" style="--i:2"><h3>${esc(plan.name)}</h3>
       <div class="progress-row"><span class="stack"><i class="fill me" style="width:${Math.min(100, (x.wallet || 0) / plan.goal * 100).toFixed(1)}%"></i></span><small>${format(x.wallet, 'isk')} of ${format(plan.goal, 'isk')}</small></div>
@@ -551,13 +586,18 @@ async function renderIndustry() {
       <h3>Train next</h3>${next.length ? `<ul class="plain">${next.map(k => `<li><b>${esc(SKILL_LABELS[k.key])} ${ROMAN[k.level]}</b>${k.omega ? ' <span class="tag">Omega</span>' : ''}<small>${k.from ? `from ${ROMAN[k.from]} · ` : ''}${esc(k.why)}</small></li>`).join('')}</ul>` : `<p class="hint">${alpha ? 'You have every industry skill an Alpha can train. Omega unlocks more slots and lower taxes.' : 'Core industry skills are done. Look at invention next.'}</p>`}
     </article>
   </div>
-  <article class="card reveal" style="--i:3"><div class="card-head"><div><h3>Best blueprints to start with</h3><p class="hint">NPC-sold originals, researched to the suggested ME, built in batches and sold at the lowest ask. Ranked by profit per day against payback time${o ? `, and split between ${esc(p.name)} and ${esc(o.name)} so you never undercut each other` : ''}.</p></div></div>
+  <article class="card reveal" style="--i:3"><h3>Where to build and research near ${esc(here?.name || 'you')}</h3>
+    <p class="hint">NPC stations in high-sec (0.5+), reachable without entering low-sec, within 10 jumps. A lower system index means cheaper jobs; NPC stations add a fixed ${pct(NPC_FACILITY_TAX)} facility tax.</p>
+    ${g ? `<div class="grid"><div><h4>Manufacturing</h4>${facilityList(factories, 'build')}</div><div><h4>Research (ME)</h4>${facilityList(labs, 'ME')}</div></div>` : '<p class="hint">The station map appears after the next market pipeline run.</p>'}
+  </article>
+  <article class="card reveal" style="--i:4"><div class="card-head"><div><h3>Best blueprints to start with</h3><p class="hint">NPC-sold originals, researched to the suggested ME, built in batches and sold at the lowest ask. Ranked by profit per day against payback time${o ? `, and split between ${esc(p.name)} and ${esc(o.name)} so you never undercut each other` : ''}.</p></div></div>
     ${picks.length ? `<ol class="opps bpos">${picks.map((pick, n) => `<li class="opp reveal ${pick.affordable ? '' : 'over'}" style="--i:${n}">
       <div class="opp-main"><b>${esc(pick.n)}</b><small><span class="tag">${esc(pick.cat)}</span> BPO ${format(pick.price, 'isk')} · rank ${pick.rank}</small>${pick.affordable ? `<small class="who ${owner(pick) === p ? 'me' : 'them'}">Suggested for ${esc(owner(pick).name)}</small>` : '<small class="neg">Over budget</small>'}</div>
       <div class="opp-route"><span>Research ME 0 → ${pick.me} · ${days(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}</span><span>Sell ${Math.round(pick.unitsPerDay).toLocaleString()}/day at ${format(pick.revenue / (1 - f.salesTax - f.brokerFee), 'isk')} · margin ${pct(pick.margin)} <em>ME 0: ${pick.profitAtZero > 0 ? '+' : ''}${format(pick.profitAtZero, 'isk')}/unit</em></span><span>Start with ${format(pick.invest, 'isk')} · ${pick.sellers} ${pick.sellers === 1 ? 'station' : 'stations'} selling · ${Math.round(pick.daily).toLocaleString()} traded/day</span></div>
-      <div class="opp-profit"><b class="pos">+${format(pick.profitDay, 'isk')}/day</b><small>pays back in ${pick.payback < 1 ? 'under a day' : `${pick.payback.toFixed(1)} days`}</small></div></li>`).join('')}</ol>` : '<p class="hint">No starter blueprint turns a profit at today’s prices with these fees. Try another system or check after the next hourly scan.</p>'}
+      <div class="opp-profit"><b class="pos">+${format(pick.profitDay, 'isk')}/day</b><small>pays back in ${pick.payback < 1 ? 'under a day' : `${pick.payback.toFixed(1)} days`}</small></div>
+      <details class="trip"><summary>Plan the trip</summary>${trip(pick)}</details></li>`).join('')}</ol>` : '<p class="hint">No starter blueprint turns a profit at today’s prices with these fees. Try another system or check after the next hourly scan.</p>'}
   </article>
-  <article class="card reveal" style="--i:4"><h3>Avoid these traps</h3><ul class="plain traps">
+  <article class="card reveal" style="--i:5"><h3>Avoid these traps</h3><ul class="plain traps">
     <li><b>Price your own ore at market value.</b><small>Minerals you mine could be sold; if a build earns less than selling them, sell them.</small></li>
     <li><b>Margins under ~${Math.round((f.salesTax + f.brokerFee) * 100 + 2)}% are losses for you.</b><small>Sales tax and broker fee alone take ${pct(f.salesTax + f.brokerFee)}; relisting adds more. Accounting and Broker Relations cut both.</small></li>
     <li><b>Batch your runs.</b><small>ME rounds up per job, so a 1-run job wastes materials that a 100-run job saves.</small></li>
@@ -664,7 +704,7 @@ function expireSessions() {
   renderAll(); notice('A pilot session expired. Connect again to see private data.');
 }
 
-$('#refresh').onclick = () => { marketData = null; loadPilots(true); };
+$('#refresh').onclick = () => { marketData = null; costIndices = null; loadPilots(true); };
 $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
 $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
 $('#industry-system').onchange = () => renderIndustry();

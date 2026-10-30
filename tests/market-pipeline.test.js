@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -42,4 +42,15 @@ test('starters keep cheap published T1 blueprints whose materials cost less than
  assert.deepEqual(list.map(s=>s.n),['Rifter','Hobgoblin I'],'ranked by screened profit per second of build time');
  assert.deepEqual(list[1],{type:2454,bp:2456,n:'Hobgoblin I',cat:'Drone',q:1,t:300,rank:1,limit:300,price:250000,m:[[34,1000]]});
  assert.equal(list[0].rank,20);assert.equal(list[0].cat,'Frigate');
+});
+test('universe keeps known-space gates, security and NPC factories and labs',()=>{
+ const map=universe({
+  mapSolarSystems:[{_key:30000142,name:{en:'Jita'},securityStatus:0.9459,regionID:10000002},{_key:30000144,name:{en:'Perimeter'},securityStatus:0.95,regionID:10000002},{_key:31000005,name:{en:'Thera'},securityStatus:-1,regionID:11000031}],
+  mapStargates:[{_key:1,solarSystemID:30000142,destination:{solarSystemID:30000144}},{_key:2,solarSystemID:30000144,destination:{solarSystemID:30000142}},{_key:3,solarSystemID:30000142,destination:{solarSystemID:30000144}}],
+  npcStations:[{_key:60003760,solarSystemID:30000142,operationID:10},{_key:60003761,solarSystemID:30000144,operationID:11},{_key:60003762,solarSystemID:30000144,operationID:12}],
+  stationOperations:[{_key:10,services:[5,6]},{_key:11,services:[6]},{_key:12,services:[7]}],
+  stationServices:[{_key:5,serviceName:{en:'Factory'}},{_key:6,serviceName:{en:'Laboratory'}},{_key:7,serviceName:{en:'Cloning'}}]
+ });
+ assert.deepEqual(map.systems,{30000142:['Jita',0.946,10000002,[30000144]],30000144:['Perimeter',0.95,10000002,[30000142]]});
+ assert.deepEqual(map.stations,[[60003760,30000142,3],[60003761,30000144,2]]);
 });

@@ -197,3 +197,24 @@ body.picking{overflow:hidden}
 .opp.over{opacity:.55}
 .traps li b{font-size:14px}
 @media(max-width:640px){.bpos .opp{grid-template-columns:1fr auto}}
+
+/* ── Trip planner ── */
+.bpos .opp .trip{grid-column:1/-1;margin:4px 0 0}
+.trip>summary{font-size:12px;color:var(--accent)}
+.legs{list-style:none;padding:0;margin:10px 0 0;counter-reset:leg}
+.legs>li{counter-increment:leg;position:relative;padding:0 0 12px 30px;border-left:2px solid var(--line);margin-left:10px}
+.legs>li:last-child{border-left-color:transparent}
+.legs>li::before{content:counter(leg);position:absolute;left:-12px;top:0;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--accent);color:#13221a}
+.leg-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:13px}
+.leg-head b:empty{display:none}.leg-head span{color:var(--text)}.leg-head small{color:var(--muted);font-size:11px}
+.leg-head a{margin-left:auto;font-size:11px;white-space:nowrap}
+.hops{display:flex;flex-wrap:wrap;gap:4px;list-style:none;padding:0;margin:8px 0 0}
+.hops li{display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px 2px 3px;border-radius:99px;background:var(--panel);border:1px solid var(--line);animation:rise .4s both}
+.hops li span,.sec{font-size:10px;font-weight:700;padding:0 5px;border-radius:99px;color:#0b1420}
+.sec-hi span,.sec.sec-hi{background:#7fd8a6}.sec-low span,.sec.sec-low{background:var(--warn)}.sec-null span,.sec.sec-null{background:var(--danger)}
+.hops li+li::before{content:'›';color:var(--muted);margin:0 2px 0 -2px;order:-1}
+.trip-link{display:inline-block;margin-top:6px;font-size:12px}
+.facilities{list-style:none;padding:0;margin:0}.facilities li{padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.facilities small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.facilities details{margin:4px 0 0}.facilities summary{font-size:11px}
+h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:8px 0}

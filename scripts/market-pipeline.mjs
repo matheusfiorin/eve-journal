@@ -88,6 +88,25 @@ export function starters(blueprints, types, groups, categories, prices, {maxPric
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit).map(({score, ...s}) => s);
 }
+// Known space only: gate graph with security, plus NPC stations that offer manufacturing (1) or research (2).
+export function universe({mapSolarSystems, mapStargates, npcStations, stationOperations, stationServices}) {
+  const service = name => stationServices.find(s => sdeName(s.serviceName) === name)?._key;
+  const factory = service('Factory'), lab = service('Laboratory');
+  const systems = {};
+  for (const s of mapSolarSystems) if (s._key < 31000000) systems[s._key] = [sdeName(s.name), Math.round(s.securityStatus * 1000) / 1000, s.regionID, []];
+  for (const gate of mapStargates) {
+    const from = systems[gate.solarSystemID], to = gate.destination?.solarSystemID;
+    if (from && systems[to] && !from[3].includes(to)) from[3].push(to);
+  }
+  const services = new Map(stationOperations.map(o => [o._key, new Set(o.services || [])]));
+  const stations = [];
+  for (const st of npcStations) {
+    const has = services.get(st.operationID) || new Set();
+    const flags = (has.has(factory) ? 1 : 0) | (has.has(lab) ? 2 : 0);
+    if (flags && systems[st.solarSystemID]) stations.push([st._key, st.solarSystemID, flags]);
+  }
+  return {systems, stations};
+}
 async function sde(files) {
   const response = await fetch(SDE, {headers:HEADERS, signal:AbortSignal.timeout(300000)});
   if (!response.ok) throw new Error(`SDE download: HTTP ${response.status}`);
@@ -118,14 +137,20 @@ async function main() {
 
   const meta = {generatedAt:new Date().toISOString(), types:{}, recipes:{}, regions:{}};
   meta.starters = [];
+  let map = null;
   try {
-    const data = await sde(['blueprints', 'types', 'groups', 'categories']);
+    const data = await sde(['blueprints', 'types', 'groups', 'categories', 'mapSolarSystems', 'mapStargates', 'npcStations', 'stationOperations', 'stationServices']);
+    try {
+      map = universe(data);
+      const linked = Object.values(map.systems).filter(s => s[3].length).length;
+      if (!linked || !map.stations.length) throw new Error(`parsed ${linked} linked systems and ${map.stations.length} stations; sample system keys: ${Object.keys(data.mapSolarSystems[0] || {}).join(',')}; sample station keys: ${Object.keys(data.npcStations[0] || {}).join(',')}`);
+    } catch (error) { map = null; console.log(`::warning title=Universe map::${error.message}`); }
     meta.recipes = recipes(data.blueprints, wanted);
     const prices = new Map((await esi('/markets/prices/')).body.map(p => [p.type_id, {average:p.average_price || p.adjusted_price || 0, adjusted:p.adjusted_price}]));
     meta.starters = starters(data.blueprints, byKey(data.types), byKey(data.groups), byKey(data.categories), prices);
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
-  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
+  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, s.bp, ...s.m.map(([id]) => id)])])];
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
     advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research'};
@@ -169,6 +194,15 @@ async function main() {
     if (!stored.ok) throw new Error(`Upload for ${name} failed: HTTP ${stored.status} ${await stored.text()}`);
     report.push(`${name} ${Object.keys(types).length} items/${locs.length} stations`);
     console.log(`${name}: ${Object.keys(types).length} items across ${locs.length} stations.`);
+  }
+  if (map) {
+    const names = new Map();
+    const ids = map.stations.map(s => s[0]);
+    for (let i = 0; i < ids.length; i += 1000) (await esi('/universe/names/', {method:'POST', body:JSON.stringify(ids.slice(i, i + 1000))})).body.forEach(r => names.set(r.id, r.name));
+    map.stations = map.stations.map(s => [...s, names.get(s[0]) || `Station ${s[0]}`]);
+    const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:1, data:map})});
+    if (!stored.ok) throw new Error(`Universe upload failed: HTTP ${stored.status} ${await stored.text()}`);
+    report.push(`map ${Object.keys(map.systems).length} systems/${map.stations.filter(s => s[2] & 1).length} factories/${map.stations.filter(s => s[2] & 2).length} labs`);
   }
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);

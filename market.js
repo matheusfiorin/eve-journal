@@ -11,7 +11,8 @@ export function book(regions) {
   for (const {data} of regions) {
     for (const [loc, [system, name]] of Object.entries(data.stations || {})) stations.set(Number(loc), {system, name, region:data.name});
     for (const [type, t] of Object.entries(data.types || {})) {
-      const item = items.get(Number(type)) || {sells:[], buys:[], daily:0};
+      const item = items.get(Number(type)) || {sells:[], buys:[], daily:0, byRegion:{}};
+      item.byRegion[data.name] = t.d || 0;
       item.sells.push(...t.s.map(([loc, price, volume]) => ({loc, price, volume})));
       item.buys.push(...t.b.map(([loc, price, volume]) => ({loc, price, volume})));
       item.daily += t.d || 0;

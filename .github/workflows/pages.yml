@@ -81,7 +81,7 @@ jobs:
           BACKEND_URL: ${{ needs.deploy-backend.outputs.url }}
         run: node scripts/configure-frontend.mjs
       - name: Prepare public application files
-        run: mkdir _site && cp index.html styles.css app.js model.js market.js industry.js storage.js backend.js config.json _site/
+        run: mkdir _site && cp index.html styles.css app.js model.js market.js industry.js route.js storage.js backend.js config.json _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

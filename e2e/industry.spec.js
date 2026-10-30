@@ -9,6 +9,15 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  const picks=industry.locator('.bpos .opp');await expect(picks).toHaveCount(2);
  await expect(picks.first()).toContainText('Hobgoblin I');await expect(picks.first()).toContainText('ME 0 → 10');await expect(picks.first()).toContainText('Suggested for Fiofka');await expect(picks.first()).toContainText('/day');
  await expect(picks.nth(1)).toContainText('Rifter');await expect(picks.nth(1)).toContainText('ME 0 → 6');await expect(picks.nth(1)).toContainText('Suggested for Decxus');
+ const facilities=industry.locator('article').filter({hasText:'Where to build and research near Jita'});
+ await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('Niarja III - Factory');await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('2 jumps');await expect(facilities).not.toContainText('Tama','low-sec stations are never suggested');
+ await expect(facilities.locator('.facilities').nth(1).locator('li').first()).toContainText('Perimeter II - Moon 1 - Lab');
+ await expect(facilities.locator('.facilities a').first()).toHaveAttribute('href','https://evemaps.dotlan.net/system/Niarja');
+ const trip=picks.filter({hasText:'Rifter'}).locator('details.trip');await trip.locator('summary').click();
+ await expect(trip.locator('.legs>li').first()).toContainText('Amarr VIII');await expect(trip.locator('.legs>li').first()).toContainText('3 jumps');
+ await expect(trip.locator('.legs>li').first().locator('.hops li')).toHaveText(['0.9Jita','1.0Perimeter','0.5Niarja','1.0Amarr']);
+ await expect(trip.locator('.legs>li').nth(1)).toContainText('Research to ME 6');await expect(trip.locator('.legs>li').nth(3)).toContainText('Build');await expect(trip.locator('.legs>li').last()).toContainText('Sell');
+ await expect(trip.locator('.trip-link')).toHaveAttribute('href',/dotlan\.net\/route\/Jita:Amarr:Perimeter:Jita:Niarja:Jita/);
  await page.screenshot({path:testInfo.outputPath('industry.png'),fullPage:true});
  await page.locator('#industry-budget').fill('1000000');await page.locator('#industry-budget').dispatchEvent('change');
  await expect(picks.filter({hasText:'Rifter'})).toContainText('Over budget');await expect(picks.first()).toContainText('Hobgoblin I');

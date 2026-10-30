@@ -47,12 +47,18 @@ export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0,
   const materials = level => s.m.reduce((t, [type, qty]) => t + materialsFor(qty, runs, level) * ask(type), 0) / (runs * s.q);
   const eiv = s.m.reduce((t, [type, qty]) => t + qty * (adjusted.get(type) || 0), 0);
   const jobFee = eiv * (index + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0)) / s.q;
-  const revenue = product.sells[0].price * (1 - fees.salesTax - fees.brokerFee);
+  // Sell where the item trades most, at that hub's lowest ask.
+  const hub = Object.entries(product.byRegion || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const sell = product.sells.find(x => book.stations.get(x.loc)?.region === hub) || product.sells[0];
+  const revenue = sell.price * (1 - fees.salesTax - fees.brokerFee);
+  // Fetch materials where the costliest input is cheapest.
+  const main = s.m.reduce((a, b) => qtyCost(b) > qtyCost(a) ? b : a);
+  function qtyCost([type, qty]) { return qty * ask(type); }
   const unitProfit = level => revenue - materials(level) - jobFee;
   const profit = unitProfit(me), profitDay = profit * unitsPerDay;
   const research = {me, seconds:researchTime(s.rank, 0, me, levels), cost:researchCost(eiv, 0, me, researchIndex, alpha)};
   const invest = s.price + research.cost + materials(me) * unitsPerDay;
-  return {...s, me, research, unitsPerDay, revenue, materialCost:materials(me), jobFee, profit, profitAtZero:unitProfit(0),
+  return {...s, me, research, unitsPerDay, revenue, sell, materialsAt:book.items.get(main[0]).sells[0].loc, materialCost:materials(me), jobFee, profit, profitAtZero:unitProfit(0),
     margin:profit / revenue, profitDay, payback:profitDay > 0 ? (s.price + research.cost) / profitDay + research.seconds / 86400 : Infinity,
     invest, daily:product.daily, sellers:product.sells.length};
 }
