@@ -30,7 +30,7 @@ export async function validateToken(token, clientId, expectedId, keys, now = Dat
     decode(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
   if (!verified) throw new Error('EVE token signature could not be verified.');
   const claims = JSON.parse(new TextDecoder().decode(decode(parts[1])));
-  if (!['login.eveonline.com','https://login.eveonline.com'].includes(claims.iss) ||
+  if (!['login.eveonline.com','https://login.eveonline.com','https://login.eveonline.com/'].includes(claims.iss) ||
       !Array.isArray(claims.aud) || !claims.aud.includes(clientId) || !claims.aud.includes('EVE Online') ||
       !Number.isFinite(claims.exp) || claims.exp * 1000 <= now ||
       (claims.nbf !== undefined && (!Number.isFinite(claims.nbf) || claims.nbf * 1000 > now)) ||

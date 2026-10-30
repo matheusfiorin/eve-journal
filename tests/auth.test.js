@@ -45,3 +45,4 @@ test('verifies ECDSA tokens using a CCP-style P-256 key',async()=>{
   const token=`${input}.${base64url(new Uint8Array(signature))}`;
   assert.equal((await validateToken(token,client,id,[key],now)).name,'Fiofka');
 });
+test('supports the canonical issuer URL with trailing slash',async()=>{assert.equal((await validateToken(await sign({iss:'https://login.eveonline.com/'}),client,id,[jwk],now)).name,'Fiofka');});

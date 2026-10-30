@@ -146,7 +146,7 @@ function renderTraining() {
     ${queue ? `${active ? `<div class="active-training"><span class="badge">TRAINING NOW</span><h3>${esc(types.get(active.skill_id) || `Skill ${active.skill_id}`)} → ${active.finished_level}</h3><progress max="100" value="${trainingProgress(active)}" aria-label="Current skill training progress"></progress><p class="muted hint">${remaining(active.finish_date)} · Ends ${esc(new Date(active.finish_date).toLocaleString())}</p></div>` : '<p class="muted">No skill is currently scheduled to train.</p>'}
     <p class="muted hint">${queue.length} queued skills${last ? ` · Queue ends ${esc(new Date(last.finish_date).toLocaleString())}` : ''}</p>${p.nameWarning ? `<p class="muted hint">${esc(p.nameWarning)}</p>` : ''}
     ${queue.length ? queue.map((q,i) => `<div class="queue-row"><span><small>${String(i+1).padStart(2,'0')} / </small>${esc(types.get(q.skill_id) || `Skill ${q.skill_id}`)} <small>→ Level ${q.finished_level}</small></span><span>${esc(q.finish_date ? remaining(q.finish_date) : 'Paused / not scheduled')}</span></div>`).join('') : '<p class="muted">Your training queue is empty. Add a skill in EVE Online.</p>'}` : '<div class="empty">Your training plan belongs here.<br><br>Connect this pilot from Overview to load their read-only skills and queue.</div>'}
-    ${p.skills ? `<details><summary>${p.skills.skills.length} trained skills · ${Number(p.skills.unallocated_sp || 0).toLocaleString()} unallocated SP</summary><button data-skills="${p.id}" class="secondary">Load searchable skill list</button><div id="skills-${p.id}"></div></details>` : ''}</article>`;
+    ${p.skills ? `<details><summary>${p.skills.skills.length} trained skills · ${Number(p.skills.unallocated_sp || 0).toLocaleString()} unallocated SP</summary><button data-skills="${p.id}" class="secondary">Load searchable skill list</button><div id="skills-${p.id}" class="skill-list"></div></details>` : ''}</article>`;
   }).join('') : '<div class="empty">Configure your pilots to start tracking training.</div>';
 }
 function renderLocal() {
@@ -161,6 +161,7 @@ function renderLocal() {
   const goals = data.goals.filter(g => filter === 'all' || (filter === 'done' ? g.done : !g.done));
   $('#goal-count').textContent = `${done} of ${data.goals.length} goals complete`;
   $('#goal-list').innerHTML = goals.length ? goals.map(g => `<article class="goal ${g.done ? 'done' : ''}"><div><label><input type="checkbox" data-goal="${esc(g.id)}" ${g.done ? 'checked' : ''}>${esc(g.title)}</label><small>${esc(g.pilot)} · ${esc(g.category || 'Other')}${g.due ? ` · <span class="${!g.done && g.due < localDate() ? 'error' : ''}">Target ${esc(g.due)}</span>` : ''}</small></div><div class="actions"><button data-edit-goal="${esc(g.id)}" class="secondary">Edit</button><button data-delete-goal="${esc(g.id)}" class="secondary" aria-label="Delete ${esc(g.title)}">Delete</button></div></article>`).join('') : `<div class="empty">${data.goals.length ? 'No goals in this view.' : 'A new ship? A new system? Give your next adventure a goal.'}</div>`;
+  pilotOptions();
   renderEntries();
 }
 function renderEntries() {
@@ -173,6 +174,7 @@ function selectTab(id) {
   document.querySelectorAll('nav [data-tab]').forEach(b => {
     if (b.dataset.tab === id) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
   });
+  document.body.dataset.section = id;
   document.querySelectorAll('.tab').forEach(s => s.hidden = s.id !== id);
   history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
 }
@@ -263,6 +265,11 @@ function expireSessions() {
   }
 }
 
+$('#copy-eve-registration').onclick = async () => {
+  const text = `Application: EVE Flight Journal\nWebsite: ${callback}\nCallback URL: ${callback}\nScopes: ${SCOPES.join(' ')}\nFlow: Authorization Code with PKCE (S256); no client secret in the frontend`;
+  try { await navigator.clipboard.writeText(text); $('#registration-status').textContent = 'Registration details copied. Paste them into the EVE developer application form.'; }
+  catch { $('#registration-status').textContent = text; }
+};
 $('#settings-button').onclick = () => openSettings();
 $('#close-settings').onclick = () => $('#settings').close();
 $('#refresh').onclick = loadPilots;
@@ -313,7 +320,7 @@ document.addEventListener('change', event => {
 document.addEventListener('input', event => {
   if (!event.target.matches('[data-skill-search]')) return;
   const term=event.target.value.toLowerCase();
-  event.target.parentElement.querySelectorAll('.queue-row').forEach(row => row.hidden=!row.textContent.toLowerCase().includes(term));
+  event.target.closest('.skill-list').querySelectorAll('.queue-row').forEach(row => row.hidden=!row.textContent.toLowerCase().includes(term));
 });
 document.addEventListener('click', async event => {
   const b=event.target.closest('button'); if (!b) return;

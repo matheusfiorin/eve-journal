@@ -20,17 +20,18 @@ Source: https://github.com/matheusfiorin/eve-journal
 
 Syntax checks and automated tests cover backup validation/merge, calendar dates, filtering, training calculations, storage corruption/quota handling, concurrent-tab conflicts, PKCE, signed JWT validation and rejection cases, DOM control references, and Pages artifact completeness.
 
-Browser interaction and visual QA have not been run in this workspace because supported browser tooling is unavailable. Live ESI lookup and EVE login still require network verification. The SSO implementation follows CCP's published PKCE flow and validates tokens locally using CCP's JWKS, but that is not a substitute for a live end-to-end login with your registered application.
+Desktop and mobile Chromium user flows are now tested with Playwright, and screenshots have been reviewed. Public ESI character lookup, profiles, SSO discovery, and token-endpoint CORS have also been checked live. See [the feature and verification map](FEATURE-MAP.md) for per-feature coverage. Real character authorization still requires an EVE-registered client and consent from each pilot. The SSO implementation follows CCP's published PKCE flow and validates tokens locally using CCP's JWKS, but that is not a substitute for a live end-to-end login with your registered application.
 
-The original GitHub Actions run passed its tests and failed at Pages configuration because the repository did not have Pages enabled. Enable it as described below; application checks now run independently from deployment.
+GitHub Pages is enabled. Controlled browser tests gate deployment; live public-service and published-site smoke tests run after deployment. Browser reports, screenshots, and failure traces are retained as Actions artifacts for seven days.
 
 ## Run locally
 
-Node.js 24 and Python 3 are sufficient; there are no npm dependencies.
+Node.js 24 and Python 3 are sufficient. The application has no runtime dependencies; Playwright is a development-only browser-test dependency.
 
 ```sh
 git clone https://github.com/matheusfiorin/eve-journal.git
 cd eve-journal
+npm ci
 npm run check
 npm test
 npm start
@@ -73,7 +74,7 @@ The app uses PKCE S256 with a one-use state and five-minute callback lifetime. I
 
 **Integration constraint:** browser CORS behavior and your registered EVE application's configuration must be verified live. If EVE requires a confidential client or does not permit the browser token exchange for your configuration, use a small OAuth backend. Never expose a client secret to make it work. This version does not provide a backend, shared private training, or unattended updates.
 
-Reference: [CCP's published PKCE flow](https://github.com/esi/esi-docs/blob/master/docs/sso/native_sso_flow.md) and [JWT validation requirements](https://github.com/esi/esi-docs/blob/master/docs/sso/validating_eve_jwt.md). Those archived pages link to the current documentation at https://developers.eveonline.com/docs/.
+Reference: [current EVE SSO documentation](https://developers.eveonline.com/docs/services/sso/), including Authorization Code with PKCE and JWT validation.
 
 ## Storage and recovery
 
@@ -88,7 +89,7 @@ Reference: [CCP's published PKCE flow](https://github.com/esi/esi-docs/blob/mast
 
 All scripts hosted on the same origin can access localStorage. Deploy trusted code only. EVE portraits and API requests contact CCP services; notes are never sent with those requests.
 
-## Manual acceptance checks before calling it production-ready
+## Additional acceptance checks
 
 1. Confirm Fiofka and Decxus resolve to the correct characters and corporations. Refresh with the network unavailable and confirm existing profiles remain visible with an error.
 2. Add/edit/complete/filter goals. Write and edit an entry, search by text/pilot/focus, reload an unsaved draft, and test date selection around your local midnight.

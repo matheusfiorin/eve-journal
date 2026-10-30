@@ -1,10 +1,12 @@
 import {test,expect} from '@playwright/test';
+test.describe.configure({timeout:60000});
 test('LIVE: published dashboard resolves Fiofka and Decxus through real ESI',async({page},testInfo)=>{
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(process.env.LIVE_SITE||'https://matheusfiorin.github.io/eve-journal/');
  await expect(page.locator('#sync-status')).toContainText('Last refresh',{timeout:45000});
  await expect(page.locator('.pilot-card').first()).toContainText('Fiofka');await expect(page.locator('.pilot-card').nth(1)).toContainText('Decxus');
  await expect(page.locator('.pilot-card .portrait img')).toHaveCount(2);
+ await expect.poll(()=>page.locator('.pilot-card .portrait img').evaluateAll(images=>images.every(image=>image.complete&&image.naturalWidth>0)),{timeout:20000}).toBe(true);
  await expect(page.locator('.pilot-card').first()).not.toContainText('Corporation unavailable');
  await expect(page.locator('.pilot-card .error')).toHaveCount(0);expect(errors).toEqual([]);
  await page.screenshot({path:testInfo.outputPath('live-dashboard.png'),fullPage:true});

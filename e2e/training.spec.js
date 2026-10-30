@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {mockApp,openApp,tab,token,IDS,SETTINGS} from './fixtures.js';
 test('connected pilots show skill points, active training, paused queue and searchable skills',async({page})=>{
- const {errors}=await mockApp(page,{connected:true});await openApp(page);await expect(page.locator('.pilot-card').first()).toContainText('125,000');await tab(page,'training');await expect(page.locator('#training-content')).toContainText('Gunnery');await expect(page.locator('.active-training')).toHaveCount(2);await expect(page.locator('#training-content')).toContainText('Paused / not scheduled');await page.locator('[data-skills]').first().click();const list=page.locator(`#skills-${IDS[0]}`);await expect(list).toContainText('Active 3');await list.getByRole('searchbox').fill('Spaceship');await expect(list.locator('.queue-row:visible')).toHaveCount(1);expect(errors).toEqual([]);
+ const {errors}=await mockApp(page,{connected:true});await openApp(page);await expect(page.locator('.pilot-card').first()).toContainText('125,000');await tab(page,'training');await expect(page.locator('#training-content')).toContainText('Gunnery');await expect(page.locator('.active-training')).toHaveCount(2);await expect(page.locator('#training-content')).toContainText('Paused / not scheduled');await page.locator('#training-content details summary').first().click();await page.locator('[data-skills]').first().click();const list=page.locator(`#skills-${IDS[0]}`);await expect(list).toContainText('Active 3');await list.getByRole('searchbox').fill('Spaceship');await expect(list.locator('.queue-row:visible')).toHaveCount(1);expect(errors).toEqual([]);
 });
 test('disconnect removes skills and queues from the visible app and tab storage',async({page})=>{
  await mockApp(page,{connected:true});await openApp(page);await page.locator('[data-disconnect]').first().click();await expect(page.locator('.pilot-card').first()).not.toContainText('125,000');await tab(page,'training');await expect(page.locator('#training-content .panel').first()).toContainText('Connect this pilot');const ids=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('eve-sessions')).map(s=>s[0]));expect(ids).not.toContain(IDS[0]);expect(ids).toContain(IDS[1]);
@@ -13,7 +13,7 @@ test('training authorization errors are surfaced without crashing',async({page})
  const {errors}=await mockApp(page,{connected:true,trainingFail:true});await openApp(page);await tab(page,'training');await expect(page.locator('#training-content .panel').first()).toContainText('access expired');expect(errors).toEqual([]);
 });
 test('missing client ID opens setup rather than a broken login',async({page})=>{
- await mockApp(page);await openApp(page);await page.locator('[data-connect]').first().click();await expect(page.locator('#settings')).toBeVisible();await expect(page.getByLabel('EVE application client ID')).toBeVisible();await expect(page.locator('#callback-url')).toHaveText('http://127.0.0.1:8000/');
+ await mockApp(page);await openApp(page);await page.locator('[data-connect]').first().click();await expect(page.locator('#settings')).toBeVisible();await expect(page.getByLabel('EVE application client ID')).toBeVisible();await expect(page.locator('#callback-url')).toHaveText('http://127.0.0.1:8000/');await expect(page.locator('#settings')).toContainText('esi-skills.read_skillqueue.v1');await page.getByRole('button',{name:'Copy registration details'}).click();await expect(page.locator('#registration-status')).toContainText(/copied|Callback URL/);
 });
 test('connect produces a PKCE authorization request with correct scope and callback',async({page})=>{
  await mockApp(page,{settings:{pilots:['Fiofka','Decxus'],eveClientId:'test-client'}});
@@ -45,5 +45,11 @@ test('cancelled authorization leaves public profiles usable',async({page})=>{
  const result=await callbackSetup(page,{cancel:true});expect(result.exchanges()).toBe(0);await expect(page.locator('#notice')).toContainText('cancelled');await expect(page.locator('.pilot-card').first()).toContainText('Fiofka');
 });
 test('expiry clears private data when the tab becomes visible',async({page})=>{
- await mockApp(page,{connected:true});await openApp(page);await page.clock.install();await page.clock.fastForward(21*60*1000);await expect(page.locator('.pilot-card').first()).not.toContainText('125,000');await expect(page.locator('#notice')).toContainText('expired');
+ await mockApp(page,{connected:true});await page.clock.install();await openApp(page);await page.clock.fastForward(21*60*1000);await expect(page.locator('.pilot-card').first()).not.toContainText('125,000');await expect(page.locator('#notice')).toContainText('expired');
+});
+test('a failed training refresh retains the previously loaded queue',async({page})=>{
+ const {state}=await mockApp(page,{connected:true});await openApp(page);state.trainingFail=true;await page.getByRole('button',{name:'Refresh ESI'}).click();await expect(page.locator('.pilot-card').first()).toContainText('Previous data');await tab(page,'training');await expect(page.locator('#training-content .panel').first()).toContainText('Gunnery');
+});
+test('invalid stored access tokens never reach private ESI endpoints',async({page})=>{
+ const {errors}=await mockApp(page,{settings:{pilots:['Fiofka','Decxus'],eveClientId:'test-client'}});await page.addInitScript(id=>sessionStorage.setItem('eve-sessions',JSON.stringify([[id,{token:'invalid.token.signature',expires:Date.now()+1200000}]])),IDS[0]);const privateRequests=[];page.on('request',r=>{if(/\/skills\/|\/skillqueue\//.test(r.url()))privateRequests.push(r.url());});await openApp(page);expect(privateRequests).toEqual([]);await expect(page.locator('.pilot-card').first()).not.toContainText('125,000');expect(errors).toEqual([]);
 });
