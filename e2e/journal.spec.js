@@ -5,7 +5,7 @@ test('public profiles, navigation and overview are usable without login',async({
  await expect(page.locator('.pilot-card')).toHaveCount(2);await expect(page.locator('.pilot-card').first()).toContainText('Fiofka');await expect(page.locator('.pilot-card').nth(1)).toContainText('Decxus');
  await expect(page.locator('.pilot-card').first()).toContainText('Test Flight Academy');await expect(page.locator('.pilot-card').first()).toContainText('Security status');
  for(const name of ['training','goals','journal','overview'])await tab(page,name);
- await page.getByRole('button',{name:'Write an entry'}).click();await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);
+ await tab(page,'journal');await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);
 });
 test('journal creates, edits, filters, persists and deletes an entry',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);await addEntry(page);
@@ -29,7 +29,7 @@ test('goals create, edit, complete, filter, reopen and delete',async({page})=>{
  await page.locator('.goal').getByRole('button',{name:'Edit',exact:true}).click();await f.getByLabel('Next milestone').fill('Fly a Buzzard');await f.getByRole('button',{name:'Save changes'}).click();await page.locator('.goal input').click();await expect(page.locator('.goal')).toHaveCount(0);await page.locator('#goal-filter').selectOption('done');await expect(page.locator('.goal')).toContainText('Fly a Buzzard');await page.locator('.goal input').click();await page.locator('#goal-filter').selectOption('open');await expect(page.locator('.goal')).toHaveCount(1);page.once('dialog',d=>d.accept());await page.locator('.goal').getByRole('button',{name:/^Delete /}).click();await expect(page.locator('.goal')).toHaveCount(0);
 });
 test('overview reflects local goals and journal history',async({page})=>{
- await mockApp(page,{data});await openApp(page);await expect(page.locator('#flight-summary')).toContainText('1');await expect(page.locator('#next-chapter')).toContainText('Fly a cruiser');await expect(page.locator('#next-chapter')).toContainText('Wormhole discovery');
+ await mockApp(page,{data});await openApp(page);await expect(page.locator('#flight-summary')).not.toBeVisible();await tab(page,'journal');await page.locator('.local-overview summary').click();await expect(page.locator('#flight-summary')).toContainText('1');await expect(page.locator('#next-chapter')).toContainText('Fly a cruiser');await expect(page.locator('#next-chapter')).toContainText('Wormhole discovery');
 });
 test('markup in notes and imported titles stays literal',async({page})=>{
  await mockApp(page);await openApp(page);await addEntry(page,{title:'<img src=x onerror=alert(1)>',body:'<script>window.compromised=true</script>'});await expect(page.locator('#entries img')).toHaveCount(0);await expect(page.locator('#entries script')).toHaveCount(0);await expect(page.locator('#entries')).toContainText('<script>');expect(await page.evaluate(()=>window.compromised)).toBeUndefined();

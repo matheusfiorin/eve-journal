@@ -1,16 +1,22 @@
-# EVE Flight Journal
+# EVE Pilot Console
 
-A GitHub Pages companion for **Fiofka** and **Decxus**. See your public EVE profiles, connect private training data, set milestones, and keep a personal flight record.
+A GitHub Pages companion for **Fiofka** and **Decxus**. Track API-provided profiles, skills, training, wallet balance, current ship and location, and industry jobs. Public corporation history and Tranquility population are available without login. Notes and goals are secondary, browser-local tools.
 
 Source: https://github.com/matheusfiorin/eve-journal
+
+## API content first
+
+Primary navigation is Pilots, Skills & training, and Operations. Notes and goals are grouped in a secondary menu. The overview contains ESI metrics rather than local journal counts.
 
 ## What works in this version
 
 - Public character lookup, portraits, corporations, birthday, character age, and security status from EVE ESI.
 - Read-only skills, total/unallocated SP, and training queues after each pilot authorizes EVE login. Shows the active skill, training progress, queue end, paused skills, and a searchable trained-skill list.
+- Corporation history, current corporation membership/tax information, and live Tranquility server population from public ESI.
+- Operations: read-only wallet balance, current ship/name, solar system and station, and current industry jobs. Each optional permission has its own unavailable/error state; training-only grants continue to work. Data is fetched on load and manual refresh, with timestamps and ESI caching notices.
 - Goals with a pilot, focus, optional target date, completion state, editing, and open/completed filters.
 - Private journal with editing, dates, focus categories, text search, pilot filters, and tab-local draft recovery.
-- Overview with local milestone counts, next goal, and latest journal entry.
+- Overview with connected-pilot counts, combined skill points, active-training counts, profiles, and corporation records. Local milestone summaries are inside the secondary journal area.
 - JSON backup export and merge, recovery downloads for malformed saved data, and protection against overwriting a journal changed in another tab.
 - Responsive layout, keyboard focus indicators, named form fields, live status messages, and local system fonts. No analytics or font CDN.
 
@@ -65,7 +71,7 @@ The Pages artifact contains only explicitly listed public app files. No private 
 
 ## Connect EVE Online
 
-1. Register an application at https://developers.eveonline.com/ that supports a public/native Authorization Code flow with PKCE. Request only `esi-skills.read_skills.v1` and `esi-skills.read_skillqueue.v1`.
+1. Register an application at https://developers.eveonline.com/ that supports a public/native Authorization Code flow with PKCE. Enable the read-only scopes listed below. Skills and queue scopes are required for the training connection; operations scopes enable each additional data source.
 2. Register this exact callback, including the trailing slash: `https://matheusfiorin.github.io/eve-journal/`. For development, use a separately registered localhost callback if your application configuration supports it. The Configure pilots dialog displays the callback for the current environment.
 3. Put the public client ID in `config.json` or **Configure pilots → Enable private skills & training**.
 4. In Overview, connect a pilot and choose that same character in EVE login. Repeat for the other pilot if you both want to authorize this browser session. Each pilot authorizes their own account; do not share EVE passwords.
@@ -75,6 +81,17 @@ The app uses PKCE S256 with a one-use state and five-minute callback lifetime. I
 **Integration constraint:** browser CORS behavior and your registered EVE application's configuration must be verified live. If EVE requires a confidential client or does not permit the browser token exchange for your configuration, use a small OAuth backend. Never expose a client secret to make it work. This version does not provide a backend, shared private training, or unattended updates.
 
 Reference: [current EVE SSO documentation](https://developers.eveonline.com/docs/services/sso/), including Authorization Code with PKCE and JWT validation.
+
+### Read-only EVE scopes
+
+- `esi-skills.read_skills.v1`
+- `esi-skills.read_skillqueue.v1`
+- `esi-wallet.read_character_wallet.v1`
+- `esi-location.read_location.v1`
+- `esi-location.read_ship_type.v1`
+- `esi-industry.read_character_jobs.v1`
+
+Registration details in Configure pilots include the complete scope list. Existing training-only connections show permission prompts in Operations and can reconnect to add the new scopes. The app performs no wallet transfers, ship actions, or industry job changes. Player structure names are not fetched; public station names are resolved when available. Only the latest six non-deleted corporation history records and up to 20 returned current industry jobs are displayed.
 
 ## Storage and recovery
 
@@ -99,6 +116,6 @@ All scripts hosted on the same origin can access localStorage. Deploy trusted co
 6. Inspect desktop and narrow-screen layouts, keyboard navigation, form validation, and search after edits.
 7. Confirm the Pages deployment succeeds and that a private browser window has neither journal entries nor authenticated training data.
 
-Wallet, assets, industry APIs, killboards, screenshot uploads, and shared journal synchronization are not implemented.
+Assets, wallet transaction history, fittings, killboards, screenshot uploads, and shared journal synchronization are not implemented. Operations data is session-only and is not included in journal backups.
 
 EVE Online and related imagery are property of CCP Games. This is an independent fan project, not affiliated with or endorsed by CCP Games.

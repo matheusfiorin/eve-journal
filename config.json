@@ -1,5 +1,8 @@
 {
-  "title": "EVE Flight Journal",
-  "pilots": ["Fiofka", "Decxus"],
+  "title": "EVE Pilot Console",
+  "pilots": [
+    "Fiofka",
+    "Decxus"
+  ],
   "eveClientId": ""
 }

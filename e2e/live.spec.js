@@ -8,7 +8,7 @@ test('LIVE: published dashboard resolves Fiofka and Decxus through real ESI',asy
  await expect(page.locator('.pilot-card .portrait img')).toHaveCount(2);
  await expect.poll(()=>page.locator('.pilot-card .portrait img').evaluateAll(images=>images.every(image=>image.complete&&image.naturalWidth>0)),{timeout:20000}).toBe(true);
  await expect(page.locator('.pilot-card').first()).not.toContainText('Corporation unavailable');
- await expect(page.locator('.pilot-card .error')).toHaveCount(0);expect(errors).toEqual([]);
+ await expect(page.locator('.pilot-card .error')).toHaveCount(0);await expect(page.locator('#server-status')).toContainText('pilots online');await expect(page.locator('#career-content')).toContainText('Joined');expect(errors).toEqual([]);
  await page.screenshot({path:testInfo.outputPath('live-dashboard.png'),fullPage:true});
 });
 test('LIVE: ESI IDs and EVE browser token exchange CORS are available',async({request})=>{

@@ -1,6 +1,14 @@
-# Feature and verification map
+# EVE Pilot Console: feature and verification map
 
 This document separates actual public-service checks, browser tests using controlled EVE responses, and checks that require a player account. Automated screenshots, traces, and HTML reports are uploaded by GitHub Actions. Test fixtures contain generated signing keys and synthetic training data, never player credentials.
+
+## API-first update
+
+The primary product is now the ESI dashboard. Pilots, Skills & training, and Operations are the primary sections. Local notes and goals are secondary and do not occupy overview metrics.
+
+New public content: Tranquility player count, current corporation ticker/members/tax, and the six latest non-deleted corporation history entries. New permission-based content: wallet balance, current ship/name, solar system/station, and current industry jobs. These use read-only scopes, have individual failure/permission states, retain prior responses on transient failures, and clear on disconnect or expiry. Existing training-only grants continue to work.
+
+Operations browser tests cover all four data sources, missing optional permissions, isolated endpoint failure, empty industry jobs, and disconnect/privacy behavior. Private operations are verified with controlled API fixtures; real character authorization still depends on the registered EVE client.
 
 ## Application features
 
@@ -9,7 +17,7 @@ This document separates actual public-service checks, browser tests using contro
 | Fiofka / Decxus public character lookup | Public profile and LIVE dashboard tests | Real ESI IDs confirmed: 2124810474 / 2124815118 |
 | Portraits, corporation, birthday, age, security status | Public profile test; LIVE published screenshot | Real CCP services; screenshots are evidence of the rendered page |
 | Section navigation and overview shortcuts | Public profiles/navigation test | None |
-| Local overview totals, next goal, latest entry | Overview reflects local history test | Browser storage |
+| Secondary local totals, next goal, latest entry | Overview reflects local history test | Browser storage |
 | Missing-character error and disabled login | Unknown characters test | Controlled ESI response |
 | Refresh with previous data retained on failure | Public refresh failure test | Controlled outage |
 | Pilot configuration and duplicate-name validation | Settings test | Browser storage |
@@ -40,7 +48,7 @@ This document separates actual public-service checks, browser tests using contro
 
 ## Verified browser audit
 
-The final local run passed **70 desktop/mobile browser scenarios** and **33 unit/data/authentication checks**. The browser run exercises real rendered forms, navigation, downloads, reloads, and tab storage against controlled API responses. Desktop and mobile overview/journal screenshots were reviewed.
+The final local run passed **82 desktop/mobile browser scenarios** and **33 unit/data/authentication checks**. The browser run exercises real rendered forms, navigation, downloads, reloads, and tab storage against controlled API responses. Desktop and mobile overview/journal screenshots were reviewed.
 
 The audit found and fixed broken skill-list filtering and missing author options for newly saved Both pilots entries. Non-overview sections now omit the large introduction so the journal and training controls remain near the top, particularly on mobile. Developer registration now offers copy-ready callback and scope details.
 
@@ -62,7 +70,7 @@ On 2026-10-30:
 - Actual pilot consent, real skills/queue values, and successful token exchange with a registered client are **not verified** by simulated OAuth tests.
 - The client ID has not been created: developer application registration requires the owner's EVE login, which is unavailable in this session. The required callback and scopes are already implemented and tested.
 - Notes and goals are local to each browser. They are not a shared journal, and the dashboard does not publicly publish private training data.
-- Wallet, assets, industry, fitting tools, screenshot uploads, and killboards are not implemented.
+- Assets, wallet transaction history, fitting tools, screenshot uploads, and killboards are not implemented. Wallet balance and current industry jobs are implemented behind their optional read-only EVE scopes.
 - Reports will mark failures rather than treating a successful upload or a unit-test count as proof that all features work.
 
 ## Run and inspect

@@ -1,4 +1,11 @@
 export const SCOPES = ['esi-skills.read_skills.v1', 'esi-skills.read_skillqueue.v1'];
+export const OPERATIONS_SCOPES = {
+  wallet:'esi-wallet.read_character_wallet.v1',
+  location:'esi-location.read_location.v1',
+  ship:'esi-location.read_ship_type.v1',
+  jobs:'esi-industry.read_character_jobs.v1'
+};
+export const REQUESTED_SCOPES = [...SCOPES, ...Object.values(OPERATIONS_SCOPES)];
 export function base64url(bytes) {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -38,5 +45,5 @@ export async function validateToken(token, clientId, expectedId, keys, now = Dat
   if (claims.sub !== `CHARACTER:EVE:${expectedId}`) throw new Error('You selected a different EVE character. Connect the configured pilot.');
   const scopes = Array.isArray(claims.scp) ? claims.scp : String(claims.scp || '').split(' ');
   if (!SCOPES.every(s => scopes.includes(s))) throw new Error('EVE did not grant both skills and queue permissions. Reconnect and allow both.');
-  return {name:claims.name, expires:claims.exp * 1000};
+  return {name:claims.name, expires:claims.exp * 1000, scopes};
 }

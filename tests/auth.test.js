@@ -22,7 +22,7 @@ test('login state rejects mismatches, old, future and incomplete state',()=>{
   for(const [p,s] of [[null,'random'],[pending,'other'],[{...pending,created:now-300001},'random'],[{...pending,created:now+1},'random'],[{...pending,expectedId:undefined},'random']])assert.throws(()=>validateState(p,s,now));
 });
 test('accepts a signed EVE token for the correct application and pilot',async()=>{
-  assert.deepEqual(await validateToken(await sign(),client,id,[jwk],now),{name:'Fiofka',expires:now+1200000});
+  assert.deepEqual(await validateToken(await sign(),client,id,[jwk],now),{name:'Fiofka',expires:now+1200000,scopes:SCOPES});
 });
 test('rejects a tampered payload even if its claims look valid',async()=>{
   const token=await sign(),parts=token.split('.');parts[1]=encode({...claims,name:'Impostor'});
