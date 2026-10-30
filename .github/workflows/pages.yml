@@ -18,8 +18,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-test-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
   deploy:
     if: github.event_name != 'pull_request'
     needs: verify
@@ -43,3 +54,23 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+  verify-published:
+    name: Test published site and live EVE APIs
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:live
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-site-test-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
