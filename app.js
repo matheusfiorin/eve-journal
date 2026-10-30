@@ -549,16 +549,25 @@ async function renderIndustry() {
   const labs = g ? facilities(g, system, 2, id => costIndices.get(id)?.researching_material_efficiency) : [];
   const factory = factories[0], lab = labs[0];
   const buildIndex = factory?.index ?? idx.manufacturing ?? 0, researchIndex = lab?.index ?? idx.researching_material_efficiency ?? 0;
-  const picks = rank(catalog.map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:buildIndex, researchIndex, levels, alpha})), budget).slice(0, 10);
-  const jobTax = buildIndex + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
   const at = loc => { const st = marketBook.stations.get(loc); return {loc, system:st?.system, name:st?.name || `Station ${loc}`}; };
+  // Where each blueprint is really sold by NPCs (365-day orders), nearest by safe route.
+  const sellerNames = meta.bpoSurvey?.names || {};
+  const sellerOf = pick => g ? nearest(g, system, (pick.sellers || []).map(([loc, sys, price]) => ({loc, system:sys, price, name:sellerNames[loc] || at(loc).name})), cache) : null;
+  const category = $('#industry-category'), sortBy = $('#industry-sort').value;
+  const categories = [...new Set(catalog.map(item => item.cat))].sort();
+  if (category.options.length !== categories.length + 1) { const prior = category.value; category.innerHTML = `<option value="">All categories</option>${categories.map(c => `<option>${esc(c)}</option>`).join('')}`; category.value = categories.includes(prior) ? prior : ''; }
+  const ranked = rank(catalog.filter(item => !category.value || item.cat === category.value).map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:buildIndex, researchIndex, levels, alpha})), budget)
+    .map(pick => ({...pick, seller:sellerOf(pick)}));
+  const SORTS = {profit:(a, b) => b.profitDay - a.profitDay, payback:(a, b) => a.payback - b.payback, margin:(a, b) => b.margin - a.margin, cheap:(a, b) => a.price - b.price,
+    near:(a, b) => (a.seller?.route.jumps ?? 999) - (b.seller?.route.jumps ?? 999)};
+  const picks = (SORTS[sortBy] ? [...ranked].sort((a, b) => (b.affordable - a.affordable) || SORTS[sortBy](a, b)) : ranked).slice(0, 20);
+  const jobTax = buildIndex + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
   const trip = pick => {
     if (!g) return '<p class="hint">Routes appear after the next market pipeline run.</p>';
-    const npc = (marketBook.items.get(pick.bp)?.sells || []).filter(o => o.price <= pick.price * 1.1).map(o => ({...at(o.loc), price:o.price}));
-    const seller = nearest(g, system, npc, cache), start = seller?.place.system ?? system;
+    const seller = pick.seller, start = seller?.place.system ?? system;
     const mats = at(pick.materialsAt), hub = at(pick.sell.loc);
     const legs = [seller ? legHtml('Buy the blueprint', seller.place.name, seller.route, ` · ${format(seller.place.price, 'isk')}`)
-      : `<div class="leg"><div class="leg-head"><b>Buy the blueprint</b><span>Not seeded in the scanned hubs</span><small>Search “${esc(pick.n)} Blueprint” on the in-game market.</small></div></div>`];
+      : `<div class="leg"><div class="leg-head"><b>Buy the blueprint</b><span>No NPC seller reachable through high-sec</span><small>Search “${esc(pick.n)} Blueprint” on the in-game market.</small></div></div>`];
     if (lab) legs.push(legHtml(`Research to ME ${pick.me}`, lab.station.name, leg(g, start, lab.system.id, cache), ` · ME index ${pct(lab.index)}`));
     legs.push(legHtml('Buy materials', mats.name, leg(g, lab?.system.id ?? start, mats.system, cache), ' · cheapest main input'));
     if (factory) legs.push(legHtml('Build', factory.station.name, leg(g, mats.system ?? start, factory.system.id, cache), ` · index ${pct(factory.index)}`));
@@ -572,7 +581,7 @@ async function renderIndustry() {
   const owner = pick => o ? (affordable.indexOf(pick) % 2 ? o : p) : p;
   const pct = v => `${(v * 100).toFixed(v < 0.1 ? 2 : 1)}%`;
   const days = sec => sec >= 86400 ? `${(sec / 86400).toFixed(1)} d` : `${Math.max(1, Math.round(sec / 3600))} h`;
-  status.textContent = `${catalog.length} cheap T1 blueprints priced from live orders · scanned ${Math.max(1, Math.round((Date.now() - Math.min(...marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
+  status.textContent = `${catalog.length} cheap T1 blueprints that NPCs sell${meta.bpoSurvey ? ` in ${meta.bpoSurvey.regions} high-sec regions` : ''}, priced from live orders · scanned ${Math.max(1, Math.round((Date.now() - Math.min(...marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
   content.innerHTML = `
   <div class="grid">
     <article class="card reveal" style="--i:1"><h3>Your industry setup</h3>
@@ -590,10 +599,10 @@ async function renderIndustry() {
     <p class="hint">NPC stations in high-sec (0.5+), reachable without entering low-sec, within 10 jumps. A lower system index means cheaper jobs; NPC stations add a fixed ${pct(NPC_FACILITY_TAX)} facility tax.</p>
     ${g ? `<div class="grid"><div><h4>Manufacturing</h4>${facilityList(factories, 'build')}</div><div><h4>Research (ME)</h4>${facilityList(labs, 'ME')}</div></div>` : '<p class="hint">The station map appears after the next market pipeline run.</p>'}
   </article>
-  <article class="card reveal" style="--i:4"><div class="card-head"><div><h3>Best blueprints to start with</h3><p class="hint">NPC-sold originals, researched to the suggested ME, built in batches and sold at the lowest ask. Ranked by profit per day against payback time${o ? `, and split between ${esc(p.name)} and ${esc(o.name)} so you never undercut each other` : ''}.</p></div></div>
+  <article class="card reveal" style="--i:4"><div class="card-head"><div><h3>Best blueprints to start with</h3><p class="hint">NPC-sold originals, researched to the suggested ME, built in batches and sold at the lowest ask. Only blueprints an NPC actually sells; ranked by profit per day against payback time${o ? `, and split between ${esc(p.name)} and ${esc(o.name)} so you never undercut each other` : ''}.</p></div></div>
     ${picks.length ? `<ol class="opps bpos">${picks.map((pick, n) => `<li class="opp reveal ${pick.affordable ? '' : 'over'}" style="--i:${n}">
-      <div class="opp-main"><b>${esc(pick.n)}</b><small><span class="tag">${esc(pick.cat)}</span> BPO ${format(pick.price, 'isk')} · rank ${pick.rank}</small>${pick.affordable ? `<small class="who ${owner(pick) === p ? 'me' : 'them'}">Suggested for ${esc(owner(pick).name)}</small>` : '<small class="neg">Over budget</small>'}</div>
-      <div class="opp-route"><span>Research ME 0 → ${pick.me} · ${days(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}</span><span>Sell ${Math.round(pick.unitsPerDay).toLocaleString()}/day at ${format(pick.revenue / (1 - f.salesTax - f.brokerFee), 'isk')} · margin ${pct(pick.margin)} <em>ME 0: ${pick.profitAtZero > 0 ? '+' : ''}${format(pick.profitAtZero, 'isk')}/unit</em></span><span>Start with ${format(pick.invest, 'isk')} · ${pick.sellers} ${pick.sellers === 1 ? 'station' : 'stations'} selling · ${Math.round(pick.daily).toLocaleString()} traded/day</span></div>
+      <div class="opp-main"><b>${esc(pick.n)}</b><small><span class="tag">${esc(pick.cat)}</span> BPO ${format(pick.seller?.place.price ?? pick.price, 'isk')} · rank ${pick.rank}</small><small>${pick.seller ? `NPC sells it at ${pick.sellers.length}${pick.sellers.length >= 40 ? '+' : ''} ${pick.sellers.length === 1 ? 'station' : 'stations'} · nearest ${pick.seller.route.jumps ? `${pick.seller.route.jumps} ${pick.seller.route.jumps === 1 ? 'jump' : 'jumps'}` : 'here'}` : `<span class="neg">No NPC seller reachable through high-sec</span>`}</small>${pick.affordable ? `<small class="who ${owner(pick) === p ? 'me' : 'them'}">Suggested for ${esc(owner(pick).name)}</small>` : '<small class="neg">Over budget</small>'}</div>
+      <div class="opp-route"><span>Research ME 0 → ${pick.me} · ${days(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}</span><span>Sell ${Math.round(pick.unitsPerDay).toLocaleString()}/day at ${format(pick.revenue / (1 - f.salesTax - f.brokerFee), 'isk')} · margin ${pct(pick.margin)} <em>ME 0: ${pick.profitAtZero > 0 ? '+' : ''}${format(pick.profitAtZero, 'isk')}/unit</em></span><span>Start with ${format(pick.invest, 'isk')} · ${Math.round(pick.daily).toLocaleString()} traded/day at the hub · ${pick.listings} ${pick.listings === 1 ? 'station' : 'stations'} competing</span>${pick.trend === null ? '' : `<span class="${pick.trend > 0.15 ? 'neg' : pick.trend < -0.1 ? 'warn-text' : ''}">Hub price ${pick.trend >= 0 ? '+' : ''}${(pick.trend * 100).toFixed(0)}% vs 7-day average${pick.trend > 0.15 ? ' · likely a spike, expect it to fall' : pick.trend < -0.1 ? ' · below normal, may recover' : ''}</span>`}</div>
       <div class="opp-profit"><b class="pos">+${format(pick.profitDay, 'isk')}/day</b><small>pays back in ${pick.payback < 1 ? 'under a day' : `${pick.payback.toFixed(1)} days`}</small></div>
       <details class="trip"><summary>Plan the trip</summary>${trip(pick)}</details></li>`).join('')}</ol>` : '<p class="hint">No starter blueprint turns a profit at today’s prices with these fees. Try another system or check after the next hourly scan.</p>'}
   </article>
@@ -707,7 +716,7 @@ function expireSessions() {
 $('#refresh').onclick = () => { marketData = null; costIndices = null; loadPilots(true); };
 $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
 $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
-$('#industry-system').onchange = () => renderIndustry();
+$('#industry-system').onchange = $('#industry-category').onchange = $('#industry-sort').onchange = () => renderIndustry();
 $('#industry-budget').onchange = event => { event.target.dataset.touched = '1'; renderIndustry(); };
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#hero').hidden && me) choosePilot(me); });
 $('#goal-form').onsubmit = event => {

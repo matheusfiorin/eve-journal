@@ -60,7 +60,9 @@ export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0,
   const invest = s.price + research.cost + materials(me) * unitsPerDay;
   return {...s, me, research, unitsPerDay, revenue, sell, materialsAt:book.items.get(main[0]).sells[0].loc, materialCost:materials(me), jobFee, profit, profitAtZero:unitProfit(0),
     margin:profit / revenue, profitDay, payback:profitDay > 0 ? (s.price + research.cost) / profitDay + research.seconds / 86400 : Infinity,
-    invest, daily:product.daily, sellers:product.sells.length};
+    invest, daily:product.byRegion?.[hub] ?? product.daily, listings:product.sells.length,
+    // Today's hub ask against its 7-day average: a spike can vanish before your first batch lands.
+    trend:product.avgByRegion?.[hub] ? sell.price / product.avgByRegion[hub] - 1 : null};
 }
 export function rank(list, budget) {
   return list.filter(x => x && x.profit > 0 && x.payback < 60)

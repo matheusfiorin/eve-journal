@@ -13,6 +13,7 @@ export function book(regions) {
     for (const [type, t] of Object.entries(data.types || {})) {
       const item = items.get(Number(type)) || {sells:[], buys:[], daily:0, byRegion:{}};
       item.byRegion[data.name] = t.d || 0;
+      if (t.p) (item.avgByRegion ||= {})[data.name] = t.p;
       item.sells.push(...t.s.map(([loc, price, volume]) => ({loc, price, volume})));
       item.buys.push(...t.b.map(([loc, price, volume]) => ({loc, price, volume})));
       item.daily += t.d || 0;

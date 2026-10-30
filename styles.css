@@ -218,3 +218,4 @@ body.picking{overflow:hidden}
 .facilities small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 .facilities details{margin:4px 0 0}.facilities summary{font-size:11px}
 h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:8px 0}
+.warn-text{color:var(--warn)}

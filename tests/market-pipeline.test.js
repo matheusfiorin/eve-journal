@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -53,4 +53,15 @@ test('universe keeps known-space gates, security and NPC factories and labs',()=
  });
  assert.deepEqual(map.systems,{30000142:['Jita',0.946,10000002,[30000144]],30000144:['Perimeter',0.95,10000002,[30000142]]});
  assert.deepEqual(map.stations,[[60003760,30000142,3],[60003761,30000144,2]]);
+});
+test('npc sellers are 365-day sell orders in NPC stations, cheapest per station',()=>{
+ const o=(location_id,price,duration,extra={})=>({location_id,system_id:30000142,price,duration,is_buy_order:false,...extra});
+ assert.deepEqual(npcSellers([o(60003760,250000,365),o(60003760,240000,365),o(60008494,250000,365),o(60008494,100000,90),o(1035466617946,1,365),o(60011866,5,365,{is_buy_order:true})]),
+  [[60003760,30000142,240000],[60008494,30000142,250000]]);
+});
+test('high-sec regions come from systems at 0.45 or better, ignoring wormhole space',()=>{
+ assert.deepEqual(highsecRegions({systems:{1:['A',0.9,10000002,[]],2:['B',0.2,10000014,[]],3:['C',0.46,10000043,[]],4:['D',0.9,11000001,[]],5:['E',0.5,10000002,[]]}}),[10000002,10000043]);
+});
+test('aggregate keeps the 7-day average price',()=>{
+ assert.equal(aggregate([],[{volume:1,average:10},{volume:1,average:20}]).p,15);
 });

@@ -31,6 +31,7 @@ export function aggregate(orders, history = []) {
   const recent = history.slice(-7);
   return {
     d: recent.length ? Math.round(recent.reduce((t, h) => t + h.volume, 0) / recent.length) : 0,
+    p: recent.length ? Math.round(recent.reduce((t, h) => t + h.average, 0) / recent.length * 100) / 100 : 0,
     s: top(sells, 1), b: top(buys, -1), systems
   };
 }
@@ -69,7 +70,16 @@ const sdeName = value => typeof value === 'string' ? value : value?.en;
 // Cheap NPC-seeded T1 blueprints a new industrialist can start with. The SDE base price is the NPC seed price.
 const STARTER_CATEGORIES = new Set(['Ship','Module','Charge','Drone','Deployable']);
 const STARTER_SHIPS = new Set(['Frigate','Destroyer']);
-export function starters(blueprints, types, groups, categories, prices, {maxPrice = 30e6, limit = 120} = {}) {
+// NPC sell orders run for 365 days; players can list for 90 at most. Cheapest per station.
+export function npcSellers(orders) {
+  const best = new Map();
+  for (const o of orders) if (!o.is_buy_order && o.duration >= 365 && isStation(o.location_id) && !(best.get(o.location_id)?.[2] <= o.price)) best.set(o.location_id, [o.location_id, o.system_id, o.price]);
+  return [...best.values()].sort((a, b) => a[2] - b[2]);
+}
+export function highsecRegions(map) {
+  return [...new Set(Object.values(map.systems).filter(([, sec, region]) => sec >= 0.45 && region < 11000000).map(s => s[2]))];
+}
+export function starters(blueprints, types, groups, categories, prices, {maxPrice = 30e6, limit = 400} = {}) {
   const out = [], id = x => x?.typeID ?? x?.typeId;
   for (const bp of blueprints) {
     const job = bp.activities?.manufacturing, product = job?.products?.[0];
@@ -135,7 +145,7 @@ async function main() {
   const wanted = new Set(ids.map(t => t.id));
   console.log(`Watchlist: ${wanted.size} of ${items.length} names resolved.`);
 
-  const meta = {generatedAt:new Date().toISOString(), types:{}, recipes:{}, regions:{}};
+  const meta = {generatedAt:new Date().toISOString(), types:{}, recipes:{}, regions:{}}, report = [];
   meta.starters = [];
   let map = null;
   try {
@@ -150,14 +160,36 @@ async function main() {
     meta.starters = starters(data.blueprints, byKey(data.types), byKey(data.groups), byKey(data.categories), prices);
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
-  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, s.bp, ...s.m.map(([id]) => id)])])];
+  // Keep only blueprints an NPC actually sells somewhere in high-sec. Seeding rarely changes, so reuse a recent survey.
+  if (meta.starters.length) {
+    const ids = meta.starters.map(s => s.bp);
+    let survey = null;
+    try { survey = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data?.bpoSurvey; } catch { /* Survey again. */ }
+    if (!(survey?.at > Date.now() - 20 * 3600000 && ids.every(id => id in survey.sellers))) {
+      const regions = map ? highsecRegions(map) : HUBS, sellers = Object.fromEntries(ids.map(id => [id, []]));
+      await pool(ids.flatMap(id => regions.map(region => [id, region])), 24, async ([id, region]) => {
+        try { sellers[id].push(...npcSellers(await allPages(`/markets/${region}/orders/?order_type=sell&type_id=${id}`))); }
+        catch (error) { console.warn(`BPO ${id} in ${region}: ${error.message}`); }
+      });
+      // Nearest-first needs many stations, but 40 per blueprint is plenty and keeps the snapshot small.
+      for (const id of ids) sellers[id] = sellers[id].sort((a, b) => a[2] - b[2]).slice(0, 40);
+      const locs = [...new Set(Object.values(sellers).flat().map(s => s[0]))], names = {};
+      for (let i = 0; i < locs.length; i += 1000) (await esi('/universe/names/', {method:'POST', body:JSON.stringify(locs.slice(i, i + 1000))})).body.forEach(r => { names[r.id] = r.name; });
+      survey = {at:Date.now(), regions:regions.length, sellers, names};
+    }
+    meta.bpoSurvey = survey;
+    const screened = meta.starters.length;
+    meta.starters = meta.starters.filter(s => survey.sellers[s.bp]?.length).slice(0, 150).map(s => ({...s, sellers:survey.sellers[s.bp]}));
+    report.push(`${meta.starters.length} of ${screened} screened blueprints sold by NPCs in ${survey.regions} high-sec regions`);
+  }
+  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
     advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research'};
   const skillIds = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(Object.values(SKILLS))})).body.inventory_types || [];
   meta.skills = Object.fromEntries(Object.entries(SKILLS).map(([key, label]) => [key, skillIds.find(s => s.name === label)?.id]));
 
-  await pool(scan, 16, async id => {
+  await pool(scan, 24, async id => {
     try { const t = (await esi(`/universe/types/${id}/`)).body; meta.types[id] = {n:t.name, v:t.packaged_volume || t.volume || 0}; }
     catch (error) { console.warn(`type ${id}: ${error.message}`); }
   });
@@ -169,13 +201,12 @@ async function main() {
     return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
   }));
   const regions = [...new Set([...HUBS, ...pilotRegions])];
-  const report = [];
 
   for (const region of regions) {
     const name = (await esi(`/universe/regions/${region}/`)).body.name;
     meta.regions[region] = name;
     const types = {}, stations = new Map();
-    await pool(scan, 16, async id => {
+    await pool(scan, 24, async id => {
       try {
         const [orders, history] = await Promise.all([
           allPages(`/markets/${region}/orders/?order_type=all&type_id=${id}`),
@@ -183,7 +214,7 @@ async function main() {
         ]);
         const result = aggregate(orders, history);
         for (const [loc, system] of result.systems) stations.set(loc, system);
-        if (result.s.length || result.b.length) types[id] = {d:result.d, s:result.s, b:result.b};
+        if (result.s.length || result.b.length) types[id] = {d:result.d, p:result.p, s:result.s, b:result.b};
       } catch (error) { console.warn(`${name} ${id}: ${error.message}`); }
     });
     const names = new Map();

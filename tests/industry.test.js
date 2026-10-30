@@ -61,3 +61,8 @@ test('sells at the hub with the most volume and fetches materials where the main
  const r=evaluate(hob,{book:twoHubs,adjusted:new Map(),fees});
  assert.equal(r.sell.loc,2);assert.ok(Math.abs(r.revenue-11000*0.895)<1e-9);assert.equal(r.materialsAt,1);
 });
+test('trend compares the hub ask with its 7-day average',()=>{
+ const m=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:2000,p:8000,s:[[1,10000,500]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]}}}}]);
+ const r=evaluate(hob,{book:m,adjusted:new Map(),fees});assert.ok(Math.abs(r.trend-0.25)<1e-9);assert.equal(r.listings,1);assert.equal(r.daily,2000);
+ assert.equal(evaluate(hob,{book:market,adjusted:new Map(),fees}).trend,null);
+});

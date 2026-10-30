@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {mockApp,openApp,tab} from './fixtures.js';
 test('industry ranks starter blueprints with research plans, payback and pilot assignments',async({page},testInfo)=>{
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'industry');const industry=page.locator('#industry');
- await expect(page.locator('#industry-status')).toContainText('2 cheap T1 blueprints');
+ await expect(page.locator('#industry-status')).toContainText('2 cheap T1 blueprints that NPCs sell in 3 high-sec regions');
  await expect(page.locator('#industry-system')).toContainText('Jita · Fiofka’s location');await expect(page.locator('#industry-budget')).toHaveValue('12500000');
  const setup=industry.locator('article').first();await expect(setup).toContainText('Alpha');await expect(setup).toContainText('Build slots');
  await expect(industry.locator('article').nth(1)).toContainText('Week 1');await expect(industry.locator('article').nth(1)).toContainText('Mass Production');
@@ -18,7 +18,12 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  await expect(trip.locator('.legs>li').first().locator('.hops li')).toHaveText(['0.9Jita','1.0Perimeter','0.5Niarja','1.0Amarr']);
  await expect(trip.locator('.legs>li').nth(1)).toContainText('Research to ME 6');await expect(trip.locator('.legs>li').nth(3)).toContainText('Build');await expect(trip.locator('.legs>li').last()).toContainText('Sell');
  await expect(trip.locator('.trip-link')).toHaveAttribute('href',/dotlan\.net\/route\/Jita:Amarr:Perimeter:Jita:Niarja:Jita/);
+ await expect(picks.first()).toContainText('NPC sells it at 1 station · nearest here');await expect(picks.nth(1)).toContainText('nearest 3 jumps');
+ await expect(picks.first()).toContainText('Hub price +25% vs 7-day average · likely a spike');
  await page.screenshot({path:testInfo.outputPath('industry.png'),fullPage:true});
+ await page.locator('#industry-category').selectOption('Frigate');await expect(picks).toHaveCount(1);await expect(picks.first()).toContainText('Rifter');
+ await page.locator('#industry-category').selectOption('');await page.locator('#industry-sort').selectOption('near');await expect(picks.first()).toContainText('Hobgoblin I');
+ await page.locator('#industry-sort').selectOption('cheap');await expect(picks.first()).toContainText('Hobgoblin I');await page.locator('#industry-sort').selectOption('');
  await page.locator('#industry-budget').fill('1000000');await page.locator('#industry-budget').dispatchEvent('change');
  await expect(picks.filter({hasText:'Rifter'})).toContainText('Over budget');await expect(picks.first()).toContainText('Hobgoblin I');
  expect(errors).toEqual([]);
