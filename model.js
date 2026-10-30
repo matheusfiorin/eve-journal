@@ -51,3 +51,46 @@ export function queueState(queue, now = Date.now()) {
   if (!active) return {kind:'paused', pending, end};
   return {kind: end - now < 86400000 ? 'ending' : 'ok', pending, active, end};
 }
+
+// Skill groups (ESI names) folded into the roles a pilot is known for.
+export const ROLES = {
+  combat:{noun:'Warrior', label:'Combat', groups:['Gunnery','Missiles','Drones','Targeting','Shields','Armor']},
+  industry:{noun:'Industrialist', label:'Industry', groups:['Production','Resource Processing','Science','Planet Management','Structure Management']},
+  commerce:{noun:'Trader', label:'Commerce', groups:['Trade','Social','Corporation Management']},
+  exploration:{noun:'Explorer', label:'Exploration', groups:['Scanning']},
+  leadership:{noun:'Commander', label:'Leadership', groups:['Leadership','Fleet Support']},
+  flight:{noun:'Pilot', label:'Flight', groups:['Spaceship Command','Navigation','Engineering','Rigging','Subsystems','Electronic Systems']}
+};
+const RANKS = [[100e6,'Legendary'],[50e6,'Elite'],[20e6,'Veteran'],[5e6,'Seasoned'],[0,'Rookie']];
+export function pilotRoles(skills, groupOf) {
+  const totals = Object.fromEntries(Object.keys(ROLES).map(k => [k, 0]));
+  let all = 0;
+  for (const s of skills?.skills || []) {
+    const sp = s.skillpoints_in_skill || 0, group = groupOf(s.skill_id);
+    const role = Object.keys(ROLES).find(k => ROLES[k].groups.includes(group));
+    all += sp; if (role) totals[role] += sp;
+  }
+  return Object.entries(totals).map(([role, sp]) => ({role, label:ROLES[role].label, sp, share:all ? sp / all : 0})).sort((a,b) => b.sp - a.sp);
+}
+// Flight skills are trained by everyone, so they only name a pilot who has nothing else.
+export function pilotTitle(skills, groupOf) {
+  if (!skills) return null;
+  const rank = RANKS.find(([min]) => (skills.total_sp || 0) >= min)[1];
+  const roles = pilotRoles(skills, groupOf).filter(r => r.sp > 0);
+  const lead = roles.find(r => r.role !== 'flight') || roles[0];
+  return `${rank} ${lead ? ROLES[lead.role].noun : 'Capsuleer'}`;
+}
+export function assetHoldings(summary, prices) {
+  const rows = (summary?.types || []).map(([type, quantity]) => ({type, quantity, value:quantity * (prices.get(type) || 0)}));
+  return {rows:rows.sort((a,b) => b.value - a.value), total:rows.reduce((t, r) => t + r.value, 0)};
+}
+export function shares(values) {
+  const known = values.map(v => Number.isFinite(v) && v > 0 ? v : 0), total = known.reduce((a,b) => a + b, 0);
+  return {total, shares:known.map(v => total ? v / total : 0)};
+}
+export function compactNumber(value) {
+  if (!Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  for (const [n, unit] of [[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'k']]) if (abs >= n) return `${(value / n).toFixed(abs / n >= 100 ? 0 : 1)}${unit}`;
+  return Math.round(value).toLocaleString('en-US');
+}

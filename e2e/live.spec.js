@@ -1,14 +1,16 @@
 import {test,expect} from '@playwright/test';
 test.describe.configure({timeout:60000});
-test('LIVE: published dashboard resolves Fiofka and Decxus through real ESI',async({page},testInfo)=>{
+test('LIVE: a new visitor picks a pilot and sees Fiofka through real ESI',async({page},testInfo)=>{
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(process.env.LIVE_SITE||'https://matheusfiorin.github.io/eve-journal/');
+ const hero=page.locator('#hero');await expect(hero).toBeVisible();await expect(hero.locator('.hero-pilot')).toHaveCount(2);
  await expect(page.locator('#sync-status')).toContainText('Last refresh',{timeout:45000});
- await expect(page.locator('.pilot-card').first()).toContainText('Fiofka');await expect(page.locator('.pilot-card').nth(1)).toContainText('Decxus');
- await expect(page.locator('.pilot-card img.portrait')).toHaveCount(2);
- await expect.poll(()=>page.locator('.pilot-card img.portrait').evaluateAll(images=>images.every(image=>image.complete&&image.naturalWidth>0)),{timeout:20000}).toBe(true);
- await expect(page.locator('.pilot-card').first()).not.toContainText('Corporation unavailable');
- await expect(page.locator('.pilot-card .error')).toHaveCount(0);await expect(page.locator('#server-status')).toContainText('pilots online');await expect(page.locator('.pilot-card details').first()).toContainText('Joined');expect(errors).toEqual([]);
+ await expect.poll(()=>hero.locator('img.portrait').evaluateAll(images=>images.length===2&&images.every(image=>image.complete&&image.naturalWidth>0)),{timeout:20000}).toBe(true);
+ await hero.getByRole('button',{name:/Fiofka/}).click();await expect(hero).toBeHidden();
+ const banner=page.locator('.me-banner');await expect(banner.locator('h1')).toHaveText('Fiofka');await expect(banner).not.toContainText('Corporation unavailable');await expect(banner.locator('.error')).toHaveCount(0);
+ await expect(page.locator('#server-status')).toContainText('pilots online');await expect(page.locator('#overview details')).toContainText('Joined');
+ await page.locator('nav [data-tab="market"]').click();await expect(page.locator('#market-status')).not.toContainText('Loading market data',{timeout:20000});
+ expect(errors).toEqual([]);
  await page.screenshot({path:testInfo.outputPath('live-dashboard.png'),fullPage:true});
 });
 test('LIVE: ESI resolves both pilot IDs',async({request})=>{

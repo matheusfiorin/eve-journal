@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken} from '../worker/index.js';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=await readFile(new URL('../worker/migrations/0001_initial.sql',import.meta.url),'utf8');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474;
@@ -38,20 +38,21 @@ function setup(options={}){
   if(path.endsWith('/attributes/'))return json({charisma:19,intelligence:20,memory:20,perception:20,willpower:20,bonus_remaps:2});
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
+  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true}]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':'2'}});}
   throw new Error(`Unexpected request ${path}`);
  };
  const request=(path,init={})=>handleRequest(new Request(`https://api.example${path}`,init),env,{},fetchImpl);
  return {env,calls,request,fetchImpl};
 }
-async function consent(app){
- const page=await app.request(`/auth/start?pilot=${id}`);assert.equal(page.status,200);
+async function consent(app,{wing=true,character=id}={}){
+ const page=await app.request(`/auth/start?pilot=${character}`);assert.equal(page.status,200);
  const body=await page.text(),csrf=body.match(/name="csrf" value="([^"]+)"/)[1];
- const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(id),csrf,share:'yes'})});
+ const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{})})});
  assert.equal(start.status,303);const login=new URL(start.headers.get('Location'));
  return {state:login.searchParams.get('state'),cookie:start.headers.get('Set-Cookie').split(';')[0],login};
 }
-async function connect(app){
- const pending=await consent(app);const callback=await app.request(`/auth/callback?code=test-code&state=${pending.state}`,{headers:{Cookie:pending.cookie}});
+async function connect(app,options){
+ const pending=await consent(app,options);const callback=await app.request(`/auth/callback?code=test-code&state=${pending.state}`,{headers:{Cookie:pending.cookie}});
  return {callback,pending,bearer:callback.status===303?new URLSearchParams(new URL(callback.headers.get('Location')).hash.slice(1)).get('backend_session'):null};
 }
 test('health verifies database and required backend secrets',async()=>{
@@ -94,7 +95,7 @@ test('optional permission failure does not destroy the training snapshot',async(
  const app=setup({walletFail:true});await connect(app);const row=app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get();const snap=JSON.parse(row.snapshot);assert.equal(snap.skills.total_sp,125000);assert.match(snap.operations.wallet.error,/temporarily unavailable/);assert.equal(snap.operations.ship.value.ship_type_id,605);
 });
 test('training-only consent does not fetch optional private endpoints',async()=>{
- const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants)\//.test(call.url)));
+ const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets)\//.test(call.url)));
 });
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
@@ -113,4 +114,34 @@ test('wallet history is trimmed to the latest 50 rows and clone data is stored p
  const app=setup();const {bearer}=await connect(app);const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
  assert.equal(payload.operations.journal.value.length,50);assert.equal(payload.operations.journal.value[0].id,0);assert.equal(payload.operations.attributes.value.bonus_remaps,2);assert.deepEqual(payload.operations.implants.value,[9899]);
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());for(const secret of ['bounty_prizes','bonus_remaps','9899'])assert.ok(!text.includes(secret));
+});
+test('assets are paged, summed per type and exclude blueprint copies',async()=>{
+ const app=setup();const {bearer}=await connect(app);const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.deepEqual(payload.operations.assets.value,{items:4,locations:3,truncated:false,types:[[34,1500],[35,7],[605,1]]});
+ assert.ok(app.calls.some(c=>c.url.includes('/assets/?page=2')));assert.ok(!JSON.stringify(await(await app.request('/api/public/pilots')).json()).includes('assets'));
+});
+test('wing summaries need a session and include only pilots who opted in',async()=>{
+ const app=setup();assert.equal((await app.request('/api/wing')).status,401);
+ const {bearer}=await connect(app,{wing:false});
+ let wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.equal(wing.pilots.length,1);assert.equal(wing.pilots[0].sharing,false);assert.equal(wing.pilots[0].wallet,12345678.25);
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,0)").run(JSON.stringify({operations:{wallet:{value:777}}}));
+ wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,1);
+ app.env.DB.raw.exec('UPDATE pilots SET share_wing = 1 WHERE character_id = 2124815118');
+ wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,2);assert.equal(wing.pilots.find(p=>p.name==='Decxus').wallet,777);assert.ok(!JSON.stringify(wing).includes('credentials'));
+});
+test('consent records the wingmate choice',async()=>{
+ const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,1);
+});
+test('market pipeline must authenticate, stores snapshots per region and the public read returns them',async()=>{
+ const app=setup();await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const ingest=(auth,body)=>app.request('/api/market/ingest',{method:'POST',headers:auth?{Authorization:`Bearer ${auth}`}:{},body:JSON.stringify(body)});
+ assert.equal((await ingest(null,{region:1,data:{}})).status,401);assert.equal((await ingest('x'.repeat(43),{region:1,data:{}})).status,401);
+ assert.equal((await ingest(token,{region:'x',data:{}})).status,400);
+ assert.equal((await ingest(token,{region:0,data:{types:{34:{n:'Tritanium',v:0.01}}}})).status,200);
+ assert.equal((await ingest(token,{region:10000002,data:{name:'The Forge',types:{34:{s:[[60003760,5,1000]]}}}})).status,200);
+ assert.equal((await ingest(token,{region:10000002,data:{name:'The Forge',types:{}}})).status,200);
+ const market=await(await app.request('/api/market')).json();assert.equal(market.meta.data.types[34].n,'Tritanium');assert.equal(market.regions.length,1);assert.deepEqual(market.regions[0].data.types,{});
+ assert.equal((await app.request('/api/market/regions')).status,401);
+ const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);
 });

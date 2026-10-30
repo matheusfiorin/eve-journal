@@ -6,7 +6,11 @@ Live: https://matheusfiorin.github.io/eve-journal/
 
 ## What it shows
 
-- **Overview** — portrait, corporation, skill points, wallet, location, ship, security status, corporation history, and a training alert.
+The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker. The browser remembers the choice, and every view centres on that pilot and compares them with their wingmate. Switch from the header.
+
+- **Overview** — your title (rank + specialty from your skill points), training alert, and a head-to-head with your wingmate: skill points, level-V skills, net worth, wallet, assets and queue length.
+- **Empire** — combined net worth of both pilots, each pilot's share, who brings what, holdings by category, both titles with their role breakdown, and the most valuable holdings.
+- **Market** — opportunities from your pilot's current system (or a trade hub): haul & flip routes ranked by profit per jump, station trading spreads, and manufacturing margins. Fees come from your Accounting and Broker Relations; cargo defaults to your current ship.
 - **Training** — the active skill with progress, a queue timeline, and alerts when the queue is empty, paused, or runs out within 24 hours.
 - **Skills** — the full skill sheet grouped by skill group, with levels, SP per skill and group, and search.
 - **Wallet** — balance, the latest 50 journal entries and market transactions, and current industry jobs.
@@ -28,8 +32,17 @@ Enable all of these on the EVE application (client ID `a94f7ccbcc8b4b0d8f7fd90fe
 - `esi-location.read_location.v1`, `esi-location.read_ship_type.v1`
 - `esi-industry.read_character_jobs.v1`
 - `esi-clones.read_clones.v1`, `esi-clones.read_implants.v1`
+- `esi-assets.read_assets.v1`
 
 A pilot who connected before a scope was added sees "Permission not granted" for that data and can press **Reconnect** to grant it.
+
+### Wingmate sharing
+
+On the consent page each pilot can tick **share with my wingmate**. Their skills, wallet balance and asset summary then reach the other pilot's session through `GET /api/wing`. That data is never public.
+
+### Market pipeline
+
+`.github/workflows/market.yml` runs every hour (and on demand). `scripts/market-pipeline.mjs` resolves `market/watchlist.json`, adds the materials of each item's blueprint (blueprint data from Fuzzwork's SDE dump), and scans ESI orders in the five trade hubs plus every region a connected pilot is in. It keeps the best prices per NPC station and uploads the result to the Worker (`POST /api/market/ingest`, signed with an HMAC of the EVE client secret). The browser reads `GET /api/market` and adds jump distances from the pilot's position. Edit the watchlist to scan other items.
 
 ## Develop
 

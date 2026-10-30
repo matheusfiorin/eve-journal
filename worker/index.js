@@ -16,6 +16,16 @@ function isSameOrigin(request,url){
  if(origin===url.origin)return true;
  return origin==='null'&&request.headers.get('Sec-Fetch-Site')==='same-origin';
 }
+// The pipeline proves itself with an HMAC of the EVE client secret, so no extra secret has to be provisioned.
+export async function pipelineToken(secret){
+ const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ return base64url(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode('market-pipeline'))));
+}
+async function requirePipeline(request,env){
+ const given=request.headers.get('Authorization')?.match(/^Bearer ([\w-]{43})$/)?.[1]||'';
+ // Compare digests so the comparison time does not depend on the token.
+ if(!env.EVE_CLIENT_SECRET||await hash(given)!==await hash(await pipelineToken(env.EVE_CLIENT_SECRET)))throw new ServiceError('Pipeline authorization required.',401);
+}
 const random=()=>base64url(crypto.getRandomValues(new Uint8Array(32)));
 const hash=async value=>base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
 const authCookie=(name,value,seconds)=>`${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
@@ -42,10 +52,25 @@ export async function decrypt(value,secret){
  const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:unbase64(item.iv)},key,unbase64(item.data));
  return JSON.parse(new TextDecoder().decode(bytes));
 }
-async function remote(url,options,fetchImpl){
+async function fetchOk(url,options,fetchImpl){
  const r=await fetchImpl(url,{...options,signal:AbortSignal.timeout(20000)});
  if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':r.status===429||r.status===420?'EVE rate limit reached. Try again later.':'EVE service is temporarily unavailable.',502);
- return r.json();
+ return r;
+}
+async function remote(url,options,fetchImpl){return (await fetchOk(url,options,fetchImpl)).json();}
+// Assets come in pages of 1000; store only quantity per type so the snapshot stays small.
+async function assetSummary(url,options,fetchImpl){
+ const first=await fetchOk(url,options,fetchImpl);
+ // shortcut: 20 pages (20k items) covers our two pilots; raise it if a pilot outgrows that.
+ const pages=Math.min(20,Number(first.headers.get('X-Pages'))||1);
+ const rows=[await first.json()];
+ for(let page=2;page<=pages;page++)rows.push(await remote(`${url}?page=${page}`,options,fetchImpl));
+ const types=new Map(),locations=new Set();let items=0;
+ for(const a of rows.flat()){
+  if(a.is_blueprint_copy)continue;
+  items++;locations.add(a.location_id);types.set(a.type_id,(types.get(a.type_id)||0)+a.quantity);
+ }
+ return {items,locations:locations.size,truncated:pages<(Number(first.headers.get('X-Pages'))||1),types:[...types].sort((a,b)=>b[1]-a[1]).slice(0,1500)};
 }
 async function exchange(env,fields,fetchImpl){
  return remote(`${EVE}/v2/oauth/token`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams(fields)},fetchImpl);
@@ -82,7 +107,7 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),id,now+90000).run();
   }
   const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{}};
-  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/'};
+  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/'};
   // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
   const trim={journal:50,transactions:50};
   const prior=parseSnapshot(row);
@@ -90,7 +115,8 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    const optional=OPERATIONS_SCOPES[key];
    if(optional&&!credentials.scopes.includes(optional)){snapshot.operations[key]={permission:false};return;}
    try {
-    let value=await remote(`${ESI}/characters/${id}/${path}`,{headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'}},fetchImpl);
+    const request=[`${ESI}/characters/${id}/${path}`,{headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'}},fetchImpl];
+    let value=key==='assets'?await assetSummary(...request):await remote(...request);
     if(trim[key]&&Array.isArray(value))value=value.slice(0,trim[key]);
     if(optional)snapshot.operations[key]={permission:true,value,fetched:snapshot.fetchedAt};
     else snapshot[key]=value;
@@ -117,7 +143,7 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
   const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location and industry jobs are visible only to your authorized dashboard session.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance and asset summary with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
@@ -125,7 +151,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
   const state=random(),verifier=random();
-  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(await hash(state),await encrypt({id,verifier,share:true},env.TOKEN_ENCRYPTION_KEY),Date.now()+300000).run();
+  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(await hash(state),await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'},env.TOKEN_ENCRYPTION_KEY),Date.now()+300000).run();
   const login=new URL(`${EVE}/v2/oauth/authorize/`);
   login.search=new URLSearchParams({response_type:'code',client_id:env.EVE_CLIENT_ID,redirect_uri:`${url.origin}/auth/callback`,scope:REQUESTED_SCOPES.join(' '),state,code_challenge:await challenge(verifier),code_challenge_method:'S256'});
   return new Response(null,{status:303,headers:{Location:login.href,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state',state,600),'Referrer-Policy':'no-referrer'}});
@@ -142,7 +168,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!tokens.refresh_token)throw new ServiceError('EVE did not return a refresh token. Reconnect the pilot.',502);
   const identity=await verify(tokens.access_token,env,payload.id,fetchImpl);
   const encrypted=await encrypt({accessToken:tokens.access_token,refreshToken:tokens.refresh_token,expires:identity.expires,scopes:identity.scopes},env.TOKEN_ENCRYPTION_KEY);
-  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training) VALUES (?, ?, ?, 1) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, sync_lock_until = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted).run();
+  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?1:0).run();
   const bearer=random(),expires=Date.now()+SESSION_MS;
   await env.DB.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').bind(await hash(bearer),payload.id,expires).run();
   await syncPilot(payload.id,env,fetchImpl,{force:true});
@@ -154,6 +180,34 @@ async function route(request,env,ctx,fetchImpl){
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const s=parseSnapshot(row);
    return {characterId:row.character_id,name:row.name,skills:s.skills?{total_sp:s.skills.total_sp}:null,queue:Array.isArray(s.queue)?s.queue.map(q=>({skill_id:q.skill_id,finished_level:q.finished_level,queue_position:q.queue_position,start_date:q.start_date,finish_date:q.finish_date})):[],fetchedAt:s.fetchedAt||null,stale:Boolean(row.last_error)};
+  })});
+ }
+ if(url.pathname==='/api/market/regions'&&request.method==='GET'){
+  await requirePipeline(request,env);
+  const rows=await env.DB.prepare('SELECT snapshot FROM pilots').all();
+  const systems=[...new Set(rows.results.map(row=>parseSnapshot(row).operations?.location?.value?.solar_system_id).filter(Number.isSafeInteger))];
+  return response({systems});
+ }
+ if(url.pathname==='/api/market/ingest'&&request.method==='POST'){
+  await requirePipeline(request,env);
+  const text=await request.text();if(text.length>1500000)throw new ServiceError('Market snapshot is too large.',413);
+  let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Market snapshot is not JSON.');}
+  if(!Number.isSafeInteger(body?.region)||body.region<0||!body.data||typeof body.data!=='object')throw new ServiceError('Market snapshot needs a region and data.');
+  await env.DB.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(region_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').bind(body.region,JSON.stringify(body.data),Date.now()).run();
+  return response({stored:body.region});
+ }
+ if(url.pathname==='/api/market'&&request.method==='GET'){
+  const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots').all();
+  const parsed=rows.results.map(row=>({region:row.region_id,updatedAt:row.updated_at,data:JSON.parse(row.data)}));
+  // Region 0 holds shared metadata: item names, volumes, recipes and skill IDs.
+  return response({meta:parsed.find(r=>r.region===0)||null,regions:parsed.filter(r=>r.region!==0)},200,{'Cache-Control':'public, max-age=300'});
+ }
+ if(url.pathname==='/api/wing'&&request.method==='GET'){
+  const s=await session(request,env);
+  const rows=await env.DB.prepare('SELECT character_id, name, snapshot, share_wing FROM pilots WHERE share_wing = 1 OR character_id = ?').bind(s.character_id).all();
+  return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
+   const snap=parseSnapshot(row),ops=snap.operations||{};
+   return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null};
   })});
  }
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){

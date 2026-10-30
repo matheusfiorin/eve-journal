@@ -2,19 +2,43 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0a1019"><meta name="referrer" content="no-referrer"><meta name="description" content="Fiofka and Decxus: a two-pilot EVE Online training, wallet and clone dashboard."><title>EVE Pilot Console</title><link rel="stylesheet" href="styles.css"></head>
 <body>
+<div id="hero" class="hero" role="dialog" aria-modal="true" aria-labelledby="hero-title" hidden>
+ <canvas id="stars" aria-hidden="true"></canvas>
+ <div class="hero-content">
+  <p class="label">EVE Pilot Console</p>
+  <h1 id="hero-title">Who’s flying today?</h1>
+  <p class="hero-sub">Pick your pilot. Everything else follows them, measured against your wingmate.</p>
+  <div id="hero-pilots" class="hero-pilots"></div>
+  <p class="hint">This browser remembers your choice. Switch any time from the header.</p>
+ </div>
+</div>
 <header>
  <a class="brand" href="./"><span class="emblem" aria-hidden="true">✦</span>Pilot Console</a>
  <div id="server-status" class="server-status" role="status">Connecting to Tranquility…</div>
- <button id="refresh" class="secondary">↻ Refresh</button>
+ <button id="switch-pilot" class="me-button secondary" aria-label="Switch pilot">Choose pilot</button>
+ <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <p id="sync-status" class="hint" role="status">Loading pilots…</p>
 
-<section id="overview" class="tab"><div id="pilots" class="grid"></div></section>
+<section id="overview" class="tab"><div id="pilots"></div></section>
+<section id="empire" class="tab" hidden><div id="empire-content"></div></section>
+<section id="market" class="tab" hidden>
+ <div class="card market-controls">
+  <div class="card-head"><div><h2>Market analysis</h2><p id="market-status" class="hint">Loading market data…</p></div></div>
+  <div class="row">
+   <label>Start from<select id="market-origin"></select></label>
+   <label>Max jumps to buy<select id="market-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="20">20 jumps</option><option value="99">Any distance</option></select></label>
+   <label>Cargo (m³)<input id="market-cargo" type="number" min="1" step="100" value="5000"></label>
+  </div>
+  <p id="market-fees" class="hint"></p>
+ </div>
+ <div id="market-content"></div>
+</section>
 <section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
 <section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>
 <section id="wallet" class="tab" hidden><div id="wallet-content" class="grid"></div></section>

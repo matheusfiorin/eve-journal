@@ -8,7 +8,8 @@ export const OPERATIONS_SCOPES = {
   transactions:'esi-wallet.read_character_wallet.v1',
   attributes:'esi-skills.read_skills.v1',
   clones:'esi-clones.read_clones.v1',
-  implants:'esi-clones.read_implants.v1'
+  implants:'esi-clones.read_implants.v1',
+  assets:'esi-assets.read_assets.v1'
 };
 export const REQUESTED_SCOPES = [...new Set([...SCOPES, ...Object.values(OPERATIONS_SCOPES)])];
 export function base64url(bytes) {

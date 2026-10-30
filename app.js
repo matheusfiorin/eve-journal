@@ -1,12 +1,17 @@
 import {BackendClient} from './backend.js';
-import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress, queueState} from './model.js';
+import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress, queueState, pilotRoles, pilotTitle, assetHoldings, shares, compactNumber} from './model.js';
+import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
 import {JournalStore} from './storage.js';
 
 const $ = selector => document.querySelector(selector);
 const KEY = 'eve-flight-journal:v1';
 const DRAFT = 'eve-flight-draft:v1';
 const GROUPS = 'eve-skill-groups:v1';
-const TABS = ['overview','training','skills','wallet','clones','notes'];
+const ME = 'eve-me:v1';
+const CATS = 'eve-asset-categories:v1';
+const TABS = ['overview','empire','market','training','skills','wallet','clones','notes'];
+const HUB_SYSTEMS = [[30000142,'Jita'],[30002187,'Amarr'],[30002659,'Dodixie'],[30002510,'Rens'],[30002053,'Hek']];
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const OLD_TABS = {journal:'notes', goals:'notes', operations:'wallet'};
 const ROMAN = ['0','I','II','III','IV','V'];
 const INFOMORPH_SYNCHRONIZING = 33399;
@@ -15,6 +20,9 @@ let config = {pilots:[]};
 let data = emptyData(), pilots = [], store, backend = null, universeStatus = null;
 let generation = 0, editingEntry = null, editingGoal = null, draftTimer;
 const names = new Map(), corporations = new Map(), typeGroup = new Map();
+let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, starsFrame = 0, warp = false;
+const assetCats = new Map(), routes = new Map(), counters = new Map(), cargo = new Map();
+try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => assetCats.set(id, cat)); } catch { /* Categories are refetched. */ }
 
 const isk = value => `${Number(value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} ISK`;
 const name = id => names.get(id) || `#${id}`;
@@ -131,7 +139,9 @@ async function loadPilots(force = false) {
     }));
     if (request !== generation) return;
     try { await resolveNames(next.flatMap(referencedIds)); } catch { notice('Some EVE names could not be loaded. IDs are shown instead.'); }
-    if (next.some(p => p.skills?.skills)) await loadSkillGroups();
+    await loadWing();
+    if (next.some(p => p.skills?.skills) || [...wing.values()].some(w => w.skills?.skills)) await loadSkillGroups();
+    await loadHoldings();
     $('#sync-status').textContent = `Last refresh ${new Date().toLocaleTimeString()}`;
   } catch (error) {
     if (request !== generation) return;
@@ -143,6 +153,85 @@ async function loadPilots(force = false) {
   }
 }
 
+async function loadWing() {
+  const holder = [mine(), ...pilots].find(p => p?.id && backend?.has(p.id));
+  if (!holder) { wing = new Map(); return; }
+  try { wing = new Map((await backend.wing(holder.id)).map(row => [row.characterId, row])); }
+  catch (error) { notice(`Wingmate summary: ${error.message}`); }
+}
+async function loadPrices() {
+  if (prices) return;
+  try {
+    const rows = await esi('markets/prices/');
+    prices = new Map(rows.map(r => [r.type_id, r.average_price || r.adjusted_price || 0]));
+    adjusted = new Map(rows.map(r => [r.type_id, r.adjusted_price || 0]));
+  } catch { /* Asset values stay unknown until the next refresh. */ }
+}
+async function loadAssetCategories(ids) {
+  const missing = ids.filter(id => !assetCats.has(id)), groups = new Map(), categories = new Map();
+  await Promise.all(missing.map(async id => {
+    try {
+      const type = await esi(`universe/types/${id}/`);
+      if (!groups.has(type.group_id)) groups.set(type.group_id, esi(`universe/groups/${type.group_id}/`));
+      const group = await groups.get(type.group_id);
+      if (!categories.has(group.category_id)) categories.set(group.category_id, esi(`universe/categories/${group.category_id}/`));
+      assetCats.set(id, (await categories.get(group.category_id)).name);
+    } catch { /* Shown as uncategorized. */ }
+  }));
+  try { localStorage.setItem(CATS, JSON.stringify([...assetCats])); } catch { /* Cache is optional. */ }
+}
+// Value assets, then name and categorize the top holdings that the Empire tab shows.
+async function loadHoldings() {
+  if (!pilots.some(p => assetsOf(p))) return;
+  await loadPrices();
+  const top = pilots.flatMap(p => summary(p).holdings?.rows.slice(0, 60).map(r => r.type) || []);
+  try { await Promise.all([resolveNames(top), loadAssetCategories(top)]); } catch { /* Names fall back to IDs. */ }
+}
+const mine = () => pilots.find(p => p.name === me) || null;
+const wingmate = () => pilots.find(p => p.name !== me) || null;
+const ordered = () => [...pilots].sort((a,b) => (b.name === me) - (a.name === me));
+const portrait = (p, size, cls = '') => p?.id ? `<img class="portrait ${cls}" src="https://images.evetech.net/characters/${p.id}/portrait?size=${size >= 100 ? 256 : 128}" alt="Portrait of ${esc(p.name)}" width="${size}" height="${size}">` : `<span class="portrait ${cls}" aria-hidden="true">✦</span>`;
+const assetsOf = p => p.private ? p.ops?.assets?.value : wing.get(p.id)?.assets;
+function summary(p) {
+  if (!p) return {};
+  const w = wing.get(p.id);
+  const skills = p.private ? p.skills : w?.skills || p.skills;
+  const walletRaw = p.private ? p.ops?.wallet?.value : w?.wallet;
+  const wallet = Number.isFinite(walletRaw) ? walletRaw : undefined;
+  const holdings = assetsOf(p) && prices ? assetHoldings(assetsOf(p), prices) : null;
+  const known = wallet !== undefined || holdings;
+  return {skills, sp:skills?.total_sp, maxed:skills?.skills?.filter(s => s.trained_skill_level === 5).length, wallet, holdings,
+    assets:holdings?.total, worth:known ? (wallet || 0) + (holdings?.total || 0) : undefined,
+    title:skills?.skills ? pilotTitle(skills, id => typeGroup.get(id)) : null};
+}
+function queueHours(p) {
+  const state = queueState(p?.queue);
+  if (!state) return undefined;
+  return state.end ? Math.max(0, (state.end - Date.now()) / 3600000) : 0;
+}
+function format(value, kind) {
+  if (!Number.isFinite(value)) return '—';
+  if (kind === 'isk') return `${compactNumber(value)} ISK`;
+  if (kind === 'pct') return `${Math.round(value)}%`;
+  if (kind === 'h') return value >= 24 ? `${Math.floor(value / 24)}d ${Math.round(value % 24)}h` : `${Math.round(value)}h`;
+  return Math.round(value).toLocaleString();
+}
+// Numbers roll from their previous value; reduced motion shows the final value at once.
+const count = (key, value, kind = '') => Number.isFinite(value) ? `<span data-count="${value}" data-key="${esc(key)}" data-kind="${kind}">${format(value, kind)}</span>` : '—';
+function countUps() {
+  document.querySelectorAll('[data-count]').forEach(el => {
+    const target = Number(el.dataset.count), key = el.dataset.key, from = counters.get(key) ?? 0, kind = el.dataset.kind;
+    counters.set(key, target);
+    if (reduced || from === target || el.closest('[hidden]')) { el.textContent = format(target, kind); return; }
+    const start = performance.now();
+    const step = now => {
+      const k = Math.min(1, (now - start) / 900);
+      el.textContent = format(from + (target - from) * (1 - Math.pow(1 - k, 3)), kind);
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
 function connectButtons(p, index) {
   if (!backend) return '<p class="hint">Private data needs the backend, which is not configured here.</p>';
   return `<div class="actions"><button data-connect="${index}" class="${p.private ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${p.private ? 'Reconnect' : 'Connect with EVE'}</button>${backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button>` : ''}</div>`;
@@ -161,28 +250,82 @@ function trainingAlert(p) {
 }
 function fact(label, value) { return `<div><dt>${label}</dt><dd>${value}</dd></div>`; }
 function pilotsOrEmpty(render) {
-  return pilots.length ? pilots.map(render).join('') : '<div class="empty">No pilots configured in config.json.</div>';
+  return pilots.length ? ordered().map(p => render(p, pilots.indexOf(p))).join('') : '<div class="empty">No pilots configured in config.json.</div>';
 }
 
 function renderStatus() {
   $('#server-status').innerHTML = universeStatus ? `<span class="dot ${universeStatus.stale ? '' : 'on'}"></span><span><b>${Number(universeStatus.players).toLocaleString()}</b> pilots online${universeStatus.vip ? ' · VIP only' : ''}${universeStatus.stale ? ' · last known' : ''}</span>` : '<span class="hint">Tranquility status unavailable</span>';
 }
+function vsRow(label, a, b, kind, other) {
+  const known = Number.isFinite(a) && Number.isFinite(b);
+  const split = known ? shares([a, b]).shares : [0, 0];
+  const verdict = !known ? (Number.isFinite(a) ? `${esc(other)}’s figure is private` : 'Not available yet')
+    : Math.abs(a - b) <= Math.max(a, b) * 0.005 ? 'Dead even' : a > b ? `You lead${b > 0 ? ` by ${Math.round((a - b) / b * 100)}%` : ''}` : `${esc(other)} leads${a > 0 ? ` by ${Math.round((b - a) / a * 100)}%` : ''}`;
+  return `<div class="vs ${known ? (a >= b ? 'ahead' : 'behind') : 'unknown'}"><span class="vs-label">${label}</span><b class="vs-me">${count(`vs-me-${label}`, a, kind)}</b><span class="vs-bar" aria-hidden="true"><i class="fill me" style="width:${(split[0] * 100).toFixed(1)}%"></i><i class="fill them" style="width:${(split[1] * 100).toFixed(1)}%"></i></span><b class="vs-them">${count(`vs-them-${label}`, b, kind)}</b><small class="vs-verdict">${verdict}</small></div>`;
+}
 function renderOverview() {
-  $('#pilots').innerHTML = pilotsOrEmpty((p, i) => {
-    const birthday = p.profile?.birthday, o = p.ops || {};
-    const age = birthday ? Math.floor((Date.now() - Date.parse(birthday)) / 86400000) : null;
-    const loc = o.location?.value, ship = o.ship?.value;
-    return `<article class="card pilot-card">${head(p, i, trainingAlert(p))}<dl class="facts">
-      ${fact('Skill points', p.skills ? Number(p.skills.total_sp).toLocaleString() : '—')}
-      ${fact('Wallet', o.wallet?.value !== undefined ? esc(isk(o.wallet.value)) : '—')}
+  const p = mine(), o = wingmate();
+  if (!p) { $('#pilots').innerHTML = '<div class="empty">Choose your pilot to begin.</div>'; return; }
+  const i = pilots.indexOf(p), s = summary(p), t = summary(o), ops = p.ops || {};
+  const birthday = p.profile?.birthday, age = birthday ? Math.floor((Date.now() - Date.parse(birthday)) / 86400000) : null;
+  const loc = ops.location?.value, ship = ops.ship?.value;
+  const sharing = o && (o.private || wing.get(o.id)?.sharing);
+  $('#pilots').innerHTML = `
+  <section class="me-banner reveal">
+    <div class="me-portrait">${portrait(p, 128, 'xl')}</div>
+    <div class="me-info"><span class="title-chip">${esc(s.title || 'Unranked capsuleer')}</span><h1>${esc(p.name)}</h1><p class="hint">${p.corp ? `${esc(p.corp.name)} [${esc(p.corp.ticker)}]` : p.refreshing ? 'Loading…' : ''}${age === null ? '' : ` · capsuleer for ${age.toLocaleString()} days`}</p>${trainingAlert(p)}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}${connectButtons(p, i)}</div>
+    <dl class="me-stats">${fact('Skill points', count('me-sp', s.sp))}${fact('Net worth', count('me-worth', s.worth, 'isk'))}</dl>
+  </section>
+  <div class="grid">
+    <article class="card reveal" style="--i:1"><div class="card-head"><h3>You vs ${esc(o?.name || 'your wingmate')}</h3>${o ? portrait(o, 40, 'sm') : ''}</div>
+      <div class="vs-legend"><span><i class="dot me"></i>${esc(p.name)}</span><span><i class="dot them"></i>${esc(o?.name || '—')}</span></div>
+      ${o ? [['Skill points', s.sp, t.sp, ''], ['Skills at V', s.maxed, t.maxed, ''], ['Net worth', s.worth, t.worth, 'isk'], ['Wallet', s.wallet, t.wallet, 'isk'], ['Assets', s.assets, t.assets, 'isk'], ['Queue left', queueHours(p), queueHours(o), 'h']].map(([label, a, b, kind]) => vsRow(label, a, b, kind, o.name)).join('') : '<p class="hint">No wingmate configured.</p>'}
+      ${o && !sharing ? `<p class="hint">${esc(o.name)}’s wallet, assets and skill sheet appear here once they reconnect and tick “share with my wingmate”.</p>` : ''}
+      ${o ? `<p class="alert-line">${esc(o.name)} · ${esc(t.title || 'Unranked')} · ${trainingAlert(o).replace(/<\/?p[^>]*>/g, '')}</p>` : ''}</article>
+    <article class="card reveal" style="--i:2"><h3>Ship &amp; position</h3><dl class="facts">
       ${fact('Location', loc ? `${esc(name(loc.solar_system_id))}<small>${loc.station_id ? esc(name(loc.station_id)) : loc.structure_id ? 'Docked in a structure' : 'In space'}</small>` : '—')}
       ${fact('Ship', ship ? `${esc(name(ship.ship_type_id))}<small>${esc(ship.ship_name || '')}</small>` : '—')}
+      ${fact('Wallet', s.wallet !== undefined ? esc(isk(s.wallet)) : '—')}
       ${fact('Security status', Number.isFinite(p.profile?.security_status) ? p.profile.security_status.toFixed(2) : '—')}
-      ${fact('Capsuleer for', age === null ? '—' : `${age.toLocaleString()} days`)}
     </dl>
     <details><summary>Corporation history</summary>${p.corp ? `<p class="hint">${Number(p.corp.member_count).toLocaleString()} members · ${(p.corp.tax_rate * 100).toFixed(1)}% tax</p>` : ''}${p.careerError ? `<p class="error">History unavailable: ${esc(p.careerError)}</p>` : ''}<ol class="career">${(p.career || []).map(item => `<li><b>${esc(item.name)}</b><span>Joined ${esc(new Date(item.start_date).toLocaleDateString())}</span></li>`).join('')}</ol></details>
-    <p class="hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : backend ? 'Connect to share training and see private data.' : ''}</p>${connectButtons(p, i)}</article>`;
-  });
+    <p class="hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : backend ? 'Connect to share training and see private data.' : ''}</p></article>
+  </div>`;
+}
+function stack(values) {
+  const split = shares(values).shares;
+  return `<span class="stack" aria-hidden="true">${split.map((v, i) => `<i class="fill ${i ? 'them' : 'me'}" style="width:${(v * 100).toFixed(2)}%"></i>`).join('')}</span>`;
+}
+function renderEmpire() {
+  const ps = ordered(), sums = ps.map(summary);
+  if (!ps.length) { $('#empire-content').innerHTML = '<div class="empty">No pilots configured.</div>'; return; }
+  const worth = shares(sums.map(x => x.worth));
+  const row = (label, values, kind) => `<div class="share-row"><span>${label}</span>${stack(values)}<b>${format(shares(values).total, kind)}</b></div>`;
+  const cats = new Map();
+  sums.forEach((x, i) => (x.holdings?.rows || []).slice(0, 60).forEach(r => {
+    const c = assetCats.get(r.type) || 'Other';
+    const v = cats.get(c) || ps.map(() => 0); v[i] += r.value; cats.set(c, v);
+  }));
+  const catRows = [...cats].map(([c, v]) => [c, v, v.reduce((a, b) => a + b, 0)]).filter(r => r[2] > 0).sort((a, b) => b[2] - a[2]).slice(0, 8);
+  const maxCat = catRows[0]?.[2] || 1;
+  const top = sums.flatMap((x, i) => (x.holdings?.rows || []).slice(0, 10).map(r => ({...r, owner:i}))).sort((a, b) => b.value - a.value).slice(0, 10);
+  const missing = ps.filter((p, i) => sums[i].worth === undefined).map(p => p.name);
+  $('#empire-content').innerHTML = `
+  <section class="card empire-hero reveal">
+    <div class="donut" style="--p:${(worth.shares[0] * 100).toFixed(1)}" role="img" aria-label="${esc(ps[0].name)} holds ${Math.round(worth.shares[0] * 100)}% of the empire"><div><b>${count('empire-share', worth.shares[0] * 100, 'pct')}</b><small>${esc(ps[0].name)}’s share</small></div></div>
+    <div><p class="label">The empire we built</p><h1 class="empire-total">${count('empire-total', worth.total, 'isk')}</h1><p class="hint">Wallets plus assets valued at average market prices.</p>
+    <div class="vs-legend">${ps.map((p, i) => `<span><i class="dot ${i ? 'them' : 'me'}"></i>${esc(p.name)} · ${format(sums[i].worth, 'isk')}</span>`).join('')}</div>
+    ${missing.length ? `<p class="hint">Not counted yet: ${missing.map(esc).join(', ')}. Wallet and assets appear after connecting with the asset permission${missing.some(n => n !== me) ? ' and wingmate sharing' : ''}.</p>` : ''}</div>
+  </section>
+  <div class="grid">
+    <article class="card reveal" style="--i:1"><h3>Who brings what</h3>${row('Net worth', sums.map(x => x.worth), 'isk')}${row('ISK', sums.map(x => x.wallet), 'isk')}${row('Assets', sums.map(x => x.assets), 'isk')}${row('Skill points', sums.map(x => x.sp), '')}${row('Skills at V', sums.map(x => x.maxed), '')}</article>
+    <article class="card reveal" style="--i:2"><h3>Holdings by category</h3>${catRows.length ? catRows.map(([c, v, total]) => `<div class="share-row"><span>${esc(c)}</span><span class="stack" style="width:${(total / maxCat * 100).toFixed(1)}%">${v.map((x, i) => `<i class="fill ${i ? 'them' : 'me'}" style="width:${(x / total * 100).toFixed(2)}%"></i>`).join('')}</span><b>${format(total, 'isk')}</b></div>`).join('') : '<p class="hint">No valued assets yet.</p>'}</article>
+  </div>
+  <div class="grid">${ps.map((p, i) => {
+    const roles = sums[i].skills?.skills ? pilotRoles(sums[i].skills, id => typeGroup.get(id)).filter(r => r.sp > 0) : [];
+    return `<article class="card reveal title-card ${i ? 'them' : 'me'}" style="--i:${i + 3}"><div class="pilot-head">${portrait(p, 56)}<div><span class="title-chip">${esc(sums[i].title || 'Unranked')}</span><h2>${esc(p.name)}</h2></div></div>${roles.length ? roles.map(r => `<div class="share-row"><span>${esc(r.label)}</span><span class="stack"><i class="fill ${i ? 'them' : 'me'}" style="width:${(r.share * 100).toFixed(1)}%"></i></span><b>${Math.round(r.share * 100)}%</b></div>`).join('') : `<p class="hint">${esc(p.name)}’s skill sheet is private${i ? ' until they share it with you' : ' until you connect'}.</p>`}</article>`;
+  }).join('')}</div>
+  <article class="card reveal" style="--i:5"><h3>Most valuable holdings</h3>${top.length ? `<ol class="holdings">${top.map(r => `<li><span>${esc(name(r.type))}<small>×${Number(r.quantity).toLocaleString()} · ${esc(assetCats.get(r.type) || 'Other')}</small></span><span class="owner ${r.owner ? 'them' : 'me'}">${esc(ps[r.owner].name)}</span><b>${format(r.value, 'isk')}</b></li>`).join('')}</ol>` : '<p class="hint">Nothing valued yet.</p>'}</article>`;
 }
 function renderTraining() {
   const now = Date.now();
@@ -246,7 +389,125 @@ function renderClones() {
     <h3>Clones</h3>${field(p, 'clones', c => `<p>Home: <b>${esc(c.home_location ? place(c.home_location.location_id, c.home_location.location_type) : 'Unknown')}</b></p><p class="hint">${cloneJump(p, c)}</p>${(c.jump_clones || []).length ? `<ul class="plain">${c.jump_clones.map(j => `<li><b>${esc(j.name || place(j.location_id, j.location_type))}</b>${j.name ? `<small>${esc(place(j.location_id, j.location_type))}</small>` : ''}<small>${j.implants?.length ? j.implants.map(id => esc(name(id))).join(', ') : 'No implants'}</small></li>`).join('')}</ul>` : '<p class="hint">No jump clones.</p>'}`)}
     ${p.private ? '' : connectButtons(p, i)}</article>`);
 }
-function renderAll() { renderStatus(); renderOverview(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions(); }
+function renderMe() {
+  const p = mine();
+  $('#switch-pilot').innerHTML = p ? `${portrait(p, 24, 'tiny')}<span>${esc(p.name)}</span><span aria-hidden="true">⇄</span>` : 'Choose pilot';
+}
+function renderHero() {
+  $('#hero-pilots').innerHTML = pilots.map((p, i) => {
+    const x = summary(p);
+    return `<button class="hero-pilot" data-me="${esc(p.name)}" style="--i:${i}">${portrait(p, 160, 'hero-portrait')}<b>${esc(p.name)}</b><span class="title-chip">${esc(x.title || 'Capsuleer')}</span><small>${esc(p.corp?.name || '')}</small></button>`;
+  }).join('');
+}
+function startStars() {
+  cancelAnimationFrame(starsFrame);
+  const canvas = $('#stars'), ctx = canvas.getContext('2d');
+  const stars = Array.from({length:300}, () => ({x:Math.random() * 2 - 1, y:Math.random() * 2 - 1, z:Math.random()}));
+  let speed = 0.002;
+  const draw = () => {
+    if (canvas.width !== innerWidth || canvas.height !== innerHeight) { canvas.width = innerWidth; canvas.height = innerHeight; }
+    const w = canvas.width, h = canvas.height;
+    speed += ((warp ? 0.05 : 0.002) - speed) * 0.06;
+    ctx.fillStyle = warp ? 'rgba(8,13,20,0.3)' : '#080d14'; ctx.fillRect(0, 0, w, h);
+    for (const star of stars) {
+      star.z -= speed;
+      if (star.z <= 0.02) Object.assign(star, {x:Math.random() * 2 - 1, y:Math.random() * 2 - 1, z:1});
+      const k = 0.5 / star.z, x = w / 2 + star.x * w / 2 * k, y = h / 2 + star.y * h / 2 * k;
+      if (x < 0 || x > w || y < 0 || y > h) { star.z = 0; continue; }
+      ctx.fillStyle = star.z < 0.35 ? `rgba(185,238,141,${1 - star.z})` : `rgba(220,232,245,${1 - star.z})`;
+      ctx.beginPath(); ctx.arc(x, y, (1 - star.z) * 2.2, 0, 7); ctx.fill();
+    }
+    if (!reduced && !$('#hero').hidden) starsFrame = requestAnimationFrame(draw);
+  };
+  draw();
+}
+function openHero() {
+  warp = false; $('#hero').classList.remove('warp'); $('#hero').hidden = false;
+  document.body.classList.add('picking'); renderHero(); startStars();
+  $('#hero-pilots button')?.focus();
+}
+function choosePilot(pilot) {
+  me = pilot;
+  try { localStorage.setItem(ME, pilot); } catch { /* Choice lasts for this visit. */ }
+  warp = true; $('#hero').classList.add('warp');
+  setTimeout(() => { $('#hero').hidden = true; document.body.classList.remove('picking'); cancelAnimationFrame(starsFrame); }, reduced ? 0 : 900);
+  counters.clear(); selectTab('overview'); renderAll();
+}
+async function routeJumps(pairs) {
+  const todo = pairs.filter(key => !routes.has(key));
+  let next = 0;
+  await Promise.all(Array.from({length:8}, async () => {
+    while (next < todo.length) {
+      const key = todo[next++], [a, b] = key.split('-');
+      if (a === b) { routes.set(key, 0); continue; }
+      try { routes.set(key, (await esi(`route/${a}/${b}/`)).length - 1); } catch { routes.set(key, null); }
+    }
+  }));
+}
+async function renderMarket() {
+  const status = $('#market-status'), content = $('#market-content');
+  if (!backend) { status.textContent = 'Market analysis needs the backend.'; return; }
+  const run = ++marketRun;
+  try {
+    if (!marketData) {
+      content.innerHTML = '<div class="card shimmer">Scanning stations…</div>';
+      marketData = await backend.market(); marketBook = book(marketData.regions);
+    }
+    await loadPrices();
+  } catch (error) { status.textContent = `Market data unavailable: ${error.message}`; content.innerHTML = ''; return; }
+  if (run !== marketRun) return;
+  if (!marketData.regions.length) { status.textContent = 'The hourly market pipeline has not stored any data yet. Check back after its next run.'; content.innerHTML = ''; return; }
+  const p = mine(), meta = marketData.meta?.data || {types:{}};
+  const here = p?.ops?.location?.value?.solar_system_id;
+  const origin = $('#market-origin'), prior = Number(origin.value);
+  const options = [...(here ? [[here, `${name(here)} · ${p.name}’s location`]] : []), ...HUB_SYSTEMS.filter(([id]) => id !== here)];
+  origin.innerHTML = options.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('');
+  origin.value = options.some(([id]) => id === prior) ? prior : options[0][0];
+  const ship = p?.ops?.ship?.value?.ship_type_id, cargoInput = $('#market-cargo');
+  if (ship && !cargoInput.dataset.touched) {
+    if (!cargo.has(ship)) { try { cargo.set(ship, (await esi(`universe/types/${ship}/`)).capacity || 0); } catch { cargo.set(ship, 0); } }
+    if (cargo.get(ship) > 0) cargoInput.value = Math.round(cargo.get(ship));
+  }
+  const skills = summary(p).skills, f = fees(skills, meta.skills);
+  const from = Number(origin.value), maxJumps = Number($('#market-jumps').value), hold = Math.max(1, Number(cargoInput.value) || 5000);
+  const updated = Math.min(...marketData.regions.map(r => r.updatedAt));
+  status.textContent = `${marketData.regions.length} regions · ${Object.keys(meta.types).length} items · scanned ${Math.max(1, Math.round((Date.now() - updated) / 60000))} min ago by the hourly pipeline`;
+  $('#market-fees').textContent = `Sales tax ${(f.salesTax * 100).toFixed(2)}% · broker fee ${(f.brokerFee * 100).toFixed(2)}% · ${skills?.skills ? `from ${p.name}’s skills` : 'base rates (connect for your skills)'} · cargo ${hold.toLocaleString()} m³`;
+  const sys = loc => marketBook.stations.get(loc)?.system, station = loc => marketBook.stations.get(loc)?.name || `Station ${loc}`;
+  const item = id => meta.types[id]?.n || name(id);
+  const haulList = hauls(marketBook, {salesTax:f.salesTax, cargo:hold, volumeOf:id => meta.types[id]?.v, limit:40});
+  const trades = stationTrades(marketBook, {...f, limit:60});
+  if (!costIndices) { try { costIndices = new Map((await esi('industry/systems/')).map(row => [row.solar_system_id, row.cost_indices.find(c => c.activity === 'manufacturing')?.cost_index || 0])); } catch { costIndices = new Map(); } }
+  const index = costIndices.get(from) || 0;
+  const builds = manufacturing(marketBook, meta.recipes, {...f, adjusted, costIndex:index}).slice(0, 12);
+  content.innerHTML = '<div class="card shimmer">Plotting routes from your position…</div>';
+  await routeJumps([...new Set([...haulList.flatMap(h => [`${from}-${sys(h.from.loc)}`, `${sys(h.from.loc)}-${sys(h.to.loc)}`]), ...trades.map(t => `${from}-${sys(t.loc)}`), ...builds.map(b => `${from}-${sys(b.loc)}`)])]);
+  if (run !== marketRun) return;
+  const jumps = (a, b) => routes.get(`${a}-${b}`);
+  const near = j => j !== null && j !== undefined && j <= maxJumps;
+  const haulRows = haulList.map(h => ({...h, toA:jumps(from, sys(h.from.loc)), ab:jumps(sys(h.from.loc), sys(h.to.loc))}))
+    .filter(h => near(h.toA) && h.ab !== null).map(h => ({...h, perJump:h.profit / Math.max(1, h.toA + h.ab)})).sort((a, b) => b.perJump - a.perJump).slice(0, 12);
+  const tradeRows = trades.map(t => ({...t, j:jumps(from, sys(t.loc))})).filter(t => near(t.j)).slice(0, 12);
+  const buildRows = builds.map(b => ({...b, j:jumps(from, sys(b.loc))}));
+  const jumpTag = j => `<em>${j === 0 ? 'here' : `${j} j`}</em>`;
+  const empty = text => `<p class="hint">${text}</p>`;
+  content.innerHTML = `
+  <article class="card reveal" style="--i:1"><div class="card-head"><div><h3>Haul &amp; flip</h3><p class="hint">Buy from a sell order, fly, sell into a buy order. Ranked by profit per jump.</p></div></div>
+   ${haulRows.length ? `<ol class="opps">${haulRows.map((h, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(h.type))}</b><small>${h.units.toLocaleString()} units · ${Math.round(h.m3).toLocaleString()} m³ · invest ${format(h.invest, 'isk')}</small></div><div class="opp-route"><span>Buy ${format(h.from.price, 'isk')} · ${esc(station(h.from.loc))} ${jumpTag(h.toA)}</span><span>Sell ${format(h.to.price, 'isk')} · ${esc(station(h.to.loc))} <em>+${h.ab} j</em></span></div><div class="opp-profit"><b class="pos">+${format(h.profit, 'isk')}</b><small>${format(h.perJump, 'isk')} / jump</small></div></li>`).join('')}</ol>` : empty(`No profitable hauls within ${maxJumps} jumps for this cargo size.`)}
+  </article>
+  <article class="card reveal" style="--i:2"><div class="card-head"><div><h3>Station trading near you</h3><p class="hint">Place a buy order at the top bid and relist at the lowest ask. Estimate assumes you capture 5% of daily volume.</p></div></div>
+   ${tradeRows.length ? `<ol class="opps">${tradeRows.map((t, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(t.type))}</b><small>${esc(station(t.loc))} ${jumpTag(t.j)}</small></div><div class="opp-route"><span>Bid ${format(t.buy, 'isk')} → ask ${format(t.sell, 'isk')}</span><span>${Math.round(t.volume).toLocaleString()} traded per day</span></div><div class="opp-profit"><b class="pos">${(t.margin * 100).toFixed(1)}%</b><small>~${format(t.daily, 'isk')} / day</small></div></li>`).join('')}</ol>` : empty(`No station spreads beat fees within ${maxJumps} jumps.`)}
+  </article>
+  <article class="card reveal" style="--i:3"><div class="card-head"><div><h3>Manufacturing</h3><p class="hint">One run with an ME 0 blueprint you own: materials at the cheapest scanned ask, product listed at the best ask, job cost at ${(index * 100).toFixed(2)}% system index + fees.</p></div></div>
+   ${meta.recipesError ? empty(esc(meta.recipesError)) : buildRows.length ? `<ol class="opps">${buildRows.map((b, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(b.type))}</b><small>sells at ${esc(station(b.loc))} ${b.j === undefined || b.j === null ? '' : jumpTag(b.j)} · ${Math.round(b.daily).toLocaleString()}/day</small></div><div class="opp-route"><span>Materials ${format(b.materials, 'isk')} · job ${format(b.job, 'isk')}</span><span>Revenue ${format(b.revenue, 'isk')}</span></div><div class="opp-profit"><b class="${b.profit > 0 ? 'pos' : 'neg'}">${b.profit > 0 ? '+' : ''}${format(b.profit, 'isk')}</b><small>${(b.margin * 100).toFixed(1)}% margin</small></div></li>`).join('')}</ol>` : empty('No manufacturing data yet.')}
+  </article>`;
+}
+function renderAll() {
+  renderStatus(); renderMe(); renderOverview(); renderEmpire(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions();
+  if (!$('#hero').hidden) renderHero();
+  if (!$('#market').hidden) renderMarket();
+  countUps();
+}
 
 function pilotOptions() {
   const pilotNames = pilots.map(p => p.name);
@@ -281,8 +542,17 @@ function selectTab(id) {
   document.querySelectorAll('nav [data-tab]').forEach(b => b.dataset.tab === id ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'));
   document.querySelectorAll('.tab').forEach(s => s.hidden = s.id !== id);
   history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
+  document.querySelectorAll(`#${id} [data-count]`).forEach(el => counters.delete(el.dataset.key));
+  countUps();
+  if (id === 'market') renderMarket();
+}
+// The wing summary also carries the pilot's own figures, so drop it with their session.
+function forgetWing(id) {
+  wing.delete(id);
+  if (!pilots.some(p => p.id && backend?.has(p.id))) wing = new Map();
 }
 function clearPrivate(p) {
+  forgetWing(p.id);
   Object.assign(p, {skills:p.shared?.skills, queue:p.shared?.queue, synced:p.shared?.fetchedAt, ops:undefined, private:false});
 }
 function saveDraft() {
@@ -328,7 +598,10 @@ function expireSessions() {
   renderAll(); notice('A pilot session expired. Connect again to see private data.');
 }
 
-$('#refresh').onclick = () => loadPilots(true);
+$('#refresh').onclick = () => { marketData = null; loadPilots(true); };
+$('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
+$('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#hero').hidden && me) choosePilot(me); });
 $('#goal-form').onsubmit = event => {
   event.preventDefault();
   const fields = Object.fromEntries(new FormData(event.target));
@@ -371,6 +644,8 @@ document.addEventListener('click', async event => {
   const b = event.target.closest('button'); if (!b) return;
   try {
     if (b.dataset.tab) selectTab(b.dataset.tab);
+    if (b.dataset.me) choosePilot(b.dataset.me);
+    if (b.id === 'switch-pilot') openHero();
     if (b.dataset.connect !== undefined) {
       const p = pilots[Number(b.dataset.connect)];
       if (!backend || !p?.id) throw new Error('Wait for the pilot lookup before connecting.');
@@ -444,6 +719,9 @@ async function init() {
   renderLocal();
   // Populate selects before restoring an existing author in a draft.
   pilots = config.pilots.map(n => ({name:n})); pilotOptions(); resetEntry(true);
+  try { me = localStorage.getItem(ME); } catch { /* Ask again. */ }
+  if (!config.pilots.includes(me)) { me = null; openHero(); }
+  renderMe();
   selectTab(location.hash.slice(1) || 'overview');
   restoreDraft();
   await loadPilots();

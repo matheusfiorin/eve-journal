@@ -6,10 +6,10 @@ test('training shows the active skill, timeline and paused entries',async({page}
  await page.screenshot({path:testInfo.outputPath('training.png'),fullPage:true});expect(errors).toEqual([]);
 });
 test('an empty queue raises a not-training alert everywhere',async({page})=>{
- await mockApp(page,{connected:true,queueEmpty:true});await openApp(page);await expect(page.locator('.pilot-card').first()).toContainText('Not training');await tab(page,'training');await expect(page.locator('#training-content .card').first()).toContainText('Your training queue is empty');
+ await mockApp(page,{connected:true,queueEmpty:true});await openApp(page);await expect(page.locator('.me-banner')).toContainText('Not training');await tab(page,'training');await expect(page.locator('#training-content .card').first()).toContainText('Your training queue is empty');
 });
 test('a queue that runs out within a day warns the pilot',async({page})=>{
- await mockApp(page,{connected:true,queueEnding:true});await openApp(page);await expect(page.locator('.pilot-card').first().locator('.alert.warn')).toContainText('Queue runs out');
+ await mockApp(page,{connected:true,queueEnding:true});await openApp(page);await expect(page.locator('.me-banner').locator('.alert.warn')).toContainText('Queue runs out');
 });
 test('skill sheet groups skills, shows levels and filters by search',async({page},testInfo)=>{
  await mockApp(page,{connected:true});await openApp(page);await tab(page,'skills');const card=page.locator('#skills-content .card').first();
@@ -18,5 +18,5 @@ test('skill sheet groups skills, shows levels and filters by search',async({page
  await page.screenshot({path:testInfo.outputPath('skills.png'),fullPage:true});
 });
 test('session expiry clears private data and keeps shared training',async({page})=>{
- await page.clock.install();await mockApp(page,{connected:true});await openApp(page);await expect(page.locator('.pilot-card').first()).toContainText('125,000');await page.clock.fastForward(21*60*1000);await expect(page.locator('#notice')).toContainText('expired');await expect(page.locator('.pilot-card').first()).toContainText('333,000');
+ await page.clock.install();await mockApp(page,{connected:true});await openApp(page);await expect(page.locator('.me-banner')).toContainText('125,000');await page.clock.fastForward(21*60*1000);await expect(page.locator('#notice')).toContainText('expired');await expect(page.locator('.me-banner')).toContainText('333,000');
 });

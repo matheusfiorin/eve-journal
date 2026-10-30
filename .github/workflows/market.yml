@@ -1,0 +1,25 @@
+name: Market pipeline
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: market-pipeline
+  cancel-in-progress: false
+jobs:
+  scan:
+    name: Aggregate ESI market data
+    environment: github-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Scan markets and upload to the Worker
+        env:
+          EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
+        run: node scripts/market-pipeline.mjs

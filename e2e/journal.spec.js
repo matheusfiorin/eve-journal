@@ -2,9 +2,9 @@ import {test,expect} from '@playwright/test';
 import {mockApp,openApp,tab,addEntry,data,KEY} from './fixtures.js';
 test('public profiles, navigation and overview are usable without login',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);
- await expect(page.locator('.pilot-card')).toHaveCount(2);await expect(page.locator('.pilot-card').first()).toContainText('Fiofka');await expect(page.locator('.pilot-card').nth(1)).toContainText('Decxus');
- await expect(page.locator('.pilot-card').first()).toContainText('Test Flight Academy');await expect(page.locator('.pilot-card').first()).toContainText('Security status');
- for(const name of ['training','goals','journal','overview'])await tab(page,name);
+ await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#overview .vs').first()).toContainText('Skill points');
+ await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.locator('#overview')).toContainText('Security status');
+ for(const name of ['empire','market','training','skills','wallet','clones','goals','overview'])await tab(page,name);
  await tab(page,'journal');await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);
 });
 test('journal creates, edits, filters, persists and deletes an entry',async({page})=>{
@@ -44,10 +44,10 @@ test('a change in another tab blocks stale saves and preserves the draft',async(
  await mockApp(page);await openApp(page);await tab(page,'journal');await page.locator('#journal-form').getByLabel('Entry title').fill('My draft');await page.locator('#journal-form').getByLabel('Private notes').fill('Do not overwrite a concurrent entry.');await page.evaluate(({key,data})=>localStorage.setItem(key,JSON.stringify(data)),{key:KEY,data});await page.getByRole('button',{name:'Save entry locally'}).click();await expect(page.locator('#notice')).toContainText('Another tab');await expect(page.locator('#journal-form').getByLabel('Entry title')).toHaveValue('My draft');expect(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).entries.length,KEY)).toBe(2);
 });
 test('public refresh failure keeps previous profiles visible',async({page})=>{
- const {state}=await mockApp(page);await openApp(page);state.fail=true;await page.getByRole('button',{name:/Refresh/}).click();await expect(page.locator('#sync-status')).toContainText('Refresh failed');await expect(page.locator('.pilot-card').first()).toContainText('Test Flight Academy');await expect(page.getByRole('button',{name:/Refresh/})).toBeEnabled();
+ const {state}=await mockApp(page);await openApp(page);state.fail=true;await page.getByRole('button',{name:/Refresh/}).click();await expect(page.locator('#sync-status')).toContainText('Refresh failed');await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.getByRole('button',{name:/Refresh/})).toBeEnabled();
 });
 test('unknown characters have an actionable error',async({page})=>{
- await mockApp(page,{missing:true});await openApp(page);await expect(page.locator('.pilot-card').first()).toContainText('Character not found');await expect(page.locator('.pilot-card').first().getByRole('button')).toBeDisabled();
+ await mockApp(page,{missing:true});await openApp(page);await expect(page.locator('.me-banner')).toContainText('Character not found');await expect(page.locator('.me-banner').getByRole('button')).toBeDisabled();
 });
 test('layout stays within viewport and captures overview and journal',async({page},testInfo)=>{
  await mockApp(page,{data});await openApp(page);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('overview.png'),fullPage:true});await tab(page,'journal');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('journal.png'),fullPage:true});

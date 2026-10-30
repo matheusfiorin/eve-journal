@@ -1,0 +1,24 @@
+{
+  "note": "Items the hourly market pipeline scans. Use exact in-game names; unknown names are skipped. Blueprint materials of these items are scanned automatically.",
+  "items": [
+    "Tritanium", "Pyerite", "Mexallon", "Isogen", "Nocxium", "Zydrine", "Megacyte", "Morphite",
+    "PLEX", "Large Skill Injector", "Skill Extractor",
+    "Helium Isotopes", "Hydrogen Isotopes", "Nitrogen Isotopes", "Oxygen Isotopes", "Heavy Water", "Liquid Ozone", "Strontium Clathrates",
+    "Coolant", "Enriched Uranium", "Mechanical Parts", "Robotics", "Consumer Electronics", "Construction Blocks", "Oxygen", "Nanite Repair Paste",
+    "Rifter", "Merlin", "Tristan", "Punisher", "Incursus", "Kestrel", "Atron", "Condor", "Slasher", "Executioner", "Heron", "Imicus", "Magnate", "Probe", "Venture",
+    "Catalyst", "Coercer", "Cormorant", "Thrasher", "Algos", "Corax", "Talwar", "Dragoon",
+    "Vexor", "Caracal", "Rupture", "Omen", "Thorax", "Moa", "Stabber", "Maller", "Osprey", "Bellicose",
+    "Drake", "Hurricane", "Myrmidon", "Harbinger", "Brutix", "Ferox", "Prophecy", "Cyclone", "Gnosis",
+    "Raven", "Tempest", "Dominix", "Apocalypse", "Megathron", "Typhoon",
+    "Retriever", "Procurer", "Covetor", "Iteron Mark V", "Badger", "Wreathe", "Bestower", "Epithal", "Miasmos",
+    "Damage Control II", "Warp Disruptor II", "Warp Scrambler II", "Stasis Webifier II",
+    "Medium Shield Extender II", "Large Shield Extender II", "Multispectrum Shield Hardener II", "Large Shield Booster II",
+    "1600mm Steel Plates II", "800mm Steel Plates II", "Multispectrum Energized Membrane II", "Medium Armor Repairer II",
+    "Drone Damage Amplifier II", "Gyrostabilizer II", "Magnetic Field Stabilizer II", "Heat Sink II", "Ballistic Control System II",
+    "Hobgoblin II", "Hammerhead II", "Ogre II", "Warrior II", "Valkyrie II", "Acolyte II", "Hornet II",
+    "5MN Microwarpdrive II", "50MN Microwarpdrive II", "10MN Afterburner II", "Data Analyzer I", "Relic Analyzer I", "Core Probe Launcher I", "Core Scanner Probe I",
+    "Antimatter Charge S", "Antimatter Charge M", "Antimatter Charge L", "Scourge Heavy Missile", "Scourge Light Missile", "Mjolnir Heavy Missile", "Inferno Rage Heavy Assault Missile",
+    "Hail M", "Barrage M", "Republic Fleet EMP M", "Multifrequency M", "Conflagration M",
+    "Mobile Tractor Unit", "Mobile Depot", "Cap Booster 800", "Navy Cap Booster 400"
+  ]
+}

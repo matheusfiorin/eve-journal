@@ -4,7 +4,16 @@ export const names=['Fiofka','Decxus'];
 export const KEY='eve-flight-journal:v1';
 export const API='https://api.example';
 export const opaque='b'.repeat(43);
-const NAMES={3300:'Gunnery',3327:'Spaceship Command',605:'Heron',1234:'Heron Blueprint',34:'Tritanium',9899:'Ocular Filter - Basic',30000142:'Jita',60003760:'Jita IV - Moon 4 - Caldari Navy Assembly Plant'};
+const NAMES={3300:'Gunnery',3327:'Spaceship Command',3380:'Industry',605:'Heron',1234:'Heron Blueprint',34:'Tritanium',35:'Pyerite',587:'Rifter',9899:'Ocular Filter - Basic',30000142:'Jita',30002187:'Amarr',60003760:'Jita IV - Moon 4 - Caldari Navy Assembly Plant'};
+export const JITA=60003760,AMARR=60008494;
+// type -> [group, category]; groups 255/257/268 are skill groups.
+const TYPES={34:[18,4],35:[18,4],605:[25,6],587:[25,6],9899:[300,20]};
+const GROUPS={18:{name:'Mineral',category_id:4},25:{name:'Frigate',category_id:6},300:{name:'Cyber Learning',category_id:20},255:{name:'Gunnery',types:[3300],published:true},257:{name:'Spaceship Command',types:[3327],published:true},268:{name:'Production',types:[3380],published:true}};
+const CATEGORIES={4:'Material',6:'Ship',20:'Implant'};
+const PRICES=[[34,5,4],[35,10,9],[605,20000000,18000000],[587,400000,380000],[9899,1000000,900000]];
+export const MARKET={meta:{region:0,updatedAt:Date.now()-600000,data:{generatedAt:new Date().toISOString(),skills:{accounting:16622,brokerRelations:3446},types:{34:{n:'Tritanium',v:0.01},35:{n:'Pyerite',v:0.01},587:{n:'Rifter',v:2500}},recipes:{587:{bp:691,q:1,m:[[34,30000],[35,6000]]}},regions:{10000002:'The Forge',10000043:'Domain'}}},
+ regions:[{region:10000002,updatedAt:Date.now()-600000,data:{name:'The Forge',stations:{[JITA]:[30000142,'Jita IV - Moon 4 - Caldari Navy Assembly Plant']},types:{34:{d:5e6,s:[[JITA,5,1e6]],b:[[JITA,4.6,1e6]]},35:{d:1e6,s:[[JITA,10,1e6]],b:[]},587:{d:40,s:[[JITA,400000,30]],b:[[JITA,300000,20]]}}}},
+  {region:10000043,updatedAt:Date.now()-600000,data:{name:'Domain',stations:{[AMARR]:[30002187,'Amarr VIII (Oris) - Emperor Family Academy']},types:{34:{d:2e6,s:[[AMARR,6,1e5]],b:[[AMARR,7,1e5]]}}}}]};
 const iso=hours=>new Date(Date.now()+hours*3600000).toISOString();
 export function sharedRecord(id){
  return {characterId:id,name:names[IDS.indexOf(id)],skills:{total_sp:333000},queue:[{skill_id:3300,finished_level:5,queue_position:0,start_date:iso(-1),finish_date:iso(30)}],fetchedAt:iso(0)};
@@ -20,6 +29,7 @@ function privateRecord(id,state){
   journal:ok([{id:2,date:iso(-1),ref_type:'bounty_prizes',amount:1500000,balance:12500000.25,description:'Bounty prizes in Jita'},{id:1,date:iso(-2),ref_type:'market_transaction',amount:-5500,balance:11000000.25}]),
   transactions:ok([{transaction_id:1,date:iso(-2),type_id:34,quantity:1000,unit_price:5.5,is_buy:true,location_id:60003760}]),
   attributes:ok({intelligence:20,memory:21,perception:22,willpower:23,charisma:19,bonus_remaps:2}),
+  assets:ok({items:3,locations:1,truncated:false,types:[[34,1000],[605,1],[9899,1]]}),
   implants:ok([9899]),
   clones:ok({home_location:{location_id:60003760,location_type:'station'},jump_clones:[{jump_clone_id:1,location_id:1035466617946,location_type:'structure',implants:[9899],name:'Staging'}],last_clone_jump_date:iso(-2)})
  };
@@ -27,6 +37,11 @@ function privateRecord(id,state){
  if(state.oldSnapshot)for(const k of ['journal','transactions','attributes','implants','clones'])delete operations[k];
  return {characterId:id,name:names[IDS.indexOf(id)],expires:Date.now()+3600000,fetchedAt:iso(0),queue,operations,
   skills:{total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:3,skillpoints_in_skill:90510},{skill_id:3327,trained_skill_level:2,active_skill_level:2,skillpoints_in_skill:1415}]}};
+}
+// What the wingmate endpoint returns: Decxus is an industrialist with more ISK.
+function wingRecord(id,state){
+ if(id===IDS[0]){const r=privateRecord(id,state);return {characterId:id,name:'Fiofka',sharing:true,fetchedAt:r.fetchedAt,skills:r.skills,wallet:r.operations.wallet?.value??null,assets:r.operations.assets?.value||null};}
+ return {characterId:id,name:'Decxus',sharing:true,fetchedAt:iso(0),wallet:40000000,assets:{items:2,locations:1,types:[[587,10],[34,500000]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}};
 }
 // Every test runs against a mocked backend; the browser itself must never call private ESI endpoints.
 export async function mockApp(page,options={}) {
@@ -42,8 +57,13 @@ export async function mockApp(page,options={}) {
   else if(path.includes('/corporationhistory/'))body=[{corporation_id:1000044,start_date:'2026-01-01T00:00:00Z',record_id:1}];
   else if(path.includes('/universe/ids/'))body={characters:state.missing?[]:IDS.map((id,i)=>({id,name:names[i]}))};
   else if(path.includes('/universe/names/'))body=JSON.parse(route.request().postData()).map(id=>({id,name:NAMES[id]||`Type ${id}`}));
-  else if(path.includes('/universe/categories/16/'))body={groups:[255,257]};
-  else if(path.includes('/universe/groups/'))body=path.includes('/255/')?{name:'Gunnery',types:[3300],published:true}:{name:'Spaceship Command',types:[3327],published:true};
+  else if(/\/universe\/categories\/16\/$/.test(path))body={groups:[255,257,268]};
+  else if(path.includes('/universe/categories/'))body={name:CATEGORIES[path.match(/(\d+)\/$/)[1]]};
+  else if(path.includes('/universe/groups/'))body=GROUPS[path.match(/(\d+)\/$/)[1]];
+  else if(path.includes('/universe/types/')){const id=Number(path.match(/(\d+)\/$/)[1]);body={type_id:id,name:NAMES[id],group_id:(TYPES[id]||[1])[0],capacity:id===605?400:0};}
+  else if(path.includes('/markets/prices/'))body=PRICES.map(([type_id,average_price,adjusted_price])=>({type_id,average_price,adjusted_price}));
+  else if(path.includes('/industry/systems/'))body=[{solar_system_id:30000142,cost_indices:[{activity:'manufacturing',cost_index:0.05}]}];
+  else if(path.includes('/route/')){const [a,b]=path.match(/route\/(\d+)\/(\d+)/).slice(1);body=a===b?[Number(a)]:Array.from({length:10},(_,i)=>i);}
   else if(path.includes('/corporations/'))body={name:'Test Flight Academy',ticker:'TFA',member_count:120,tax_rate:0.1};
   else if(/\/characters\/\d+\/$/.test(path))body={name:path.includes(String(IDS[0]))?names[0]:names[1],corporation_id:1000044,birthday:'2026-01-01T00:00:00Z',security_status:0.5};
   else {privateEsi.push(path);return route.fulfill({status:404,body:'{}'});}
@@ -60,10 +80,13 @@ export async function mockApp(page,options={}) {
    return json(privateRecord(id,state));
   }
   if(path==='/api/disconnect')return json({disconnected:true});
+  if(path==='/api/wing'){if(state.expired)return json({error:'Backend session expired.'},401);return json({pilots:IDS.map(id=>wingRecord(id,state)).filter(r=>r.characterId===IDS[0]||!state.wingPrivate).map(r=>r.characterId===IDS[1]&&state.wingPrivate?{...r,sharing:false}:r)});}
+  if(path==='/api/market')return state.noMarket?json({meta:null,regions:[]}):json(MARKET);
   if(path==='/auth/start')return route.fulfill({status:200,body:'EVE backend consent screen'});
   throw new Error(`Unexpected backend route ${path}`);
  });
- if(options.data||options.corrupt||options.connected)await page.addInitScript(({options,KEY,IDS,API,opaque})=>{
+ await page.addInitScript(({options,KEY,IDS,API,opaque})=>{
+  if(!options.fresh&&!sessionStorage.getItem('e2e-started')){localStorage.setItem('eve-me:v1',options.me||'Fiofka');sessionStorage.setItem('e2e-started','1');}
   if(options.corrupt)localStorage.setItem(KEY,'{broken');
   else if(options.data)localStorage.setItem(KEY,JSON.stringify(options.data));
   if(options.connected){const ids=options.connected==='first'?IDS.slice(0,1):IDS;sessionStorage.setItem(`eve-backend-sessions:${API}`,JSON.stringify(ids.map(id=>[id,{token:`${opaque.slice(0,42)}${IDS.indexOf(id)}`,expires:Date.now()+1200000}])));}
