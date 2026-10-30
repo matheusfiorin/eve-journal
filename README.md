@@ -42,7 +42,7 @@ On the consent page each pilot can tick **share with my wingmate**. Their skills
 
 ### Market pipeline
 
-`.github/workflows/market.yml` runs every hour (and on demand). `scripts/market-pipeline.mjs` resolves `market/watchlist.json`, adds the materials of each item's blueprint (blueprint data from Fuzzwork's SDE dump), and scans ESI orders in the five trade hubs plus every region a connected pilot is in. It keeps the best prices per NPC station and uploads the result to the Worker (`POST /api/market/ingest`, signed with an HMAC of the EVE client secret). The browser reads `GET /api/market` and adds jump distances from the pilot's position. Edit the watchlist to scan other items.
+`.github/workflows/market.yml` runs every hour (and on demand). `scripts/market-pipeline.mjs` resolves `market/watchlist.json`, adds the materials of each item's blueprint (blueprints from CCP's official static data export), and scans ESI orders in the five trade hubs plus every region a connected pilot is in. It keeps the best prices per NPC station and uploads the result to the Worker (`POST /api/market/ingest`, signed with an HMAC of the EVE client secret). The browser reads `GET /api/market` and adds jump distances from the pilot's position. Edit the watchlist to scan other items.
 
 ## Develop
 

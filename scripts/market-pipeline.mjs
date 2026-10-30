@@ -1,14 +1,16 @@
 // Hourly market pipeline: scans ESI orders for the watchlist in trade hubs and the
 // pilots' current regions, keeps only the best prices per station, and stores the
 // compact result in the Worker for the dashboard to rank opportunities.
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile,mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {createHmac} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
 const ESI = 'https://esi.evetech.net/latest';
 const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
-const FUZZWORK = 'https://www.fuzzwork.co.uk/dump/latest/csv';
+const SDE = 'https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip';
 const HEADERS = {Accept:'application/json', 'User-Agent':'eve-journal market pipeline (github.com/matheusfiorin/eve-journal)'};
 const TOP = 6;
 const isStation = id => id >= 60000000 && id < 64000000;
@@ -32,20 +34,13 @@ export function aggregate(orders, history = []) {
     s: top(sells, 1), b: top(buys, -1), systems
   };
 }
-export function parseCsv(text) {
-  const [header, ...lines] = text.trim().split(/\r?\n/);
-  const keys = header.split(',');
-  return lines.map(line => Object.fromEntries(line.split(',').map((v, i) => [keys[i], Number(v)])));
-}
-// Manufacturing recipes for watchlist products; skip anything with a long material tree.
-export function recipes(products, materials, wanted) {
-  const byBlueprint = new Map();
-  for (const m of materials) if (m.activityID === 1) (byBlueprint.get(m.typeID) || byBlueprint.set(m.typeID, []).get(m.typeID)).push([m.materialTypeID, m.quantity]);
-  const out = {};
-  for (const p of products) {
-    if (p.activityID !== 1 || !wanted.has(p.productTypeID)) continue;
-    const list = byBlueprint.get(p.typeID);
-    if (list?.length && list.length <= 15) out[p.productTypeID] = {bp:p.typeID, q:p.quantity, m:list};
+// Manufacturing recipes for watchlist products from the SDE's blueprints.jsonl; skip long material trees.
+export function recipes(blueprints, wanted) {
+  const out = {}, id = x => x?.typeID ?? x?.typeId;
+  for (const bp of blueprints) {
+    const job = bp.activities?.manufacturing, product = job?.products?.[0];
+    if (!wanted.has(id(product)) || !job.materials?.length || job.materials.length > 15) continue;
+    out[id(product)] = {bp:bp.blueprintTypeID ?? bp._key, q:product.quantity, m:job.materials.map(m => [id(m), m.quantity])};
   }
   return out;
 }
@@ -70,10 +65,14 @@ async function allPages(path) {
   for (let page = 2; page <= first.pages; page++) rows.push((await esi(`${path}&page=${page}`)).body);
   return rows.flat();
 }
-async function bz2Csv(file) {
-  const response = await fetch(`${FUZZWORK}/${file}.csv.bz2`, {headers:HEADERS, signal:AbortSignal.timeout(60000)});
-  if (!response.ok) throw new Error(`${file}: HTTP ${response.status}`);
-  return parseCsv(execFileSync('bunzip2', ['-c'], {input:Buffer.from(await response.arrayBuffer()), maxBuffer:256 * 1024 * 1024}).toString());
+async function sdeBlueprints() {
+  const response = await fetch(SDE, {headers:HEADERS, signal:AbortSignal.timeout(300000)});
+  if (!response.ok) throw new Error(`SDE download: HTTP ${response.status}`);
+  const zip = join(await mkdtemp(join(tmpdir(), 'sde-')), 'sde.zip');
+  await writeFile(zip, Buffer.from(await response.arrayBuffer()));
+  const entry = execFileSync('unzip', ['-Z1', zip]).toString().split('\n').find(n => /(^|\/)blueprints\.jsonl$/.test(n.trim()));
+  if (!entry) throw new Error('blueprints.jsonl is missing from the SDE');
+  return execFileSync('unzip', ['-p', zip, entry.trim()], {maxBuffer:1024 * 1024 * 1024}).toString().split('\n').filter(Boolean).map(line => JSON.parse(line));
 }
 
 async function main() {
@@ -92,8 +91,7 @@ async function main() {
 
   const meta = {generatedAt:new Date().toISOString(), types:{}, recipes:{}, regions:{}};
   try {
-    const [products, materials] = await Promise.all([bz2Csv('industryActivityProducts'), bz2Csv('industryActivityMaterials')]);
-    meta.recipes = recipes(products, materials, wanted);
+    meta.recipes = recipes(await sdeBlueprints(), wanted);
     console.log(`Recipes: ${Object.keys(meta.recipes).length} manufacturable watchlist items.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
   const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id))])];
