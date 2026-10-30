@@ -4,5 +4,6 @@
     "Fiofka",
     "Decxus"
   ],
-  "eveClientId": ""
+  "eveClientId": "",
+  "backendUrl": ""
 }

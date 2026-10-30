@@ -4,6 +4,10 @@ A GitHub Pages companion for **Fiofka** and **Decxus**. Track API-provided profi
 
 Source: https://github.com/matheusfiorin/eve-journal
 
+## Shared backend
+
+The Cloudflare backend implementation and deployment workflow are included. See [Worker setup](worker/README.md) for required repository Actions secrets, the callback registration step, consent/privacy behavior and endpoint details. Deployment uses the `github-pages` GitHub environment, where the expected secrets are configured and Cloudflare account/Workers/D1 access checks have passed. The published Worker URL is injected into the Pages config during deployment; it is not guessed or manually committed.
+
 ## API content first
 
 Primary navigation is Pilots, Skills & training, and Operations. Notes and goals are grouped in a secondary menu. The overview contains ESI metrics rather than local journal counts.

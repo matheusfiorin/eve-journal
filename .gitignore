@@ -6,3 +6,5 @@ _site/
 .env.*
 playwright-report/
 test-results/
+.cloudflare/
+.wrangler/

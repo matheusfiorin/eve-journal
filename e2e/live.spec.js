@@ -15,3 +15,12 @@ test('LIVE: ESI IDs and EVE browser token exchange CORS are available',async({re
  const response=await request.post('https://esi.evetech.net/latest/universe/ids/',{data:['Fiofka','Decxus']});expect(response.ok()).toBeTruthy();const payload=await response.json();expect(payload.characters.map(c=>c.id).sort()).toEqual([2124810474,2124815118]);
  const cors=await request.fetch('https://login.eveonline.com/v2/oauth/token',{method:'OPTIONS',headers:{Origin:'https://matheusfiorin.github.io','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type'}});expect(cors.ok()).toBeTruthy();expect(cors.headers()['access-control-allow-origin']).toBe('*');
 });
+test('LIVE: deployed backend is ready, public API is redacted and private API requires authorization',async({request})=>{
+ const url=process.env.EVE_BACKEND_URL;
+ test.skip(!url,'No deployed backend URL supplied.');
+ const health=await request.get(`${url}/health`);expect(health.ok()).toBeTruthy();expect((await health.json()).ready).toBe(true);
+ const publicResponse=await request.get(`${url}/api/public/pilots`,{headers:{Origin:'https://matheusfiorin.github.io'}});expect(publicResponse.ok()).toBeTruthy();expect(publicResponse.headers()['access-control-allow-origin']).toBe('https://matheusfiorin.github.io');
+ const body=await publicResponse.json();expect(Array.isArray(body.pilots)).toBe(true);for(const row of body.pilots)for(const key of ['operations','credentials','accessToken','refreshToken'])expect(row[key]).toBeUndefined();
+ const privateResponse=await request.get(`${url}/api/session`);expect(privateResponse.status()).toBe(401);
+ const refused=await request.get(`${url}/api/public/pilots`,{headers:{Origin:'https://unrelated.example'}});expect(refused.status()).toBe(403);
+});

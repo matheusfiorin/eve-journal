@@ -15,6 +15,7 @@ export function token(id=IDS[0],overrides={}) {
 }
 export async function mockApp(page,options={}) {
   const state={fail:false,missing:false,trainingFail:false,queueEmpty:false,...options};
+  if(options.backend)await page.route('**/config.json',r=>r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({title:'EVE Pilot Console',pilots:names,eveClientId:'test-client',backendUrl:'https://api.example'})}));
   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://images.evetech.net/**',r=>r.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#284736"/></svg>'}));
   await page.route('https://esi.evetech.net/**',async route=>{

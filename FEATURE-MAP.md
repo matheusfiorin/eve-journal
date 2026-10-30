@@ -2,6 +2,10 @@
 
 This document separates actual public-service checks, browser tests using controlled EVE responses, and checks that require a player account. Automated screenshots, traces, and HTML reports are uploaded by GitHub Actions. Test fixtures contain generated signing keys and synthetic training data, never player credentials.
 
+## Cloudflare backend implementation
+
+The repository now includes a Worker/D1 backend, encrypted EVE credential storage, consent-gated public training snapshots, private operations sessions, token refresh and a 30-minute scheduler. Worker unit tests cover real SQLite migrations, OAuth state/replay/character validation, token encryption/rotation, public redaction, CORS and disconnect. Browser scenarios cover the backend session and snapshot paths. The configured github-pages environment passed secret-presence and Cloudflare account/Workers/D1 access checks. Actual deployment and subsequent EVE callback registration/consent remain separate verification steps; implementation/tests do not establish a deployed or authorized service.
+
 ## API-first update
 
 The primary product is now the ESI dashboard. Pilots, Skills & training, and Operations are the primary sections. Local notes and goals are secondary and do not occupy overview metrics.

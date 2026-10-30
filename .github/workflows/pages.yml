@@ -31,9 +31,36 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
-  deploy:
+  deploy-backend:
+    name: Deploy EVE Cloudflare backend
+    environment: github-pages
     if: github.event_name != 'pull_request'
     needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.backend.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Verify deployment configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
+        run: node scripts/check-cloudflare.mjs
+      - name: Provision database and deploy Worker
+        id: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
+        run: node scripts/deploy-backend.mjs
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: [verify, deploy-backend]
     permissions:
       contents: read
       pages: write
@@ -46,8 +73,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure Pages (enable Settings → Pages → GitHub Actions first)
         uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Configure the deployed backend URL
+        env:
+          BACKEND_URL: ${{ needs.deploy-backend.outputs.url }}
+        run: node scripts/configure-frontend.mjs
       - name: Prepare public application files
-        run: mkdir _site && cp index.html styles.css app.js model.js auth.js storage.js config.json _site/
+        run: mkdir _site && cp index.html styles.css app.js model.js auth.js storage.js backend.js config.json _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
@@ -56,7 +90,9 @@ jobs:
         uses: actions/deploy-pages@v4
   verify-published:
     name: Test published site and live EVE APIs
-    needs: deploy
+    needs: [deploy, deploy-backend]
+    env:
+      EVE_BACKEND_URL: ${{ needs.deploy-backend.outputs.url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,3 +1,4 @@
+import {BackendClient} from './backend.js';
 import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress} from './model.js';
 import {JournalStore} from './storage.js';
 import {REQUESTED_SCOPES, OPERATIONS_SCOPES, base64url, challenge, validateState, validateToken} from './auth.js';
@@ -13,6 +14,7 @@ let generation = 0, editingEntry = null, editingGoal = null, draftTimer;
 const types = new Map();
 const corporationNames = new Map();
 let universeStatus = null;
+let backend = null;
 
 function notice(message) {
   $('#notice').textContent = message;
@@ -59,7 +61,7 @@ async function corporationName(id) {
 function saveSessions() {
   sessionStorage.setItem('eve-sessions', JSON.stringify([...sessions]));
 }
-function isConnected(id) { return sessions.get(id)?.expires > Date.now(); }
+function isConnected(id) { return Boolean(backend?.has(id) || sessions.get(id)?.expires > Date.now()); }
 function pilotOptions() {
   const names = pilots.map(p => p.name);
   document.querySelectorAll('.pilot-select').forEach(select => {
@@ -73,9 +75,10 @@ function pilotOptions() {
   filter.innerHTML = '<option value="">All pilots</option>' + authors.map(n => `<option>${esc(n)}</option>`).join('');
   filter.value = authors.includes(prior) ? prior : '';
 }
-async function loadPilots() {
+async function loadPilots(force = false) {
   const request = ++generation;
   const statusTask = esi('status/').then(value => { if(request===generation) universeStatus={...value,fetched:new Date().toISOString()}; }).catch(() => { if(request===generation && universeStatus) universeStatus.stale=true; });
+  const sharedTask=backend?backend.publicPilots().catch(error=>{notice(`Shared training snapshots: ${error.message}`);return [];}):Promise.resolve([]);
   const previous = pilots;
   const next = config.pilots.map(name => ({...previous.find(p => p.name.toLowerCase() === name.toLowerCase()), name, error:null, refreshing:true}));
   pilots = next;
@@ -102,6 +105,20 @@ async function loadPilots() {
             delete p.careerError;
           } catch(error) { p.careerError=error.message; }
         } catch (error) { p.error = `Public profile: ${error.message}`; }
+        if(backend) {
+          delete p.operations; delete p.skills; delete p.queue; delete p.synced; delete p.backendPrivate;
+          if(backend.has(p.id)) {
+            try {
+              const record=await backend.privatePilot(p.id,force===true);
+              p.skills=record.skills; p.queue=record.queue?.sort((a,b)=>a.queue_position-b.queue_position); p.operations=record.operations; p.synced=record.fetchedAt; p.backendPrivate=true;
+              if(record.lastError)p.error=record.lastError;
+              const ids=[...(p.queue||[]).map(q=>q.skill_id),p.operations?.ship?.value?.ship_type_id,p.operations?.location?.value?.solar_system_id,...(p.operations?.jobs?.value||[]).map(job=>job.product_type_id||job.blueprint_type_id)].filter(Number.isSafeInteger);
+              try{await resolveNames(ids);}catch{p.nameWarning='Some EVE type names could not be loaded.';}
+              if(p.operations?.location?.value?.station_id){try{p.operations.location.station=(await esi(`universe/stations/${p.operations.location.value.station_id}/`)).name;}catch{p.operations.location.station=`Station ${p.operations.location.value.station_id}`;}}
+            }catch(error){p.error=error.message;}
+          }
+          return;
+        }
         if (!isConnected(p.id)) { delete p.skills; delete p.queue; delete p.synced; delete p.operations; return; }
         const session = sessions.get(p.id);
         const operationsTask=loadOperations(p,session);
@@ -119,7 +136,14 @@ async function loadPilots() {
         await operationsTask;
       }));
     }
+    const shared=await sharedTask;
     if (request !== generation) return;
+    for(const p of next) {
+      const record=shared.find(row=>row.characterId===p.id);
+      p.shared=record||null;
+      if(record?.stale&&!p.error)p.error='The shared training snapshot could not be refreshed. This pilot may need to reconnect.';
+      if(record&&!p.backendPrivate){p.skills=record.skills||undefined;p.queue=record.queue;p.synced=record.fetchedAt;try{await resolveNames((p.queue||[]).map(q=>q.skill_id));}catch{}}
+    }
     $('#sync-status').textContent = `Last refresh ${new Date().toLocaleTimeString()} · Public ESI profiles · Private character data is session-only`;
   } catch (error) {
     if (request !== generation) return;
@@ -185,11 +209,11 @@ function renderPilots() {
     const birthday = p.profile?.birthday;
     const age = birthday ? Math.max(0, Math.floor((Date.now() - Date.parse(birthday)) / 86400000)) : null;
     const queue = p.queue?.filter(q => !q.finish_date || Date.parse(q.finish_date) > Date.now());
-    return `<article class="pilot-card"><div class="pilot-head"><div class="portrait">${p.id ? `<img src="https://images.evetech.net/characters/${p.id}/portrait?size=128" alt="Portrait of ${esc(p.name)}" width="64" height="64">` : '✦'}</div><div><span class="badge">PILOT 0${i+1} / ${isConnected(p.id) ? 'EVE CONNECTED' : 'PUBLIC PROFILE'}</span><h3>${esc(p.name)}</h3><small class="muted">${esc(p.corporation || (p.refreshing ? 'Loading corporation…' : 'Corporation unavailable'))}</small></div></div>
+    return `<article class="pilot-card"><div class="pilot-head"><div class="portrait">${p.id ? `<img src="https://images.evetech.net/characters/${p.id}/portrait?size=128" alt="Portrait of ${esc(p.name)}" width="64" height="64">` : '✦'}</div><div><span class="badge">PILOT 0${i+1} / ${isConnected(p.id) ? 'EVE CONNECTED' : p.shared ? 'SHARED TRAINING' : 'PUBLIC PROFILE'}</span><h3>${esc(p.name)}</h3><small class="muted">${esc(p.corporation || (p.refreshing ? 'Loading corporation…' : 'Corporation unavailable'))}</small></div></div>
     <div class="profile-facts"><span>Capsuleer since <strong>${birthday ? esc(new Date(birthday).toLocaleDateString()) : '—'}</strong></span><span>Security status <strong>${Number.isFinite(p.profile?.security_status) ? p.profile.security_status.toFixed(2) : '—'}</strong></span></div>
     <div class="stats"><div><small>${p.skills ? 'TOTAL SKILL POINTS' : 'DAYS IN NEW EDEN'}</small><strong>${p.skills ? Number(p.skills.total_sp).toLocaleString() : age === null ? '—' : age.toLocaleString()}</strong></div><div><small>${p.queue ? 'QUEUED SKILLS' : 'TRAINING ACCESS'}</small><strong>${queue ? queue.length : 'Not connected'}</strong></div></div>
-    ${p.error ? `<p class="error hint">${esc(p.error)}</p>` : ''}<p class="muted hint">${p.synced ? `Training fetched ${esc(new Date(p.synced).toLocaleTimeString())}` : config.eveClientId ? 'Connect to see private skills and training.' : 'Training setup needed · add an EVE application client ID.'}</p>
-    <div class="actions"><button data-connect="${i}" class="secondary" ${!p.id || p.refreshing ? 'disabled' : ''}>${isConnected(p.id) ? 'Reconnect' : config.eveClientId ? 'Connect with EVE' : 'Set up EVE login'}</button>${isConnected(p.id) ? `<button data-disconnect="${p.id}" class="secondary">Disconnect</button>` : ''}</div></article>`;
+    ${p.error ? `<p class="error hint">${esc(p.error)}</p>` : ''}<p class="muted hint">${p.synced ? `Training fetched ${esc(new Date(p.synced).toLocaleTimeString())}` : backend ? 'Connect your EVE account to enable scheduled progression updates.' : config.eveClientId ? 'Connect to see private skills and training.' : 'Training setup needed · add an EVE application client ID.'}</p>
+    <div class="actions"><button data-connect="${i}" class="secondary" ${!p.id || p.refreshing ? 'disabled' : ''}>${isConnected(p.id) ? 'Reconnect' : (backend || config.eveClientId) ? 'Connect with EVE' : 'Set up EVE login'}</button>${isConnected(p.id) ? `<button data-disconnect="${p.id}" class="secondary">Disconnect</button>` : ''}</div></article>`;
   }).join('') : '<div class="empty">Your wing is waiting. Use Configure pilots to add your two character names.</div>';
 }
 function renderTraining() {
@@ -198,12 +222,12 @@ function renderTraining() {
     const queue = p.queue?.filter(q => !q.finish_date || Date.parse(q.finish_date) > now);
     const active = queue?.find(q => Date.parse(q.start_date) <= now && Date.parse(q.finish_date) > now);
     const last = queue?.filter(q => q.finish_date).at(-1);
-    return `<article class="panel"><div class="section-head"><div><span class="badge">${esc(p.name)}</span><h3>Training queue</h3></div><span class="muted hint">${isConnected(p.id) ? `Session ends ${esc(new Date(sessions.get(p.id).expires).toLocaleTimeString())}` : 'EVE login required'}</span></div>
+    return `<article class="panel"><div class="section-head"><div><span class="badge">${esc(p.name)}</span><h3>Training queue</h3></div><span class="muted hint">${isConnected(p.id) ? `Session ends ${esc(new Date(backend?.expires(p.id)||sessions.get(p.id)?.expires).toLocaleTimeString())}` : 'EVE login required'}</span></div>
     ${p.error ? `<p class="error hint">${esc(p.error)}</p>` : ''}
     ${queue ? `${active ? `<div class="active-training"><span class="badge">TRAINING NOW</span><h3>${esc(types.get(active.skill_id) || `Skill ${active.skill_id}`)} → ${active.finished_level}</h3><progress max="100" value="${trainingProgress(active)}" aria-label="Current skill training progress"></progress><p class="muted hint">${remaining(active.finish_date)} · Ends ${esc(new Date(active.finish_date).toLocaleString())}</p></div>` : '<p class="muted">No skill is currently scheduled to train.</p>'}
     <p class="muted hint">${queue.length} queued skills${last ? ` · Queue ends ${esc(new Date(last.finish_date).toLocaleString())}` : ''}</p>${p.nameWarning ? `<p class="muted hint">${esc(p.nameWarning)}</p>` : ''}
     ${queue.length ? queue.map((q,i) => `<div class="queue-row"><span><small>${String(i+1).padStart(2,'0')} / </small>${esc(types.get(q.skill_id) || `Skill ${q.skill_id}`)} <small>→ Level ${q.finished_level}</small></span><span>${esc(q.finish_date ? remaining(q.finish_date) : 'Paused / not scheduled')}</span></div>`).join('') : '<p class="muted">Your training queue is empty. Add a skill in EVE Online.</p>'}` : '<div class="empty">Your training plan belongs here.<br><br>Connect this pilot from Pilots to load their read-only skills and queue.</div>'}
-    ${p.skills ? `<details><summary>${p.skills.skills.length} trained skills · ${Number(p.skills.unallocated_sp || 0).toLocaleString()} unallocated SP</summary><button data-skills="${p.id}" class="secondary">Load searchable skill list</button><div id="skills-${p.id}" class="skill-list"></div></details>` : ''}</article>`;
+    ${p.skills?.skills ? `<details><summary>${p.skills.skills.length} trained skills · ${Number(p.skills.unallocated_sp || 0).toLocaleString()} unallocated SP</summary><button data-skills="${p.id}" class="secondary">Load searchable skill list</button><div id="skills-${p.id}" class="skill-list"></div></details>` : ''}</article>`;
   }).join('') : '<div class="empty">Configure your pilots to start tracking training.</div>';
 }
 function renderLocal() {
@@ -237,6 +261,7 @@ function selectTab(id) {
   history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
 }
 async function connect(index) {
+  if(backend){const pilot=pilots[index];if(!pilot?.id)throw new Error('Wait for the pilot lookup before connecting.');location.assign(backend.authURL(pilot.id));return;}
   if (!config.eveClientId) { openSettings(true); return; }
   const p = pilots[index];
   if (!p?.id) throw new Error('Wait for the public character lookup before connecting.');
@@ -268,7 +293,7 @@ async function finishLogin() {
 function openSettings(training = false) {
   const f = $('#settings-form');
   f.elements.pilot1.value = config.pilots[0] || ''; f.elements.pilot2.value = config.pilots[1] || '';
-  f.elements.clientId.value = config.eveClientId; $('#callback-url').textContent = callback;
+  f.elements.clientId.value = config.eveClientId; $('#callback-url').textContent = backend ? `${backend.url}/auth/callback` : callback;
   $('#settings-error').hidden = true;
   $('#settings details').open = training;
   $('#settings').showModal();
@@ -311,6 +336,9 @@ function download(contents, filename) {
 }
 function expireSessions() {
   let changed = false;
+  if(backend)for(const id of backend.expire()){
+    changed=true;const p=pilots.find(p=>p.id===id);if(p){delete p.skills;delete p.queue;delete p.operations;delete p.synced;delete p.backendPrivate;if(p.shared){p.skills=p.shared.skills;p.queue=p.shared.queue;p.synced=p.shared.fetchedAt;}}
+  }
   for (const [id, session] of sessions) {
     if (session.expires > Date.now()) continue;
     sessions.delete(id); changed = true;
@@ -324,13 +352,13 @@ function expireSessions() {
 }
 
 $('#copy-eve-registration').onclick = async () => {
-  const text = `Application: EVE Flight Journal\nWebsite: ${callback}\nCallback URL: ${callback}\nScopes: ${REQUESTED_SCOPES.join(' ')}\nFlow: Authorization Code with PKCE (S256); no client secret in the frontend`;
+  const text = `Application: EVE Flight Journal\nWebsite: ${callback}\nCallback URL: ${backend ? `${backend.url}/auth/callback` : callback}\nScopes: ${REQUESTED_SCOPES.join(' ')}\nFlow: Authorization Code with PKCE (S256); no client secret in the frontend`;
   try { await navigator.clipboard.writeText(text); $('#registration-status').textContent = 'Registration details copied. Paste them into the EVE developer application form.'; }
   catch { $('#registration-status').textContent = text; }
 };
 $('#settings-button').onclick = () => openSettings();
 $('#close-settings').onclick = () => $('#settings').close();
-$('#refresh').onclick = loadPilots;
+$('#refresh').onclick = () => loadPilots(true);
 $('#settings-form').onsubmit = async event => {
   event.preventDefault();
   const f = new FormData(event.target);
@@ -386,8 +414,8 @@ document.addEventListener('click', async event => {
     if (b.dataset.tab) selectTab(b.dataset.tab);
     if (b.dataset.connect !== undefined) await connect(Number(b.dataset.connect));
     if (b.dataset.disconnect) {
-      const id=Number(b.dataset.disconnect); sessions.delete(id);
-      const p=pilots.find(p => p.id===id); if(p) { delete p.skills; delete p.queue; delete p.synced; delete p.operations; }
+      const id=Number(b.dataset.disconnect); if(backend?.has(id)){if(!confirm('Disconnect this pilot, remove the stored EVE authorization, and stop sharing their training snapshot?'))return;await backend.disconnect(id);} sessions.delete(id);
+      const p=pilots.find(p => p.id===id); if(p) { delete p.skills; delete p.queue; delete p.synced; delete p.operations; delete p.shared; }
       renderPilots(); renderTraining(); renderOperations(); renderApiOverview(); saveSessions();
     }
     if (b.dataset.editEntry) editEntry(b.dataset.editEntry);
@@ -449,10 +477,19 @@ async function init() {
   }
   try {
     config=await json('./config.json');
-    const saved=localStorage.getItem(SETTINGS); if(saved) config=JSON.parse(saved);
+    const saved=localStorage.getItem(SETTINGS); if(saved) config={...config,...JSON.parse(saved)};
     if(!Array.isArray(config.pilots) || config.pilots.length>2 || config.pilots.some(p => typeof p!=='string' || !p.trim() || p.length>100) || new Set(config.pilots.map(p => p.toLowerCase())).size!==config.pilots.length) throw new Error('Invalid pilot settings. Reconfigure your pilots.');
     config.eveClientId=String(config.eveClientId || '');
   } catch(error) { config={pilots:['Fiofka','Decxus'],eveClientId:''}; notice(`Using default pilots. ${error.message}`); }
+  if(config.backendUrl) {
+    try {
+      backend=new BackendClient(config.backendUrl);
+      const accepted=backend.acceptRedirect(location.hash);
+      if(accepted){history.replaceState(null,'',callback);notice('EVE pilot connected. Shared progression updates are now handled by the backend.');}
+      if(new URLSearchParams(location.search).has('code')){history.replaceState(null,'',callback);notice(`Update the EVE application's callback to ${backend.url}/auth/callback, then connect again.`);}
+      sessionStorage.removeItem('eve-sessions');sessions.clear();
+    }catch(error){notice(error.message);}
+  }
   try {
     const saved=JSON.parse(sessionStorage.getItem('eve-sessions') || '[]');
     sessions=new Map(saved.filter(row => Array.isArray(row) && Number.isSafeInteger(row[0]) && typeof row[1]?.token==='string' && row[1].expires>Date.now()));
@@ -465,7 +502,7 @@ async function init() {
       }
       saveSessions();
     }
-    await finishLogin();
+    if(!backend)await finishLogin();
   } catch(error) { sessions.clear(); try{saveSessions();}catch{} notice(`EVE connection: ${error.message}`); }
   renderLocal();
   // Populate selects before restoring an existing author in a draft.
