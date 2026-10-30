@@ -3,9 +3,14 @@ export const OPERATIONS_SCOPES = {
   wallet:'esi-wallet.read_character_wallet.v1',
   location:'esi-location.read_location.v1',
   ship:'esi-location.read_ship_type.v1',
-  jobs:'esi-industry.read_character_jobs.v1'
+  jobs:'esi-industry.read_character_jobs.v1',
+  journal:'esi-wallet.read_character_wallet.v1',
+  transactions:'esi-wallet.read_character_wallet.v1',
+  attributes:'esi-skills.read_skills.v1',
+  clones:'esi-clones.read_clones.v1',
+  implants:'esi-clones.read_implants.v1'
 };
-export const REQUESTED_SCOPES = [...SCOPES, ...Object.values(OPERATIONS_SCOPES)];
+export const REQUESTED_SCOPES = [...new Set([...SCOPES, ...Object.values(OPERATIONS_SCOPES)])];
 export function base64url(bytes) {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

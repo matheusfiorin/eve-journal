@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateBackup,mergeBackups,remaining,escapeHTML,filterEntries,trainingProgress,localDate} from '../model.js';
+import {validateBackup,mergeBackups,remaining,escapeHTML,filterEntries,trainingProgress,localDate,queueState} from '../model.js';
 const goal={id:'goal-1',title:'Fly a cruiser',pilot:'Both pilots',done:false};
 const entry={id:'entry-1',title:'First flight',pilot:'Pilot',date:'2026-10-30',body:'We made it home.'};
 test('backup validation preserves journal records and strips unrelated data',()=>{
@@ -42,3 +42,13 @@ test('training progress handles future, active, complete, and paused skills',()=
   assert.equal(trainingProgress({}),0);
 });
 test('editor defaults use the local calendar date',()=>{assert.equal(localDate(new Date(2026,0,3,23,59)),'2026-01-03');});
+test('queue state flags empty, paused, ending-soon and healthy training queues',()=>{
+  const now=Date.parse('2026-10-30T12:00:00Z'),at=h=>new Date(now+h*3600000).toISOString();
+  assert.equal(queueState(undefined,now),null);
+  assert.equal(queueState([],now).kind,'empty');
+  assert.equal(queueState([{skill_id:1,start_date:at(-5),finish_date:at(-1)}],now).kind,'empty');
+  assert.equal(queueState([{skill_id:1,finished_level:3}],now).kind,'paused');
+  const ending=queueState([{skill_id:1,start_date:at(-1),finish_date:at(2)},{skill_id:2,start_date:at(2),finish_date:at(10)}],now);
+  assert.equal(ending.kind,'ending');assert.equal(ending.active.skill_id,1);assert.equal(ending.end,now+10*3600000);
+  assert.equal(queueState([{skill_id:1,start_date:at(-1),finish_date:at(30)}],now).kind,'ok');
+});

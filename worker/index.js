@@ -82,13 +82,16 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),id,now+90000).run();
   }
   const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{}};
-  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false'};
+  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/'};
+  // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
+  const trim={journal:50,transactions:50};
   const prior=parseSnapshot(row);
   await Promise.all(Object.entries(paths).map(async([key,path])=>{
    const optional=OPERATIONS_SCOPES[key];
    if(optional&&!credentials.scopes.includes(optional)){snapshot.operations[key]={permission:false};return;}
    try {
-    const value=await remote(`${ESI}/characters/${id}/${path}`,{headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'}},fetchImpl);
+    let value=await remote(`${ESI}/characters/${id}/${path}`,{headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'}},fetchImpl);
+    if(trim[key]&&Array.isArray(value))value=value.slice(0,trim[key]);
     if(optional)snapshot.operations[key]={permission:true,value,fetched:snapshot.fetchedAt};
     else snapshot[key]=value;
    }catch(error){

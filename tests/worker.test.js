@@ -33,6 +33,11 @@ function setup(options={}){
   if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name'});
   if(path.endsWith('/location/'))return json({solar_system_id:30000142});
   if(path.endsWith('/industry/jobs/'))return json([]);
+  if(path.endsWith('/wallet/journal/'))return json(Array.from({length:120},(_,i)=>({id:i,date:'2026-10-30T00:00:00Z',ref_type:'bounty_prizes',amount:1000+i,balance:5})));
+  if(path.endsWith('/wallet/transactions/'))return json([{transaction_id:1,date:'2026-10-30T00:00:00Z',type_id:34,quantity:10,unit_price:5,is_buy:true,location_id:60003760}]);
+  if(path.endsWith('/attributes/'))return json({charisma:19,intelligence:20,memory:20,perception:20,willpower:20,bonus_remaps:2});
+  if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
+  if(path.endsWith('/implants/'))return json([9899]);
   throw new Error(`Unexpected request ${path}`);
  };
  const request=(path,init={})=>handleRequest(new Request(`https://api.example${path}`,init),env,{},fetchImpl);
@@ -89,7 +94,7 @@ test('optional permission failure does not destroy the training snapshot',async(
  const app=setup({walletFail:true});await connect(app);const row=app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get();const snap=JSON.parse(row.snapshot);assert.equal(snap.skills.total_sp,125000);assert.match(snap.operations.wallet.error,/temporarily unavailable/);assert.equal(snap.operations.ship.value.ship_type_id,605);
 });
 test('training-only consent does not fetch optional private endpoints',async()=>{
- const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs)\//.test(call.url)));
+ const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants)\//.test(call.url)));
 });
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
@@ -103,4 +108,9 @@ test('scheduler removes expired transient state and does not duplicate recent sy
 });
 test('encryption rejects altered ciphertext and uses a fresh IV',async()=>{
  const secret=Buffer.alloc(32,9).toString('base64');const a=await encrypt({token:'private'},secret),b=await encrypt({token:'private'},secret);assert.notEqual(a,b);assert.deepEqual(await decrypt(a,secret),{token:'private'});const changed=JSON.parse(a);changed.data=(changed.data[0]==='A'?'B':'A')+changed.data.slice(1);await assert.rejects(decrypt(JSON.stringify(changed),secret));
+});
+test('wallet history is trimmed to the latest 50 rows and clone data is stored privately',async()=>{
+ const app=setup();const {bearer}=await connect(app);const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.equal(payload.operations.journal.value.length,50);assert.equal(payload.operations.journal.value[0].id,0);assert.equal(payload.operations.attributes.value.bonus_remaps,2);assert.deepEqual(payload.operations.implants.value,[9899]);
+ const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());for(const secret of ['bounty_prizes','bonus_remaps','9899'])assert.ok(!text.includes(secret));
 });

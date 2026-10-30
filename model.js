@@ -40,3 +40,14 @@ export function remaining(date, now=Date.now()) {
   return hours<24 ? `${hours}h remaining` : `${Math.floor(hours/24)}d ${hours%24}h remaining`;
 }
 export function escapeHTML(value) {return String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// Training is the one thing a pilot must never let lapse, so classify the queue for alerts.
+export function queueState(queue, now = Date.now()) {
+  if (!Array.isArray(queue)) return null;
+  const pending = queue.filter(q => !q.finish_date || Date.parse(q.finish_date) > now);
+  if (!pending.length) return {kind:'empty', pending};
+  const active = pending.find(q => Date.parse(q.start_date) <= now && Date.parse(q.finish_date) > now);
+  const ends = pending.map(q => Date.parse(q.finish_date)).filter(Number.isFinite);
+  const end = ends.length ? Math.max(...ends) : null;
+  if (!active) return {kind:'paused', pending, end};
+  return {kind: end - now < 86400000 ? 'ending' : 'ok', pending, active, end};
+}
