@@ -95,7 +95,7 @@ async function main() {
     const [products, materials] = await Promise.all([bz2Csv('industryActivityProducts'), bz2Csv('industryActivityMaterials')]);
     meta.recipes = recipes(products, materials, wanted);
     console.log(`Recipes: ${Object.keys(meta.recipes).length} manufacturable watchlist items.`);
-  } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.warn(meta.recipesError); }
+  } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
   const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id))])];
 
   const skillIds = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(['Accounting','Broker Relations'])})).body.inventory_types || [];
@@ -113,6 +113,7 @@ async function main() {
     return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
   }));
   const regions = [...new Set([...HUBS, ...pilotRegions])];
+  const report = [];
 
   for (const region of regions) {
     const name = (await esi(`/universe/regions/${region}/`)).body.name;
@@ -135,10 +136,12 @@ async function main() {
     const data = {name, generatedAt:new Date().toISOString(), types, stations:Object.fromEntries(locs.map(loc => [loc, [stations.get(loc), names.get(loc) || `Station ${loc}`]]))};
     const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region, data})});
     if (!stored.ok) throw new Error(`Upload for ${name} failed: HTTP ${stored.status} ${await stored.text()}`);
+    report.push(`${name} ${Object.keys(types).length} items/${locs.length} stations`);
     console.log(`${name}: ${Object.keys(types).length} items across ${locs.length} stations.`);
   }
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
-  console.log(`Market snapshot stored for ${regions.length} regions.`);
+  // Annotations show up in the run summary, so a failed scan is visible without opening the log.
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${pilotSystems.length} pilot locations. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();
