@@ -9,6 +9,13 @@ class ServiceError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
 }
 function cookie(request,name){return request.headers.get('Cookie')?.split(';').map(v=>v.trim()).find(v=>v.startsWith(`${name}=`))?.slice(name.length+1)||'';}
+// True when the browser says the request came from this worker's own origin.
+// Some browsers/policies send `Origin: null` on same-origin form posts; Sec-Fetch-Site is browser-set and cannot be forged by page scripts.
+function isSameOrigin(request,url){
+ const origin=request.headers.get('Origin');
+ if(origin===url.origin)return true;
+ return origin==='null'&&request.headers.get('Sec-Fetch-Site')==='same-origin';
+}
 const random=()=>base64url(crypto.getRandomValues(new Uint8Array(32)));
 const hash=async value=>base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
 const authCookie=(name,value,seconds)=>`${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
@@ -17,7 +24,8 @@ function response(body,status=200,headers={}){
  return new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...headers}});
 }
 function html(body,status=200,headers={}){
- return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EVE Pilot Console</title><style>body{background:#0a1019;color:#edf2f6;font:16px system-ui;max-width:620px;margin:60px auto;padding:24px;line-height:1.7}h1{line-height:1.2}button,a{color:#b9ee8d}button{background:#172b21;border:1px solid #b9ee8d;padding:14px;cursor:pointer;font:inherit}p,li{color:#b6c3d0}label{display:block;margin:20px 0}</style>${body}</html>`,{status,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://login.eveonline.com; frame-ancestors 'none'; base-uri 'none'",...headers}});
+ // 'same-origin' (not 'no-referrer') so the consent form's POST carries a real Origin header; nothing leaks cross-origin.
+ return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EVE Pilot Console</title><style>body{background:#0a1019;color:#edf2f6;font:16px system-ui;max-width:620px;margin:60px auto;padding:24px;line-height:1.7}h1{line-height:1.2}button,a{color:#b9ee8d}button{background:#172b21;border:1px solid #b9ee8d;padding:14px;cursor:pointer;font:inherit}p,li{color:#b6c3d0}label{display:block;margin:20px 0}</style>${body}</html>`,{status,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://login.eveonline.com; frame-ancestors 'none'; base-uri 'none'",...headers}});
 }
 export async function encrypt(value,secret){
  const bytes=Uint8Array.from(atob(secret),c=>c.charCodeAt(0));
@@ -109,7 +117,7 @@ async function route(request,env,ctx,fetchImpl){
   return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location and industry jobs are visible only to your authorized dashboard session.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
-  if(request.headers.get('Origin')!==url.origin)throw new ServiceError('Invalid connection origin.',403);
+  if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
   const fields=new URLSearchParams(await request.text());
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
@@ -166,8 +174,9 @@ async function route(request,env,ctx,fetchImpl){
 }
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const origin=request.headers.get('Origin');
+ const url=new URL(request.url);
  let front;try{front=frontend(env);}catch{return response({error:'Backend configuration is incomplete.'},503);}
- if(origin&&origin!==front.origin&&origin!==new URL(request.url).origin)return response({error:'Origin is not allowed.'},403);
+ if(origin&&origin!==front.origin&&!isSameOrigin(request,url))return response({error:'Origin is not allowed.'},403);
  const cors=origin===front.origin?{'Access-Control-Allow-Origin':front.origin,Vary:'Origin','Access-Control-Allow-Headers':'Authorization,Content-Type','Access-Control-Allow-Methods':'GET,POST,OPTIONS'}:{};
  if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
  let result;
