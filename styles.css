@@ -186,3 +186,14 @@ body.picking{overflow:hidden}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 #empire-content,#pilots{display:grid;gap:16px}.empire-hero,.me-banner{margin-bottom:0}
+
+/* ── Industry ── */
+#industry-content{display:grid;gap:16px}
+.progress-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;font-size:12px;color:var(--muted)}
+.steps{margin:12px 0 0;padding-left:20px;font-size:14px}.steps li{margin:6px 0}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:99px;background:#b9ee8d1f;color:var(--accent);letter-spacing:.4px}
+.bpos .opp{grid-template-columns:minmax(0,1fr) minmax(0,1.8fr) auto}
+.opp .who{margin-top:4px}.who.me{color:var(--accent)}.who.them{color:var(--wing)}
+.opp.over{opacity:.55}
+.traps li b{font-size:14px}
+@media(max-width:640px){.bpos .opp{grid-template-columns:1fr auto}}

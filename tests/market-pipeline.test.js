@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -21,4 +21,25 @@ test('recipes keep manufacturing materials for wanted products only',()=>{
 });
 test('the pipeline signs uploads exactly the way the Worker verifies them',async()=>{
  assert.equal(createHmac('sha256','secret').update('market-pipeline').digest('base64url'),await pipelineToken('secret'));
+});
+test('starters keep cheap published T1 blueprints whose materials cost less than the product',()=>{
+ const mf=(product,mats,time=300)=>({manufacturing:{materials:mats.map(([typeID,quantity])=>({typeID,quantity})),products:[{typeID:product,quantity:1}],time},research_material:{time:105}});
+ const blueprints=[
+  {_key:2456,maxProductionLimit:300,activities:mf(2454,[[34,1000]])},          // Hobgoblin I: cheap, profitable drone
+  {_key:9001,activities:mf(9000,[[34,1000]])},                                   // T2 item: excluded
+  {_key:691,activities:{...mf(587,[[34,30000]],6000),research_material:{time:2100}}}, // Rifter: frigate, rank 20
+  {_key:24699,activities:mf(24698,[[34,10]])},                                   // Drake: battlecruiser, excluded
+  {_key:5000,activities:mf(5001,[[34,99999]])},                                  // loses money: excluded
+  {_key:7000,activities:mf(7001,[[34,1]])}                                       // BPO too expensive
+ ];
+ const types=new Map([[2456,{published:true,basePrice:250000}],[2454,{published:true,groupID:100,name:{en:'Hobgoblin I'}}],[9001,{published:true,basePrice:1}],[9000,{published:true,groupID:100,metaGroupID:2}],
+  [691,{published:true,basePrice:2800000}],[587,{published:true,groupID:25,name:{en:'Rifter'}}],[24699,{published:true,basePrice:1}],[24698,{published:true,groupID:419,name:{en:'Drake'}}],
+  [5000,{published:true,basePrice:1}],[5001,{published:true,groupID:100}],[7000,{published:true,basePrice:5e7}],[7001,{published:true,groupID:100}]]);
+ const groups=new Map([[100,{categoryID:18,name:{en:'Combat Drone'}}],[25,{categoryID:6,name:{en:'Frigate'}}],[419,{categoryID:6,name:{en:'Combat Battlecruiser'}}]]);
+ const categories=new Map([[18,{name:{en:'Drone'}}],[6,{name:{en:'Ship'}}]]);
+ const prices=new Map([[34,{adjusted:4}],[2454,{average:10000}],[9000,{average:1e6}],[587,{average:400000}],[24698,{average:5e7}],[5001,{average:10}],[7001,{average:1e6}]]);
+ const list=starters(blueprints,types,groups,categories,prices);
+ assert.deepEqual(list.map(s=>s.n),['Rifter','Hobgoblin I'],'ranked by screened profit per second of build time');
+ assert.deepEqual(list[1],{type:2454,bp:2456,n:'Hobgoblin I',cat:'Drone',q:1,t:300,rank:1,limit:300,price:250000,m:[[34,1000]]});
+ assert.equal(list[0].rank,20);assert.equal(list[0].cat,'Frigate');
 });

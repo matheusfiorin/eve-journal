@@ -19,7 +19,7 @@
  <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -38,6 +38,16 @@
   <p id="market-fees" class="hint"></p>
  </div>
  <div id="market-content"></div>
+</section>
+<section id="industry" class="tab" hidden>
+ <div class="card market-controls">
+  <div class="card-head"><div><h2>Start industry</h2><p id="industry-status" class="hint">Loading blueprint prices…</p></div></div>
+  <div class="row">
+   <label>Build in<select id="industry-system"></select></label>
+   <label>Budget (ISK)<input id="industry-budget" type="number" min="0" step="1000000" placeholder="Your wallet"></label>
+  </div>
+ </div>
+ <div id="industry-content"></div>
 </section>
 <section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
 <section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>

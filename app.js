@@ -1,6 +1,7 @@
 import {BackendClient} from './backend.js';
 import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress, queueState, pilotRoles, pilotTitle, assetHoldings, shares, compactNumber} from './model.js';
 import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
+import {skillLevels, isAlpha, slots, evaluate, rank, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
 import {JournalStore} from './storage.js';
 
 const $ = selector => document.querySelector(selector);
@@ -9,18 +10,19 @@ const DRAFT = 'eve-flight-draft:v1';
 const GROUPS = 'eve-skill-groups:v1';
 const ME = 'eve-me:v1';
 const CATS = 'eve-asset-categories:v1';
-const TABS = ['overview','empire','market','training','skills','wallet','clones','notes'];
+const TABS = ['overview','empire','market','industry','training','skills','wallet','clones','notes'];
 const HUB_SYSTEMS = [[30000142,'Jita'],[30002187,'Amarr'],[30002659,'Dodixie'],[30002510,'Rens'],[30002053,'Hek']];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const OLD_TABS = {journal:'notes', goals:'notes', operations:'wallet'};
 const ROMAN = ['0','I','II','III','IV','V'];
+const SKILL_LABELS = {industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production', advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research', accounting:'Accounting', brokerRelations:'Broker Relations'};
 const INFOMORPH_SYNCHRONIZING = 33399;
 const home = new URL('./', location.href).href;
 let config = {pilots:[]};
 let data = emptyData(), pilots = [], store, backend = null, universeStatus = null;
 let generation = 0, editingEntry = null, editingGoal = null, draftTimer;
 const names = new Map(), corporations = new Map(), typeGroup = new Map();
-let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, starsFrame = 0, warp = false;
+let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, industryRun = 0, starsFrame = 0, warp = false;
 const assetCats = new Map(), routes = new Map(), counters = new Map(), cargo = new Map();
 try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => assetCats.set(id, cat)); } catch { /* Categories are refetched. */ }
 
@@ -444,25 +446,35 @@ async function routeJumps(pairs) {
     }
   }));
 }
+async function loadMarket() {
+  if (!marketData) { marketData = await backend.market(); marketBook = book(marketData.regions); }
+  await loadPrices();
+  if (!costIndices) {
+    try { costIndices = new Map((await esi('industry/systems/')).map(row => [row.solar_system_id, Object.fromEntries(row.cost_indices.map(c => [c.activity, c.cost_index]))])); }
+    catch { costIndices = new Map(); }
+  }
+}
+// The pilot's own system first, then the trade hubs.
+function systemOptions(select) {
+  const p = mine(), here = p?.ops?.location?.value?.solar_system_id, prior = Number(select.value);
+  const options = [...(here ? [[here, `${name(here)} · ${p.name}’s location`]] : []), ...HUB_SYSTEMS.filter(([id]) => id !== here)];
+  select.innerHTML = options.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('');
+  select.value = options.some(([id]) => id === prior) ? prior : options[0][0];
+  return options;
+}
 async function renderMarket() {
   const status = $('#market-status'), content = $('#market-content');
   if (!backend) { status.textContent = 'Market analysis needs the backend.'; return; }
   const run = ++marketRun;
   try {
-    if (!marketData) {
-      content.innerHTML = '<div class="card shimmer">Scanning stations…</div>';
-      marketData = await backend.market(); marketBook = book(marketData.regions);
-    }
-    await loadPrices();
+    if (!marketData) content.innerHTML = '<div class="card shimmer">Scanning stations…</div>';
+    await loadMarket();
   } catch (error) { status.textContent = `Market data unavailable: ${error.message}`; content.innerHTML = ''; return; }
   if (run !== marketRun) return;
   if (!marketData.regions.length) { status.textContent = 'The hourly market pipeline has not stored any data yet. Check back after its next run.'; content.innerHTML = ''; return; }
   const p = mine(), meta = marketData.meta?.data || {types:{}};
-  const here = p?.ops?.location?.value?.solar_system_id;
-  const origin = $('#market-origin'), prior = Number(origin.value);
-  const options = [...(here ? [[here, `${name(here)} · ${p.name}’s location`]] : []), ...HUB_SYSTEMS.filter(([id]) => id !== here)];
-  origin.innerHTML = options.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('');
-  origin.value = options.some(([id]) => id === prior) ? prior : options[0][0];
+  const origin = $('#market-origin');
+  systemOptions(origin);
   const ship = p?.ops?.ship?.value?.ship_type_id, cargoInput = $('#market-cargo');
   if (ship && !cargoInput.dataset.touched) {
     if (!cargo.has(ship)) { try { cargo.set(ship, (await esi(`universe/types/${ship}/`)).capacity || 0); } catch { cargo.set(ship, 0); } }
@@ -477,8 +489,7 @@ async function renderMarket() {
   const item = id => meta.types[id]?.n || name(id);
   const haulList = hauls(marketBook, {salesTax:f.salesTax, cargo:hold, volumeOf:id => meta.types[id]?.v, limit:40});
   const trades = stationTrades(marketBook, {...f, limit:60});
-  if (!costIndices) { try { costIndices = new Map((await esi('industry/systems/')).map(row => [row.solar_system_id, row.cost_indices.find(c => c.activity === 'manufacturing')?.cost_index || 0])); } catch { costIndices = new Map(); } }
-  const index = costIndices.get(from) || 0;
+  const index = costIndices.get(from)?.manufacturing || 0;
   const builds = manufacturing(marketBook, meta.recipes, {...f, adjusted, costIndex:index}).slice(0, 12);
   content.innerHTML = '<div class="card shimmer">Plotting routes from your position…</div>';
   await routeJumps([...new Set([...haulList.flatMap(h => [`${from}-${sys(h.from.loc)}`, `${sys(h.from.loc)}-${sys(h.to.loc)}`]), ...trades.map(t => `${from}-${sys(t.loc)}`), ...builds.map(b => `${from}-${sys(b.loc)}`)])]);
@@ -502,10 +513,64 @@ async function renderMarket() {
    ${meta.recipesError ? empty(esc(meta.recipesError)) : buildRows.length ? `<ol class="opps">${buildRows.map((b, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(b.type))}</b><small>sells at ${esc(station(b.loc))} ${b.j === undefined || b.j === null ? '' : jumpTag(b.j)} · ${Math.round(b.daily).toLocaleString()}/day</small></div><div class="opp-route"><span>Materials ${format(b.materials, 'isk')} · job ${format(b.job, 'isk')}</span><span>Revenue ${format(b.revenue, 'isk')}</span></div><div class="opp-profit"><b class="${b.profit > 0 ? 'pos' : 'neg'}">${b.profit > 0 ? '+' : ''}${format(b.profit, 'isk')}</b><small>${(b.margin * 100).toFixed(1)}% margin</small></div></li>`).join('')}</ol>` : empty('No manufacturing data yet.')}
   </article>`;
 }
+async function renderIndustry() {
+  const status = $('#industry-status'), content = $('#industry-content');
+  if (!backend) { status.textContent = 'Industry planning needs the backend.'; return; }
+  const run = ++industryRun;
+  try {
+    if (!marketData) content.innerHTML = '<div class="card shimmer">Pricing starter blueprints…</div>';
+    await loadMarket();
+  } catch (error) { status.textContent = `Market data unavailable: ${error.message}`; content.innerHTML = ''; return; }
+  if (run !== industryRun) return;
+  const meta = marketData.meta?.data || {}, catalog = meta.starters || [];
+  if (!marketData.regions.length || !catalog.length) { status.textContent = 'The pipeline has not priced starter blueprints yet. Check back after its next hourly run.'; content.innerHTML = ''; return; }
+  const p = mine(), o = wingmate(), x = summary(p), levels = skillLevels(x.skills, meta.skills || {}), alpha = isAlpha(x.skills), f = fees(x.skills, meta.skills), s = slots(levels);
+  const options = systemOptions($('#industry-system')), system = Number($('#industry-system').value), idx = costIndices.get(system) || {};
+  const budgetInput = $('#industry-budget');
+  if (!budgetInput.dataset.touched && x.wallet !== undefined) budgetInput.value = Math.floor(x.wallet);
+  const budget = budgetInput.value === '' ? undefined : Number(budgetInput.value);
+  const picks = rank(catalog.map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:idx.manufacturing || 0, researchIndex:idx.researching_material_efficiency || 0, levels, alpha})), budget).slice(0, 10);
+  const cheapest = options.map(([id, label]) => ({id, label, index:costIndices.get(id)?.manufacturing})).filter(c => Number.isFinite(c.index)).sort((a, b) => a.index - b.index)[0];
+  const jobTax = (idx.manufacturing || 0) + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
+  const plan = stage(x.wallet), next = nextSkills(levels, alpha), known = Boolean(x.skills?.skills);
+  const affordable = picks.filter(pick => pick.affordable);
+  const owner = pick => o ? (affordable.indexOf(pick) % 2 ? o : p) : p;
+  const pct = v => `${(v * 100).toFixed(v < 0.1 ? 2 : 1)}%`;
+  const days = sec => sec >= 86400 ? `${(sec / 86400).toFixed(1)} d` : `${Math.max(1, Math.round(sec / 3600))} h`;
+  status.textContent = `${catalog.length} cheap T1 blueprints priced from live orders · scanned ${Math.max(1, Math.round((Date.now() - Math.min(...marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
+  content.innerHTML = `
+  <div class="grid">
+    <article class="card reveal" style="--i:1"><h3>Your industry setup</h3>
+      <dl class="facts">${fact('Clone', known ? (alpha ? 'Alpha<small>4 build · 1 research slot max</small>' : 'Omega') : '—')}${fact('Build slots', known ? s.build : '—')}${fact('Research slots', known ? s.science : '—')}${fact('Job tax here', `${pct(jobTax)}<small>index ${pct(idx.manufacturing || 0)} + facility + SCC${alpha ? ' + alpha' : ''}</small>`)}${fact('Selling fees', `${pct(f.salesTax + f.brokerFee)}<small>sales ${pct(f.salesTax)} · broker ${pct(f.brokerFee)}</small>`)}${fact('Budget', format(budget, 'isk'))}</dl>
+      ${known ? '' : `<p class="hint">Connect ${esc(p?.name || 'your pilot')} to plan with real skills, slots and wallet.</p>`}
+      ${cheapest && cheapest.id !== system && cheapest.index < (idx.manufacturing || 0) * 0.8 ? `<p class="alert warn">Building in ${esc(cheapest.label.split(' · ')[0])} is cheaper: ${pct(cheapest.index)} index vs ${pct(idx.manufacturing || 0)} here.</p>` : ''}
+    </article>
+    <article class="card reveal" style="--i:2"><h3>${esc(plan.name)}</h3>
+      <div class="progress-row"><span class="stack"><i class="fill me" style="width:${Math.min(100, (x.wallet || 0) / plan.goal * 100).toFixed(1)}%"></i></span><small>${format(x.wallet, 'isk')} of ${format(plan.goal, 'isk')}</small></div>
+      <ol class="steps">${plan.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>
+      <h3>Train next</h3>${next.length ? `<ul class="plain">${next.map(k => `<li><b>${esc(SKILL_LABELS[k.key])} ${ROMAN[k.level]}</b>${k.omega ? ' <span class="tag">Omega</span>' : ''}<small>${k.from ? `from ${ROMAN[k.from]} · ` : ''}${esc(k.why)}</small></li>`).join('')}</ul>` : `<p class="hint">${alpha ? 'You have every industry skill an Alpha can train. Omega unlocks more slots and lower taxes.' : 'Core industry skills are done. Look at invention next.'}</p>`}
+    </article>
+  </div>
+  <article class="card reveal" style="--i:3"><div class="card-head"><div><h3>Best blueprints to start with</h3><p class="hint">NPC-sold originals, researched to the suggested ME, built in batches and sold at the lowest ask. Ranked by profit per day against payback time${o ? `, and split between ${esc(p.name)} and ${esc(o.name)} so you never undercut each other` : ''}.</p></div></div>
+    ${picks.length ? `<ol class="opps bpos">${picks.map((pick, n) => `<li class="opp reveal ${pick.affordable ? '' : 'over'}" style="--i:${n}">
+      <div class="opp-main"><b>${esc(pick.n)}</b><small><span class="tag">${esc(pick.cat)}</span> BPO ${format(pick.price, 'isk')} · rank ${pick.rank}</small>${pick.affordable ? `<small class="who ${owner(pick) === p ? 'me' : 'them'}">Suggested for ${esc(owner(pick).name)}</small>` : '<small class="neg">Over budget</small>'}</div>
+      <div class="opp-route"><span>Research ME 0 → ${pick.me} · ${days(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}</span><span>Sell ${Math.round(pick.unitsPerDay).toLocaleString()}/day at ${format(pick.revenue / (1 - f.salesTax - f.brokerFee), 'isk')} · margin ${pct(pick.margin)} <em>ME 0: ${pick.profitAtZero > 0 ? '+' : ''}${format(pick.profitAtZero, 'isk')}/unit</em></span><span>Start with ${format(pick.invest, 'isk')} · ${pick.sellers} ${pick.sellers === 1 ? 'station' : 'stations'} selling · ${Math.round(pick.daily).toLocaleString()} traded/day</span></div>
+      <div class="opp-profit"><b class="pos">+${format(pick.profitDay, 'isk')}/day</b><small>pays back in ${pick.payback < 1 ? 'under a day' : `${pick.payback.toFixed(1)} days`}</small></div></li>`).join('')}</ol>` : '<p class="hint">No starter blueprint turns a profit at today’s prices with these fees. Try another system or check after the next hourly scan.</p>'}
+  </article>
+  <article class="card reveal" style="--i:4"><h3>Avoid these traps</h3><ul class="plain traps">
+    <li><b>Price your own ore at market value.</b><small>Minerals you mine could be sold; if a build earns less than selling them, sell them.</small></li>
+    <li><b>Margins under ~${Math.round((f.salesTax + f.brokerFee) * 100 + 2)}% are losses for you.</b><small>Sales tax and broker fee alone take ${pct(f.salesTax + f.brokerFee)}; relisting adds more. Accounting and Broker Relations cut both.</small></li>
+    <li><b>Batch your runs.</b><small>ME rounds up per job, so a 1-run job wastes materials that a 100-run job saves.</small></li>
+    <li><b>Never leave a slot idle.</b><small>Research the next blueprint while the current one builds${s.science > 1 ? `; you have ${s.science} research slots` : ''}.</small></li>
+    <li><b>Buy BPOs from the NPC market.</b><small>Unresearched T1 originals are always on the market at the NPC price; don’t overpay on contracts.</small></li>
+    ${alpha ? `<li><b>Alpha tax.</b><small>Alphas pay an extra industry tax (CCP lists 2%; this page assumes it). Omega on the main builder removes it.</small></li>` : ''}
+  </ul><p class="hint">Assumes SCC surcharge ${pct(SCC.manufacturing)} on builds and ${pct(SCC.research)} on research, and ${pct(NPC_FACILITY_TAX)} NPC facility tax. Confirm against the in-game job window.</p></article>`;
+}
 function renderAll() {
   renderStatus(); renderMe(); renderOverview(); renderEmpire(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions();
   if (!$('#hero').hidden) renderHero();
   if (!$('#market').hidden) renderMarket();
+  if (!$('#industry').hidden) renderIndustry();
   countUps();
 }
 
@@ -545,6 +610,7 @@ function selectTab(id) {
   document.querySelectorAll(`#${id} [data-count]`).forEach(el => counters.delete(el.dataset.key));
   countUps();
   if (id === 'market') renderMarket();
+  if (id === 'industry') renderIndustry();
 }
 // The wing summary also carries the pilot's own figures, so drop it with their session.
 function forgetWing(id) {
@@ -601,6 +667,8 @@ function expireSessions() {
 $('#refresh').onclick = () => { marketData = null; loadPilots(true); };
 $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
 $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
+$('#industry-system').onchange = () => renderIndustry();
+$('#industry-budget').onchange = event => { event.target.dataset.touched = '1'; renderIndustry(); };
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#hero').hidden && me) choosePilot(me); });
 $('#goal-form').onsubmit = event => {
   event.preventDefault();

@@ -65,15 +65,42 @@ async function allPages(path) {
   for (let page = 2; page <= first.pages; page++) rows.push((await esi(`${path}&page=${page}`)).body);
   return rows.flat();
 }
-async function sdeBlueprints() {
+const sdeName = value => typeof value === 'string' ? value : value?.en;
+// Cheap NPC-seeded T1 blueprints a new industrialist can start with. The SDE base price is the NPC seed price.
+const STARTER_CATEGORIES = new Set(['Ship','Module','Charge','Drone','Deployable']);
+const STARTER_SHIPS = new Set(['Frigate','Destroyer']);
+export function starters(blueprints, types, groups, categories, prices, {maxPrice = 30e6, limit = 120} = {}) {
+  const out = [], id = x => x?.typeID ?? x?.typeId;
+  for (const bp of blueprints) {
+    const job = bp.activities?.manufacturing, product = job?.products?.[0];
+    const bpId = bp.blueprintTypeID ?? bp._key, blueprint = types.get(bpId), item = types.get(id(product));
+    if (!job?.materials?.length || !blueprint?.published || !item?.published) continue;
+    if (!(blueprint.basePrice > 0 && blueprint.basePrice <= maxPrice) || (item.metaGroupID && item.metaGroupID !== 1)) continue;
+    const group = groups.get(item.groupID), category = sdeName(categories.get(group?.categoryID)?.name);
+    if (!STARTER_CATEGORIES.has(category) || (category === 'Ship' && !STARTER_SHIPS.has(sdeName(group.name)))) continue;
+    // Rough screen with CCP's average/adjusted prices; the browser re-prices everything from live orders.
+    const value = (prices.get(id(product))?.average || 0) * product.quantity;
+    const cost = job.materials.reduce((t, m) => t + (prices.get(id(m))?.adjusted ?? NaN) * m.quantity * 0.9, 0);
+    if (!Number.isFinite(cost) || !(value > cost)) continue;
+    out.push({type:id(product), bp:bpId, n:sdeName(item.name), cat:category === 'Ship' ? sdeName(group.name) : category, q:product.quantity, t:job.time,
+      rank:Math.max(1, Math.round((bp.activities.research_material?.time || 105) / 105)), limit:bp.maxProductionLimit, price:blueprint.basePrice,
+      m:job.materials.map(m => [id(m), m.quantity]), score:(value - cost) / job.time});
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, limit).map(({score, ...s}) => s);
+}
+async function sde(files) {
   const response = await fetch(SDE, {headers:HEADERS, signal:AbortSignal.timeout(300000)});
   if (!response.ok) throw new Error(`SDE download: HTTP ${response.status}`);
   const zip = join(await mkdtemp(join(tmpdir(), 'sde-')), 'sde.zip');
   await writeFile(zip, Buffer.from(await response.arrayBuffer()));
-  const entry = execFileSync('unzip', ['-Z1', zip]).toString().split('\n').find(n => /(^|\/)blueprints\.jsonl$/.test(n.trim()));
-  if (!entry) throw new Error('blueprints.jsonl is missing from the SDE');
-  return execFileSync('unzip', ['-p', zip, entry.trim()], {maxBuffer:1024 * 1024 * 1024}).toString().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const entries = execFileSync('unzip', ['-Z1', zip]).toString().split('\n').map(n => n.trim());
+  return Object.fromEntries(files.map(file => {
+    const entry = entries.find(n => n === `${file}.jsonl` || n.endsWith(`/${file}.jsonl`));
+    if (!entry) throw new Error(`${file}.jsonl is missing from the SDE`);
+    return [file, execFileSync('unzip', ['-p', zip, entry], {maxBuffer:1024 * 1024 * 1024}).toString().split('\n').filter(Boolean).map(line => JSON.parse(line))];
+  }));
 }
+const byKey = rows => new Map(rows.map(row => [row._key, row]));
 
 async function main() {
   const secret = process.env.EVE_CLIENT_SECRET?.trim();
@@ -90,14 +117,20 @@ async function main() {
   console.log(`Watchlist: ${wanted.size} of ${items.length} names resolved.`);
 
   const meta = {generatedAt:new Date().toISOString(), types:{}, recipes:{}, regions:{}};
+  meta.starters = [];
   try {
-    meta.recipes = recipes(await sdeBlueprints(), wanted);
-    console.log(`Recipes: ${Object.keys(meta.recipes).length} manufacturable watchlist items.`);
+    const data = await sde(['blueprints', 'types', 'groups', 'categories']);
+    meta.recipes = recipes(data.blueprints, wanted);
+    const prices = new Map((await esi('/markets/prices/')).body.map(p => [p.type_id, {average:p.average_price || p.adjusted_price || 0, adjusted:p.adjusted_price}]));
+    meta.starters = starters(data.blueprints, byKey(data.types), byKey(data.groups), byKey(data.categories), prices);
+    console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
-  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id))])];
+  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
 
-  const skillIds = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(['Accounting','Broker Relations'])})).body.inventory_types || [];
-  meta.skills = {accounting:skillIds.find(s => s.name === 'Accounting')?.id, brokerRelations:skillIds.find(s => s.name === 'Broker Relations')?.id};
+  const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
+    advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research'};
+  const skillIds = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(Object.values(SKILLS))})).body.inventory_types || [];
+  meta.skills = Object.fromEntries(Object.entries(SKILLS).map(([key, label]) => [key, skillIds.find(s => s.name === label)?.id]));
 
   await pool(scan, 16, async id => {
     try { const t = (await esi(`/universe/types/${id}/`)).body; meta.types[id] = {n:t.name, v:t.packaged_volume || t.volume || 0}; }
@@ -140,6 +173,6 @@ async function main() {
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${pilotSystems.length} pilot locations. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${scan.length} items scanned, ${pilotSystems.length} pilot locations. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();
