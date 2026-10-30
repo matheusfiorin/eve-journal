@@ -24,3 +24,10 @@ test('LIVE: deployed backend is ready, public API is redacted and private API re
  const privateResponse=await request.get(`${url}/api/session`);expect(privateResponse.status()).toBe(401);
  const refused=await request.get(`${url}/api/public/pilots`,{headers:{Origin:'https://unrelated.example'}});expect(refused.status()).toBe(403);
 });
+test('LIVE: backend consent accepts its CSRF cookie and produces the official EVE OAuth redirect',async({request})=>{
+ const url=process.env.EVE_BACKEND_URL;test.skip(!url,'No deployed backend URL supplied.');
+ const page=await request.get(`${url}/auth/start?pilot=2124810474`);expect(page.ok()).toBeTruthy();expect(page.headers()['content-security-policy']).toContain("form-action 'self' https://login.eveonline.com");
+ const html=await page.text();const csrf=html.match(/name="csrf" value="([^"]+)"/)[1];
+ const start=await request.post(`${url}/auth/start`,{headers:{Origin:url},form:{pilot:'2124810474',csrf,share:'yes'},maxRedirects:0});expect(start.status()).toBe(303);
+ const login=new URL(start.headers().location);expect(login.origin).toBe('https://login.eveonline.com');expect(login.searchParams.get('client_id')).toBe('a94f7ccbcc8b4b0d8f7fd90fec110d2b');expect(login.searchParams.get('redirect_uri')).toBe(`${url}/auth/callback`);expect(login.searchParams.get('code_challenge_method')).toBe('S256');expect(login.searchParams.get('state')).toBeTruthy();
+});

@@ -53,7 +53,7 @@ test('health verifies database and required backend secrets',async()=>{
  const app=setup();assert.equal((await app.request('/health')).status,200);delete app.env.EVE_CLIENT_SECRET;assert.equal((await app.request('/health')).status,503);
 });
 test('OAuth start presents explicit public-sharing consent and requires CSRF',async()=>{
- const app=setup();const page=await app.request(`/auth/start?pilot=${id}`);assert.match(await page.text(),/visible on the public/);
+ const app=setup();const page=await app.request(`/auth/start?pilot=${id}`);assert.match(await page.text(),/visible on the public/);assert.match(page.headers.get('Content-Security-Policy'),/form-action 'self' https:\/\/login.eveonline.com/);
  const denied=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example'},body:new URLSearchParams({pilot:String(id),share:'yes'})});assert.equal(denied.status,403);
  const valid=await consent(app);assert.equal(valid.login.searchParams.get('code_challenge_method'),'S256');assert.equal(valid.login.searchParams.get('redirect_uri'),'https://api.example/auth/callback');
 });
