@@ -2,28 +2,41 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  verify:
+    name: Check application and data protection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm run check && npm test
-      - uses: actions/configure-pages@v5
-      - run: mkdir _site && cp index.html styles.css app.js model.js config.json _site/
+      - run: npm run check
+      - run: npm test
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Pages (enable Settings → Pages → GitHub Actions first)
+        uses: actions/configure-pages@v5
+      - name: Prepare public application files
+        run: mkdir _site && cp index.html styles.css app.js model.js auth.js storage.js config.json _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

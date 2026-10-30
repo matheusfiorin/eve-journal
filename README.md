@@ -1,65 +1,103 @@
 # EVE Flight Journal
 
-A buildless, responsive GitHub Pages application for two EVE Online pilots. Public ESI character profiles, read-only authenticated skills and training queues, local goals, and a private local journal. No dependencies or backend are required for the static application.
+A GitHub Pages companion for **Fiofka** and **Decxus**. See your public EVE profiles, connect private training data, set milestones, and keep a personal flight record.
 
-## Current status
+Source: https://github.com/matheusfiorin/eve-journal
 
-The application and GitHub Pages workflow are implemented. EVE SSO requires developer registration and live verification with your characters; the OAuth flow has not been tested against a registered EVE application. Source is maintained in https://github.com/matheusfiorin/eve-journal. GitHub Pages deployment and EVE SSO must be verified separately.
+## What works in this version
+
+- Public character lookup, portraits, corporations, birthday, character age, and security status from EVE ESI.
+- Read-only skills, total/unallocated SP, and training queues after each pilot authorizes EVE login. Shows the active skill, training progress, queue end, paused skills, and a searchable trained-skill list.
+- Goals with a pilot, focus, optional target date, completion state, editing, and open/completed filters.
+- Private journal with editing, dates, focus categories, text search, pilot filters, and tab-local draft recovery.
+- Overview with local milestone counts, next goal, and latest journal entry.
+- JSON backup export and merge, recovery downloads for malformed saved data, and protection against overwriting a journal changed in another tab.
+- Responsive layout, keyboard focus indicators, named form fields, live status messages, and local system fonts. No analytics or font CDN.
+
+**Privacy:** journal entries and goals are stored in this browser, not shared automatically. Public hosting does not publish your notes or training. Your friend can read the same public pilot profiles but will not see your local journal. Export a backup before changing browsers or clearing site data. Backups include private notes; share them intentionally.
+
+## Verification status
+
+Syntax checks and automated tests cover backup validation/merge, calendar dates, filtering, training calculations, storage corruption/quota handling, concurrent-tab conflicts, PKCE, signed JWT validation and rejection cases, DOM control references, and Pages artifact completeness.
+
+Browser interaction and visual QA have not been run in this workspace because supported browser tooling is unavailable. Live ESI lookup and EVE login still require network verification. The SSO implementation follows CCP's published PKCE flow and validates tokens locally using CCP's JWKS, but that is not a substitute for a live end-to-end login with your registered application.
+
+The original GitHub Actions run passed its tests and failed at Pages configuration because the repository did not have Pages enabled. Enable it as described below; application checks now run independently from deployment.
 
 ## Run locally
 
-Use Node.js 24 and Python 3:
+Node.js 24 and Python 3 are sufficient; there are no npm dependencies.
 
 ```sh
+git clone https://github.com/matheusfiorin/eve-journal.git
+cd eve-journal
 npm run check
 npm test
 npm start
 ```
 
-Open http://localhost:8000/. Serve over HTTP locally or HTTPS in production; do not open index.html as a file.
+Open http://localhost:8000/. Serve over HTTP locally or HTTPS in production; do not open `index.html` as a file.
 
-## Publish beside rs3-leaderboard
+## GitHub Pages
 
-The repository is `matheusfiorin/eve-journal`. To publish from a fresh local copy with an authenticated GitHub CLI, use:
+1. Open repository **Settings → Pages → Build and deployment**.
+2. Select **GitHub Actions** as the source.
+3. Open **Actions → Deploy GitHub Pages → Run workflow** on `main`.
 
-```sh
-git init -b main
-git add .
-git commit -m "Create EVE Flight Journal"
-git remote add origin https://github.com/matheusfiorin/eve-journal.git
-git push -u origin main
+Subsequent pushes to `main` validate and deploy automatically. Pull requests run validation only. The expected URL is **https://matheusfiorin.github.io/eve-journal/**; the Actions deployment result is the source of truth for publication.
+
+The Pages artifact contains only explicitly listed public app files. No private journal, token, test fixture, or local environment file is packaged.
+
+## Configure the pilots
+
+`config.json` sets public defaults for every visitor:
+
+```json
+{
+  "title": "EVE Flight Journal",
+  "pilots": ["Fiofka", "Decxus"],
+  "eveClientId": ""
+}
 ```
 
-In repository **Settings → Pages → Build and deployment**, select **GitHub Actions**, then run the Deploy GitHub Pages workflow (or push another commit). The expected URL is `https://matheusfiorin.github.io/eve-journal/`; verify the actual deployment URL in Actions. The workflow publishes only the application files, excluding tests and documentation.
-
-Set up to two exact character names in `config.json` to make them the defaults for all visitors. The Configure pilots dialog overrides these settings only in the current browser. `eveClientId` is a public application identifier, never a secret.
+**Configure pilots** overrides these defaults in the current browser. It does not change the repository. A client ID is a public identifier; never put a client secret in this project.
 
 ## Connect EVE Online
 
-1. Register an EVE developer application at https://developers.eveonline.com/ using a public/native client supporting Authorization Code with PKCE. Request only `esi-skills.read_skills.v1` and `esi-skills.read_skillqueue.v1`.
-2. Register the exact callback URL shown in Configure pilots, including the trailing slash. For the proposed repository it is `https://matheusfiorin.github.io/eve-journal/`. Use a separately registered localhost callback for development if supported by your application settings.
-3. Put the public client ID in `config.json`, or enter it in Configure pilots. Do not add a client secret anywhere in the frontend or repository.
-4. Configure both character names. Select Connect with EVE Online for a pilot and authorize that same character. Repeat for the second pilot in this browser if you want a side-by-side private training view. Each pilot must authorize their own character; do not share EVE passwords.
+1. Register an application at https://developers.eveonline.com/ that supports a public/native Authorization Code flow with PKCE. Request only `esi-skills.read_skills.v1` and `esi-skills.read_skillqueue.v1`.
+2. Register this exact callback, including the trailing slash: `https://matheusfiorin.github.io/eve-journal/`. For development, use a separately registered localhost callback if your application configuration supports it. The Configure pilots dialog displays the callback for the current environment.
+3. Put the public client ID in `config.json` or **Configure pilots → Enable private skills & training**.
+4. In Overview, connect a pilot and choose that same character in EVE login. Repeat for the other pilot if you both want to authorize this browser session. Each pilot authorizes their own account; do not share EVE passwords.
 
-The implementation uses PKCE S256, one-time state with a ten-minute lifetime, and EVE's authenticated verification endpoint to check the character. Access tokens stay in sessionStorage on this origin; refresh tokens are discarded. Reconnect after expiry. Disconnect removes the browser token and cached training view; revoke the application's access in EVE account management to revoke the server-side grant. Never paste access tokens into a URL or config file.
+The app uses PKCE S256 with a one-use state and five-minute callback lifetime. It verifies RS256/ES256 signatures using keys from the fixed CCP JWKS endpoint, plus issuer, audience, expiry, authorized party, character, and scopes. Saved session tokens are revalidated on load. Refresh tokens are discarded. Access tokens live only in `sessionStorage` for this tab and expire after about 20 minutes; reconnect when asked. Disconnect removes the browser token and training view. To revoke the application's grant server-side, use EVE account management.
 
-**Live integration limit:** EVE application type and token-endpoint browser CORS behavior must be verified with your registered application. If that configuration requires a confidential client or does not permit browser token exchange, add a small OAuth backend before enabling training access. Never work around it by exposing a client secret. Public character lookup and the local journal do not need EVE login.
+**Integration constraint:** browser CORS behavior and your registered EVE application's configuration must be verified live. If EVE requires a confidential client or does not permit the browser token exchange for your configuration, use a small OAuth backend. Never expose a client secret to make it work. This version does not provide a backend, shared private training, or unattended updates.
 
-## Privacy and sharing
+Reference: [CCP's published PKCE flow](https://github.com/esi/esi-docs/blob/master/docs/sso/native_sso_flow.md) and [JWT validation requirements](https://github.com/esi/esi-docs/blob/master/docs/sso/validating_eve_jwt.md). Those archived pages link to the current documentation at https://developers.eveonline.com/docs/.
 
-- Public visitors see default pilot identities, portraits, and corporation names from public ESI endpoints. Their own browser can configure different pilot names.
-- Skills and training queues appear only in the browser session that authorized each pilot. They are fetched on load and manual refresh; this application performs no unattended synchronization or public snapshot publishing.
-- Goals and journal entries are browser-local, under localStorage key `eve-flight-journal:v1`. They are not synchronized with your friend. All scripts running on this origin can access local data, so only deploy trusted code.
-- Export a JSON backup regularly. Restore merges records by stable ID; matching IDs are replaced after confirmation. Backups contain your private notes. Store and share them intentionally. Clearing browser data or switching devices will not preserve the journal automatically.
-- There is no wallet, assets, industry, killboard, or screenshot-upload integration in this version.
-- Portraits load from CCP's image service. Optional fonts load from Google Fonts with local fallback fonts. EVE API availability and cache behavior determine data freshness.
+## Storage and recovery
 
-## Manual acceptance checks
+- Saved records: localStorage key `eve-flight-journal:v1`. Older v1 backups remain compatible; focus categories and target dates are optional.
+- Unsaved draft: sessionStorage key `eve-flight-draft:v1`, restored in the same tab. This is a convenience, not a backup.
+- Browser settings: localStorage key `eve-flight-settings:v1`.
+- EVE session: sessionStorage key `eve-sessions`; pending authorization uses `eve-oauth`.
+- Exports include saved entries and goals, not drafts, tokens, or settings. Save a draft before exporting if you want it in the backup.
+- Import validates the whole file before writing. Matching IDs are replaced only after confirmation. Other records remain intact. There is a 5 MB import limit and a 10,000-record limit.
+- If saved data is unreadable, writes are blocked. Use **Journal → Download raw recovery file** to preserve the bytes before repairing browser site data. Exporting an empty replacement is also blocked.
+- If another tab changes saved records, reload before saving. Your draft remains in the current tab. The comparison prevents ordinary stale-tab overwrites; localStorage is not a transactional multi-user database.
 
-1. Add both exact names; verify character portraits and corporations, and check a nonexistent name produces a clear error.
-2. Add and complete a goal. Write an entry, reload, export, and import in another browser; confirm the records persist and merge without duplicates.
-3. Verify HTML-like text in entries displays literally.
-4. Register the EVE app; connect each pilot, compare total skill points and queue entries with the game, then disconnect. Test cancellation, a mismatched character, expired login state, and token expiry.
-5. Open the Pages site on mobile and in a private browser window. Confirm private notes and training data do not appear there.
+All scripts hosted on the same origin can access localStorage. Deploy trusted code only. EVE portraits and API requests contact CCP services; notes are never sent with those requests.
+
+## Manual acceptance checks before calling it production-ready
+
+1. Confirm Fiofka and Decxus resolve to the correct characters and corporations. Refresh with the network unavailable and confirm existing profiles remain visible with an error.
+2. Add/edit/complete/filter goals. Write and edit an entry, search by text/pilot/focus, reload an unsaved draft, and test date selection around your local midnight.
+3. Export and restore in a separate browser. Check duplicate IDs merge, impossible dates fail, and literal HTML in notes displays safely.
+4. Open two tabs, save in one, and confirm the other cannot overwrite the change. Test unavailable/full storage and raw recovery for invalid saved JSON.
+5. Register EVE login, connect the correct and incorrect characters, cancel authorization, and test session expiry/disconnect. Compare skill points and queues with the game.
+6. Inspect desktop and narrow-screen layouts, keyboard navigation, form validation, and search after edits.
+7. Confirm the Pages deployment succeeds and that a private browser window has neither journal entries nor authenticated training data.
+
+Wallet, assets, industry APIs, killboards, screenshot uploads, and shared journal synchronization are not implemented.
 
 EVE Online and related imagery are property of CCP Games. This is an independent fan project, not affiliated with or endorsed by CCP Games.
