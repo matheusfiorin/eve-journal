@@ -1,6 +1,3 @@
-// Only names are reported; secret values remain in runner memory.
-const available=Object.keys(JSON.parse(process.env.CONFIGURED_SECRETS||'{}')).filter(name=>name!=='GITHUB_TOKEN');
-console.log(`Available repository secret names: ${available.length?available.sort().join(', '):'(none)'}`);
 const required=['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','EVE_CLIENT_SECRET'];
 let missing=false;
 for(const key of required) {
