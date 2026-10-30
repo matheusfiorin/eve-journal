@@ -10,13 +10,14 @@ const name='eve-journal-api',dbName='eve-journal';
 async function cf(path,method='GET',body){
  const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}${path}`,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
  const result=await response.json();
- if(!response.ok||!result.success)throw new Error(`Cloudflare ${method} ${path.split('?')[0]} failed: HTTP ${response.status}; provider codes ${(result.errors||[]).map(e=>e.code).join(',')}. Check the token's account and permissions.`);
+ if(!response.ok||!result.success){const error=new Error(`Cloudflare ${method} ${path.split('?')[0]} failed: HTTP ${response.status}; provider codes ${(result.errors||[]).map(e=>e.code).join(',')}. Check the token's account and permissions.`);error.status=response.status;error.codes=(result.errors||[]).map(e=>e.code);throw error;}
  return result.result;
 }
 const databases=await cf('/d1/database?per_page=100');
 let database=databases.find(item=>item.name===dbName);
 if(!database){database=await cf('/d1/database','POST',{name:dbName});console.log('Created the EVE D1 database.');}
-let subdomain=await cf('/workers/subdomain');
+let subdomain;
+try{subdomain=await cf('/workers/subdomain');}catch(error){if(error.status!==404||!error.codes.includes(10007))throw error;console.log('This account has no workers.dev subdomain yet; registering one.');}
 if(!subdomain?.subdomain)subdomain=await cf('/workers/subdomain','PUT',{subdomain:`eve-pilots-${randomBytes(4).toString('hex')}`});
 const url=`https://${name}.${subdomain.subdomain}.workers.dev`;
 await mkdir('.cloudflare',{recursive:true});
