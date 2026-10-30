@@ -35,7 +35,7 @@ function privateRecord(id,state){
  };
  if(state.trainingOnly)operations=Object.fromEntries(Object.keys(operations).map(k=>[k,{permission:false}]));
  if(state.oldSnapshot)for(const k of ['journal','transactions','attributes','implants','clones'])delete operations[k];
- return {characterId:id,name:names[IDS.indexOf(id)],expires:Date.now()+3600000,fetchedAt:iso(0),queue,operations,
+ return {characterId:id,name:names[IDS.indexOf(id)],expires:Date.now()+600000,fetchedAt:iso(0),queue,operations,
   skills:{total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:3,skillpoints_in_skill:90510},{skill_id:3327,trained_skill_level:2,active_skill_level:2,skillpoints_in_skill:1415}]}};
 }
 // What the wingmate endpoint returns: Decxus is an industrialist with more ISK.
@@ -89,7 +89,7 @@ export async function mockApp(page,options={}) {
   if(!options.fresh&&!sessionStorage.getItem('e2e-started')){localStorage.setItem('eve-me:v1',options.me||'Fiofka');sessionStorage.setItem('e2e-started','1');}
   if(options.corrupt)localStorage.setItem(KEY,'{broken');
   else if(options.data)localStorage.setItem(KEY,JSON.stringify(options.data));
-  if(options.connected){const ids=options.connected==='first'?IDS.slice(0,1):IDS;sessionStorage.setItem(`eve-backend-sessions:${API}`,JSON.stringify(ids.map(id=>[id,{token:`${opaque.slice(0,42)}${IDS.indexOf(id)}`,expires:Date.now()+1200000}])));}
+  if(options.connected){const ids=options.connected==='first'?IDS.slice(0,1):IDS;localStorage.setItem(`eve-backend-sessions:${API}`,JSON.stringify(ids.map(id=>[id,{token:`${opaque.slice(0,42)}${IDS.indexOf(id)}`,expires:Date.now()+1200000}])));}
  },{options,KEY,IDS,API,opaque});
  return {state,errors,calls,privateEsi};
 }

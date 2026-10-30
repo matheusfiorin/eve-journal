@@ -145,3 +145,11 @@ test('market pipeline must authenticate, stores snapshots per region and the pub
  assert.equal((await app.request('/api/market/regions')).status,401);
  const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);
 });
+test('active sessions slide forward at most once a day and expire after 30 idle days',async()=>{
+ const app=setup();const {bearer}=await connect(app);const read=()=>app.env.DB.raw.prepare('SELECT expires_at FROM sessions').get().expires_at;
+ const first=read();assert.ok(first>Date.now()+29*86400000);
+ await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}});assert.equal(read(),first,'no write when renewed within a day');
+ app.env.DB.raw.prepare('UPDATE sessions SET expires_at = ?').run(Date.now()+86400000);
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.ok(read()>Date.now()+29*86400000);assert.equal(payload.expires,read());
+});

@@ -30,3 +30,11 @@ test('disconnect removes local session only after backend confirms deletion',asy
 test('fetch is called without binding it to the client object',async()=>{
  const c=client(function(){assert.equal(this,undefined);return Promise.resolve(Response.json({pilots:[]}));});await c.publicPilots();
 });
+test('sessions last up to 31 days and adopt the longer expiry the backend returns',async()=>{
+ const later=Date.now()+30*86400000;
+ const c=client(async()=>Response.json({characterId:id,expires:later}));auth(c);
+ await c.privatePilot(id);assert.equal(c.expires(id),later);
+ assert.throws(()=>c.acceptRedirect(`#backend_session=${'b'.repeat(43)}&pilot=${id}&expires=${Date.now()+40*86400000}`));
+ const s=storage();const a=new BackendClient('https://api.example',s);a.acceptRedirect(`#backend_session=${'c'.repeat(43)}&pilot=${id}&expires=${later}`);
+ assert.equal(new BackendClient('https://api.example',s).has(id),true,'a new page load finds the stored session');
+});

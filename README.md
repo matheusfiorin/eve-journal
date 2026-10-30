@@ -20,6 +20,8 @@ The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker
 
 Visitors without a session see public profiles plus each pilot's shared skill total and queue. Everything else needs that pilot's own session.
 
+A browser stays connected: its session is kept in `localStorage` and renews itself on every daily visit, expiring only after 30 days without use. Redeploys don't log anyone out, because sessions, encrypted EVE authorizations and the encryption key all live in Cloudflare, and the backend keeps syncing every 30 minutes even with no browser open. **Disconnect** ends it everywhere.
+
 ## How it works
 
 Each pilot connects once through the Worker (`/auth/start`), which runs EVE SSO with PKCE and a confidential client, stores the refresh token encrypted in D1, and syncs ESI every 30 minutes. The browser only ever holds an opaque 24-hour session; it never sees EVE tokens. See [worker/README.md](worker/README.md).

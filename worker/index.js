@@ -3,7 +3,8 @@ import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} fr
 const EVE='https://login.eveonline.com';
 const ESI='https://esi.evetech.net/latest';
 const ALLOWED=new Map([[2124810474,'Fiofka'],[2124815118,'Decxus']]);
-const SESSION_MS=24*60*60*1000;
+// Dashboard sessions slide: each day of use pushes expiry 30 days out, so an active browser never logs out.
+const SESSION_MS=30*24*60*60*1000;
 const encoder=new TextEncoder();
 class ServiceError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -84,6 +85,8 @@ async function session(request,env){
  if(!token)throw new ServiceError('Connect this pilot with EVE to access private data.',401);
  const row=await env.DB.prepare('SELECT token_hash, character_id, expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?').bind(await hash(token),Date.now()).first();
  if(!row)throw new ServiceError('This dashboard session expired. Connect the pilot again.',401);
+ const now=Date.now();
+ if(row.expires_at-now<SESSION_MS-86400000){row.expires_at=now+SESSION_MS;await env.DB.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').bind(row.expires_at,row.token_hash).run();}
  return row;
 }
 function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {};}}

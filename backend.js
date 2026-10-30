@@ -1,16 +1,19 @@
+const MAX_SESSION=31*86400000;
 export class BackendClient {
- constructor(url,storage=globalThis.sessionStorage,fetchImpl=globalThis.fetch){
+ constructor(url,storage=globalThis.localStorage,fetchImpl=globalThis.fetch){
   const parsed=new URL(url);if(parsed.protocol!=='https:')throw new Error('The backend URL must use HTTPS.');
   this.url=parsed.origin;this.storage=storage;this.fetch=(...args)=>fetchImpl(...args);this.key=`eve-backend-sessions:${this.url}`;
+  // Sessions used to live in sessionStorage and died with the tab; carry an open tab's session over once.
+  try{const legacy=globalThis.sessionStorage?.getItem(this.key);if(legacy&&!storage.getItem(this.key))storage.setItem(this.key,legacy);globalThis.sessionStorage?.removeItem(this.key);}catch{/* Start fresh. */}
   try{this.sessions=new Map(JSON.parse(storage.getItem(this.key)||'[]').filter(([id,s])=>Number.isSafeInteger(id)&&/^[\w-]{43}$/.test(s?.token)&&s.expires>Date.now()));}catch{this.sessions=new Map();}
  }
- save(){this.storage.setItem(this.key,JSON.stringify([...this.sessions]));}
+ save(){try{this.storage.setItem(this.key,JSON.stringify([...this.sessions]));}catch{/* Session lasts for this page only. */}}
  has(id){return this.sessions.get(id)?.expires>Date.now();}
  expires(id){return this.sessions.get(id)?.expires;}
  acceptRedirect(hash){
   const params=new URLSearchParams(hash.replace(/^#/,''));if(!params.has('backend_session'))return false;
   const token=params.get('backend_session'),id=Number(params.get('pilot')),expires=Number(params.get('expires'));
-  if(![2124810474,2124815118].includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+25*3600000)throw new Error('Backend session response was invalid. Connect the pilot again.');
+  if(![2124810474,2124815118].includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+MAX_SESSION)throw new Error('Backend session response was invalid. Connect the pilot again.');
   this.sessions.set(id,{token,expires});this.save();return true;
  }
  async call(path,{id,method='GET'}={}){
@@ -24,6 +27,9 @@ export class BackendClient {
  async privatePilot(id,force=false){
   const data=await this.call(force?'/api/sync':'/api/session',{id,method:force?'POST':'GET'});
   if(data.characterId!==id){this.sessions.delete(id);this.save();throw new Error('Backend returned a different pilot. Connect again.');}
+  // The backend extends active sessions; remember the new expiry.
+  const s=this.sessions.get(id);
+  if(s&&Number.isFinite(data.expires)&&data.expires>s.expires&&data.expires<=Date.now()+MAX_SESSION){s.expires=data.expires;this.save();}
   return data;
  }
  authURL(id){return `${this.url}/auth/start?pilot=${encodeURIComponent(id)}`;}
