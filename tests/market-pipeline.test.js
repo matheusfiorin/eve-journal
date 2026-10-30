@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -64,4 +64,14 @@ test('high-sec regions come from systems at 0.45 or better, ignoring wormhole sp
 });
 test('aggregate keeps the 7-day average price',()=>{
  assert.equal(aggregate([],[{volume:1,average:10},{volume:1,average:20}]).p,15);
+});
+
+test('the survey refreshes unseen and stale regions first, pilot regions ahead of the rest',()=>{
+ const now=100*3600000;
+ assert.deepEqual(surveyQueue({1:now-3600000,2:now-30*3600000,3:now-50*3600000},[1,2,3,4,5],[5],now),[5,4,3,2]);
+});
+test('merging a region replaces only its sellers and keeps a few stations per region',()=>{
+ const sellers={7:[[60000001,1,100,9],[60000002,2,100,8]],8:[[60000003,3,50,9]]};
+ mergeRegion(sellers,9,[7,8],{7:[[60000004,4,90],[60000005,5,95],[60000006,6,99]]});
+ assert.deepEqual(sellers,{7:[[60000004,4,90,9],[60000005,5,95,9],[60000002,2,100,8]]});
 });

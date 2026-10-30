@@ -46,11 +46,19 @@ export function recipes(blueprints, wanted) {
   return out;
 }
 
+export const stats = {limited:0};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function esi(path, options = {}, attempt = 0) {
   const response = await fetch(`${ESI}${path}`, {...options, headers:{...HEADERS, ...options.headers}, signal:AbortSignal.timeout(30000)});
-  if (Number(response.headers.get('X-ESI-Error-Limit-Remain')) < 20) await new Promise(r => setTimeout(r, (Number(response.headers.get('X-ESI-Error-Limit-Reset')) || 10) * 1000));
-  if ((response.status >= 500 || response.status === 420 || response.status === 429) && attempt < 3) {
-    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+  if (Number(response.headers.get('X-ESI-Error-Limit-Remain')) < 20) await sleep((Number(response.headers.get('X-ESI-Error-Limit-Reset')) || 10) * 1000);
+  // Market orders share a token bucket (2 tokens per 200); a 429 says how long until it refills.
+  if ((response.status === 420 || response.status === 429) && attempt < 4) {
+    stats.limited++;
+    await sleep(Math.min(900, Number(response.headers.get('Retry-After')) || 60) * 1000);
+    return esi(path, options, attempt + 1);
+  }
+  if (response.status >= 500 && attempt < 3) {
+    await sleep(2000 * (attempt + 1));
     return esi(path, options, attempt + 1);
   }
   if (!response.ok) { const e = new Error(`ESI ${response.status} ${path}`); e.status = response.status; throw e; }
@@ -75,6 +83,20 @@ export function npcSellers(orders) {
   const best = new Map();
   for (const o of orders) if (!o.is_buy_order && o.duration >= 365 && isStation(o.location_id) && !(best.get(o.location_id)?.[2] <= o.price)) best.set(o.location_id, [o.location_id, o.system_id, o.price]);
   return [...best.values()].sort((a, b) => a[2] - b[2]);
+}
+// Survey regions never seen or older than maxAge, the pilots' and hubs' regions first.
+export function surveyQueue(done, regions, priority, now, maxAge = 20 * 3600000) {
+  const first = r => priority.includes(r) ? 1 : 0;
+  return regions.filter(r => !(done[r] > now - maxAge)).sort((a, b) => first(b) - first(a) || (done[a] || 0) - (done[b] || 0));
+}
+// Replace one region's sellers. A few stations per region is enough to find a nearby one and keeps the snapshot small.
+export function mergeRegion(sellers, region, ids, found, perRegion = 2) {
+  for (const id of ids) {
+    const kept = (sellers[id] || []).filter(s => s[3] !== region);
+    const added = (found[id] || []).slice(0, perRegion).map(([loc, system, price]) => [loc, system, price, region]);
+    if (kept.length || added.length) sellers[id] = [...kept, ...added].sort((a, b) => a[2] - b[2]); else delete sellers[id];
+  }
+  return sellers;
 }
 export function highsecRegions(map) {
   return [...new Set(Object.values(map.systems).filter(([, sec, region]) => sec >= 0.45 && region < 11000000).map(s => s[2]))];
@@ -160,27 +182,43 @@ async function main() {
     meta.starters = starters(data.blueprints, byKey(data.types), byKey(data.groups), byKey(data.categories), prices);
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
-  // Keep only blueprints an NPC actually sells somewhere in high-sec. Seeding rarely changes, so reuse a recent survey.
+  let pilotSystems = [];
+  try { pilotSystems = (await (await api('/api/market/regions')).json()).systems || []; } catch (error) { console.warn(`Pilot regions: ${error.message}`); }
+  const pilotRegions = await Promise.all(pilotSystems.map(async system => {
+    if (map?.systems[system]) return map.systems[system][2];
+    const s = (await esi(`/universe/systems/${system}/`)).body;
+    return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
+  }));
+  // Keep only blueprints an NPC actually sells in high-sec. The survey is too big for one run under ESI's
+  // market rate limit, so it is incremental: each run refreshes the stalest regions within a time budget.
+  // shortcut: a blueprint new to the candidate list is only checked in a region at that region's next refresh.
   if (meta.starters.length) {
-    const ids = meta.starters.map(s => s.bp);
+    const ids = meta.starters.map(s => s.bp), regions = map ? highsecRegions(map) : HUBS;
     let survey = null;
-    try { survey = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data?.bpoSurvey; } catch { /* Survey again. */ }
-    if (!(survey?.at > Date.now() - 20 * 3600000 && ids.every(id => id in survey.sellers))) {
-      const regions = map ? highsecRegions(map) : HUBS, sellers = Object.fromEntries(ids.map(id => [id, []]));
-      await pool(ids.flatMap(id => regions.map(region => [id, region])), 24, async ([id, region]) => {
-        try { sellers[id].push(...npcSellers(await allPages(`/markets/${region}/orders/?order_type=sell&type_id=${id}`))); }
-        catch (error) { console.warn(`BPO ${id} in ${region}: ${error.message}`); }
-      });
-      // Nearest-first needs many stations, but 40 per blueprint is plenty and keeps the snapshot small.
-      for (const id of ids) sellers[id] = sellers[id].sort((a, b) => a[2] - b[2]).slice(0, 40);
-      const locs = [...new Set(Object.values(sellers).flat().map(s => s[0]))], names = {};
-      for (let i = 0; i < locs.length; i += 1000) (await esi('/universe/names/', {method:'POST', body:JSON.stringify(locs.slice(i, i + 1000))})).body.forEach(r => { names[r.id] = r.name; });
-      survey = {at:Date.now(), regions:regions.length, sellers, names};
+    try { survey = (await (await api('/api/market/survey')).json()).survey; } catch (error) { console.warn(`Previous survey: ${error.message}`); }
+    survey = {done:{}, sellers:{}, names:{}, ...survey};
+    const deadline = Date.now() + Number(process.env.SURVEY_MINUTES || 20) * 60000;
+    let surveyed = 0;
+    for (const region of surveyQueue(survey.done, regions, [...pilotRegions, ...HUBS], Date.now())) {
+      if (Date.now() > deadline) break;
+      try {
+        const present = new Set(await allPages(`/markets/${region}/types/?datasource=tranquility`));
+        const here = ids.filter(id => present.has(id)), found = {};
+        await pool(here, 16, async id => { found[id] = npcSellers(await allPages(`/markets/${region}/orders/?order_type=sell&type_id=${id}`)); });
+        mergeRegion(survey.sellers, region, ids, found);
+        survey.done[region] = Date.now(); surveyed++;
+      } catch (error) { console.warn(`Survey ${region}: ${error.message}`); }
     }
-    meta.bpoSurvey = survey;
-    const screened = meta.starters.length;
-    meta.starters = meta.starters.filter(s => survey.sellers[s.bp]?.length).slice(0, 150).map(s => ({...s, sellers:survey.sellers[s.bp]}));
-    report.push(`${meta.starters.length} of ${screened} screened blueprints sold by NPCs in ${survey.regions} high-sec regions`);
+    for (const r of Object.keys(survey.done)) if (!regions.includes(Number(r))) delete survey.done[r];
+    const missing = [...new Set(Object.values(survey.sellers).flat().map(s => s[0]))].filter(loc => !survey.names[loc]);
+    for (let i = 0; i < missing.length; i += 1000) (await esi('/universe/names/', {method:'POST', body:JSON.stringify(missing.slice(i, i + 1000))})).body.forEach(r => { survey.names[r.id] = r.name; });
+    const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:2, data:survey})});
+    if (!stored.ok) console.log(`::warning title=BPO survey::Upload failed: HTTP ${stored.status} ${await stored.text()}`);
+    const screened = meta.starters.length, covered = Object.keys(survey.done).length;
+    meta.starters = meta.starters.filter(s => survey.sellers[s.bp]?.length).slice(0, 150).map(s => ({...s, sellers:survey.sellers[s.bp].map(x => x.slice(0, 3))}));
+    const locs = new Set(meta.starters.flatMap(s => s.sellers.map(x => x[0])));
+    meta.bpoSurvey = {regions:covered, of:regions.length, names:Object.fromEntries(Object.entries(survey.names).filter(([loc]) => locs.has(Number(loc))))};
+    report.push(`${meta.starters.length} of ${screened} screened blueprints sold by NPCs; surveyed ${covered} of ${regions.length} high-sec regions (${surveyed} this run)`);
   }
   const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
 
@@ -194,12 +232,6 @@ async function main() {
     catch (error) { console.warn(`type ${id}: ${error.message}`); }
   });
 
-  let pilotSystems = [];
-  try { pilotSystems = (await (await api('/api/market/regions')).json()).systems || []; } catch (error) { console.warn(`Pilot regions: ${error.message}`); }
-  const pilotRegions = await Promise.all(pilotSystems.map(async system => {
-    const s = (await esi(`/universe/systems/${system}/`)).body;
-    return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
-  }));
   const regions = [...new Set([...HUBS, ...pilotRegions])];
 
   for (const region of regions) {
@@ -238,6 +270,6 @@ async function main() {
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${scan.length} items scanned, ${pilotSystems.length} pilot locations. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

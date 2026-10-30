@@ -141,6 +141,9 @@ test('market pipeline must authenticate, stores snapshots per region and the pub
  assert.equal((await ingest(token,{region:0,data:{types:{34:{n:'Tritanium',v:0.01}}}})).status,200);
  assert.equal((await ingest(token,{region:10000002,data:{name:'The Forge',types:{34:{s:[[60003760,5,1000]]}}}})).status,200);
  assert.equal((await ingest(token,{region:10000002,data:{name:'The Forge',types:{}}})).status,200);
+ assert.equal((await ingest(token,{region:2,data:{done:{10000002:1}}})).status,200);
+ assert.equal((await app.request('/api/market/survey')).status,401);
+ assert.deepEqual((await(await app.request('/api/market/survey',{headers:{Authorization:`Bearer ${token}`}})).json()).survey,{done:{10000002:1}});
  const market=await(await app.request('/api/market')).json();assert.equal(market.meta.data.types[34].n,'Tritanium');assert.equal(market.regions.length,1);assert.deepEqual(market.regions[0].data.types,{});
  assert.equal((await app.request('/api/market/regions')).status,401);
  const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);

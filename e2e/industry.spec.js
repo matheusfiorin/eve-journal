@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {mockApp,openApp,tab} from './fixtures.js';
 test('industry ranks starter blueprints with research plans, payback and pilot assignments',async({page},testInfo)=>{
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'industry');const industry=page.locator('#industry');
- await expect(page.locator('#industry-status')).toContainText('2 cheap T1 blueprints that NPCs sell in 3 high-sec regions');
+ await expect(page.locator('#industry-status')).toContainText('2 cheap T1 blueprints that NPCs sell (seller survey covers 3 of 4 high-sec regions)');
  await expect(page.locator('#industry-system')).toContainText('Jita · Fiofka’s location');await expect(page.locator('#industry-budget')).toHaveValue('12500000');
  const setup=industry.locator('article').first();await expect(setup).toContainText('Alpha');await expect(setup).toContainText('Build slots');
  await expect(industry.locator('article').nth(1)).toContainText('Week 1');await expect(industry.locator('article').nth(1)).toContainText('Mass Production');

@@ -191,6 +191,11 @@ async function route(request,env,ctx,fetchImpl){
   const systems=[...new Set(rows.results.map(row=>parseSnapshot(row).operations?.location?.value?.solar_system_id).filter(Number.isSafeInteger))];
   return response({systems});
  }
+ if(url.pathname==='/api/market/survey'&&request.method==='GET'){
+  await requirePipeline(request,env);
+  const row=await env.DB.prepare('SELECT data FROM market_snapshots WHERE region_id = 2').first();
+  return response({survey:row?JSON.parse(row.data):null});
+ }
  if(url.pathname==='/api/market/ingest'&&request.method==='POST'){
   await requirePipeline(request,env);
   const text=await request.text();if(text.length>1500000)throw new ServiceError('Market snapshot is too large.',413);
@@ -202,8 +207,8 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/api/market'&&request.method==='GET'){
   const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots').all();
   const parsed=rows.results.map(row=>({region:row.region_id,updatedAt:row.updated_at,data:JSON.parse(row.data)}));
-  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations.
-  return response({meta:parsed.find(r=>r.region===0)||null,universe:parsed.find(r=>r.region===1)?.data||null,regions:parsed.filter(r=>r.region>1)},200,{'Cache-Control':'public, max-age=300'});
+  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations; region 2 the pipeline's blueprint survey.
+  return response({meta:parsed.find(r=>r.region===0)||null,universe:parsed.find(r=>r.region===1)?.data||null,regions:parsed.filter(r=>r.region>2)},200,{'Cache-Control':'public, max-age=300'});
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);
