@@ -7,38 +7,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          mkdir -p dump sde && cd sde
+          mkdir -p dump
           curl -sSfL https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip -o sde.zip
-          unzip -Z1 sde.zip > ../dump/files.txt
-          unzip -q sde.zip
-          f() { find . -name "$1.jsonl" | head -1; }
-          head -c 600 $(f mapAsteroidBelts) > ../dump/belts.txt || true
-          wc -l $(f mapAsteroidBelts) >> ../dump/belts.txt || true
-          head -c 800 $(f typeMaterials) > ../dump/typeMaterials.txt
-          grep -E '^\{"_key":(1230|1228|17470|17471|28430|62516),' $(f typeMaterials) >> ../dump/typeMaterials.txt || true
-          grep -E '^\{"_key":(32880|17476|17478|17480|482|483|11396|17482|22548|22544|28606|37135),' $(f typeDogma) > ../dump/dogma.txt || true
-          grep -E '"_key":(77|73|79|161|434|1923|2458|2459|3165|3166|1924|2580|2581|2582|2583|2584|1921|1922|1940|1941|2459|2464),' $(f dogmaAttributes) > ../dump/attrs.txt || true
-          grep -E '"categoryID":25,' $(f groups) > ../dump/oregroups.txt
-          python3 - <<'PY' > ../dump/ores.txt
-          import json,glob
-          g={}
-          for l in open(glob.glob('./**/groups.jsonl',recursive=True)[0]):
-              d=json.loads(l)
-              if d.get('categoryID')==25: g[d['_key']]=d['name'].get('en') if isinstance(d['name'],dict) else d['name']
-          for l in open(glob.glob('./**/types.jsonl',recursive=True)[0]):
-              d=json.loads(l)
-              if d.get('groupID') in g and d.get('published'):
-                  n=d['name'].get('en') if isinstance(d['name'],dict) else d['name']
-                  print(d['_key'],g[d['groupID']],n,d.get('volume'),d.get('portionSize'),d.get('metaGroupID'))
-          PY
-          python3 - <<'PY' > ../dump/ships.txt
-          import json,glob
-          for l in open(glob.glob('./**/types.jsonl',recursive=True)[0]):
-              d=json.loads(l)
-              n=d['name'].get('en') if isinstance(d['name'],dict) else d['name']
-              if n in ('Venture','Procurer','Retriever','Covetor','Skiff','Mackinaw','Hulk','Prospect','Endurance','Pioneer','Miner I','Miner II','Strip Miner I','Mining Laser Upgrade I','Mining','Astrogeology','Mining Barge','Mining Frigate','Exhumers','Reprocessing','Reprocessing Efficiency','Veldspar Processing','Simple Ore Processing','Coherent Ore Processing','Variegated Ore Processing','Compressed Veldspar','Expedition Frigates','Mining Upgrades'):
-                  print(d['_key'],n,d.get('groupID'),d.get('volume'),d.get('capacity'))
-          PY
-          cd .. && rm -rf sde
+          python3 dump.py || echo "FAILED $?" >> dump/sde.txt
+          rm sde.zip
           git config user.name dump; git config user.email dump@example.com
           git add dump && git commit -qm "[skip ci] dump" && git push -q
