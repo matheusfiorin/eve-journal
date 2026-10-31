@@ -2,6 +2,7 @@ import {BackendClient} from './backend.js';
 import {emptyData, validateBackup, mergeBackups, remaining, escapeHTML as esc, localDate, filterEntries, trainingProgress, queueState, pilotRoles, pilotTitle, assetHoldings, shares, compactNumber} from './model.js';
 import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
 import {skillLevels, isAlpha, slots, evaluate, rank, portfolio, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
+import {SHIPS, SKILL, yieldRate, holdOf, canFly, oreValue, sites, ledger} from './mining.js';
 import {graph, leg, facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from './route.js';
 import {JournalStore} from './storage.js';
 
@@ -11,7 +12,7 @@ const DRAFT = 'eve-flight-draft:v1';
 const GROUPS = 'eve-skill-groups:v1';
 const ME = 'eve-me:v1';
 const CATS = 'eve-asset-categories:v1';
-const TABS = ['overview','empire','market','industry','training','skills','wallet','clones','notes'];
+const TABS = ['overview','empire','market','industry','mining','training','skills','wallet','clones','notes'];
 const HUB_SYSTEMS = [[30000142,'Jita'],[30002187,'Amarr'],[30002659,'Dodixie'],[30002510,'Rens'],[30002053,'Hek']];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const OLD_TABS = {journal:'notes', goals:'notes', operations:'wallet'};
@@ -23,7 +24,7 @@ let config = {pilots:[]};
 let data = emptyData(), pilots = [], store, backend = null, universeStatus = null;
 let generation = 0, editingEntry = null, editingGoal = null, draftTimer;
 const names = new Map(), corporations = new Map(), typeGroup = new Map();
-let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, industryRun = 0, starsFrame = 0, warp = false;
+let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, industryRun = 0, miningRun = 0, starsFrame = 0, warp = false;
 const assetCats = new Map(), routes = new Map(), counters = new Map(), cargo = new Map();
 try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => assetCats.set(id, cat)); } catch { /* Categories are refetched. */ }
 
@@ -631,11 +632,97 @@ async function renderIndustry() {
     ${alpha ? `<li><b>Alpha tax.</b><small>Alphas pay an extra industry tax (CCP lists 2%; this page assumes it). Omega on the main builder removes it.</small></li>` : ''}
   </ul><p class="hint">Assumes SCC surcharge ${pct(SCC.manufacturing)} on builds and ${pct(SCC.research)} on research, and ${pct(NPC_FACILITY_TAX)} NPC facility tax. Confirm against the in-game job window.</p></article>`;
 }
+// Mining: the best belts within reach for each pilot, with their ship and skills, valued at today's hub prices.
+function minerOf(p) {
+  if (!p) return null;
+  const w = wing.get(p.id), x = summary(p);
+  const level = id => x.skills?.skills?.find(k => k.skill_id === id)?.active_skill_level || 0;
+  return {p, level, known:Boolean(x.skills?.skills), salesTax:fees(x.skills, marketData?.meta?.data?.skills).salesTax,
+    location:(p.private ? p.ops?.location?.value : w?.location)?.solar_system_id, ship:(p.private ? p.ops?.ship?.value : w?.ship)?.ship_type_id,
+    ledger:p.private ? p.ops?.mining : w?.mining ? {permission:true, value:w.mining} : null};
+}
+function shipFor(m, choice) {
+  if (SHIPS[choice]) return Number(choice);
+  if (SHIPS[m.ship]) return m.ship;
+  const flyable = Object.keys(SHIPS).map(Number).filter(id => canFly(id, m.level));
+  return flyable.sort((a, b) => yieldRate(b, m.level) * 1 - yieldRate(a, m.level))[0] || 32880;
+}
+async function renderMining() {
+  const status = $('#mining-status'), content = $('#mining-content');
+  if (!backend) { status.textContent = 'Mining needs the backend.'; return; }
+  const run = ++miningRun;
+  try {
+    if (!marketData) content.innerHTML = '<div class="card shimmer">Pricing ore…</div>';
+    await loadMarket();
+  } catch (error) { status.textContent = `Market data unavailable: ${error.message}`; content.innerHTML = ''; return; }
+  if (run !== miningRun) return;
+  const meta = marketData.meta?.data || {}, g = universeGraph();
+  if (!meta.ores?.length || !g) { status.textContent = 'The pipeline has not priced ore yet. Check back after its next hourly run.'; content.innerHTML = ''; return; }
+  systemOptions($('#mining-system'));
+  const from = Number($('#mining-system').value), maxJumps = Number($('#mining-jumps').value), lowsec = $('#mining-lowsec').checked, choice = $('#mining-ship').value;
+  const me = minerOf(mine()), mate = minerOf(wingmate());
+  const valuesFor = m => new Map(meta.ores.map(o => [o.n, oreValue(o, marketBook, {salesTax:m.salesTax, level:m.level})]));
+  const cache = new Map(), activity = meta.activity || {};
+  const plan = (m, start, shipChoice, limit) => {
+    const ship = shipFor(m, shipChoice), values = valuesFor(m), rate = yieldRate(ship, m.level), hold = holdOf(ship, m.level);
+    return {m, ship, values, rate, hold, start, list:start ? sites(g, start, {values, rate, hold, activity, maxJumps, lowsec, limit}) : []};
+  };
+  const mine1 = plan(me, from, choice, 8), mate1 = mate ? plan(mate, mate.location || from, '', 3) : null;
+  const sysName = id => g.systems.get(id)?.name || name(id);
+  const hours = sec => sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(sec / 60))} min`;
+  const chip = sys => `<span class="sec sec-${secClass(sys.sec)}">${secShown(sys.sec).toFixed(1)}</span>`;
+  const site = (pl, s, n) => `<li class="opp reveal" style="--i:${n}">
+    <div class="opp-main"><b>${chip(s.system)} <a href="${dotlanSystem(s.system.name)}" target="_blank" rel="noopener noreferrer">${esc(s.system.name)}</a></b><small>${s.jumps ? `${s.jumps} ${s.jumps === 1 ? 'jump' : 'jumps'}` : 'you are here'} · ${s.system.belts} ${s.system.belts === 1 ? 'belt' : 'belts'}${s.lowsec ? ' · <span class="neg">route through low-sec</span>' : ''}</small>
+      <small class="flags">${s.ores.map((o, i) => `<span class="tag ${i ? 'dim' : ''}" title="${esc(o.how)} · ${format(o.perM3, 'isk')}/m³">${esc(o.n)}</span>`).join('')}</small></div>
+    <div class="opp-route"><span>Mine ${esc(s.ores[0].n)}: ${format(s.ores[0].perM3, 'isk')}/m³, best sold ${esc(s.ores[0].how)}${s.ores[0].at ? ` at ${esc(marketBook.stations.get(s.ores[0].at)?.name || 'a hub')}` : ' as minerals'}</span>
+      <span class="${s.kills ? 'neg' : ''}">${s.kills ? `${s.kills} ${s.kills === 1 ? 'ship' : 'ships'} killed in the last hour` : 'No kills in the last hour'} · ${s.traffic.toLocaleString()} jumps/h${s.crowd < 1 ? ' · busy, belts may be stripped' : ''}${secClass(s.system.sec) !== 'hi' ? ' · <span class="neg">low-sec: no CONCORD</span>' : ''}</span></div>
+    <div class="opp-profit"><b class="pos">${format(s.iskHour, 'isk')}/h</b><small>full hold every ${hours(pl.hold / pl.rate)}</small></div>
+    ${s.jumps ? `<details class="trip"><summary>Route</summary>${legHtml('Fly to', s.system.name, leg(g, pl.start, s.system.id, cache))}</details>` : ''}</li>`;
+  const sitesHtml = pl => pl.list.length ? `<ol class="opps">${pl.list.map((s, n) => site(pl, s, n)).join('')}</ol>` : `<p class="hint">No ${lowsec ? '' : 'high-sec '}belts with known ore within ${maxJumps} jumps.</p>`;
+  const shipLine = pl => `${esc(SHIPS[pl.ship].name)}${pl.m.ship === pl.ship ? ' (current ship)' : canFly(pl.ship, pl.m.level) ? '' : ' <span class="neg">(not trained yet)</span>'} · ${Math.round(pl.rate * 60).toLocaleString()} m³/min · ${Math.round(pl.hold).toLocaleString()} m³ hold`;
+  const ledgerHtml = m => {
+    if (!m?.ledger) return '<p class="hint">Not shared yet.</p>';
+    if (m.ledger.permission === false) return '<p class="hint">Permission not granted. Press Reconnect to allow the mining ledger.</p>';
+    const r = ledger(m.ledger.value || [], meta.ores, valuesFor(m), sysName);
+    return r.units ? `<dl class="facts">${fact('Mined', `${Math.round(r.m3).toLocaleString()} m³<small>${r.days} ${r.days === 1 ? 'day' : 'days'} in the last 30</small>`)}${fact('Worth today', format(r.isk, 'isk'))}${fact('Per mining day', format(r.isk / r.days, 'isk'))}</dl>
+      <ul class="plain">${r.systems.slice(0, 4).map(s => `<li><b>${esc(s.name)}</b><small>${Math.round(s.m3).toLocaleString()} m³ over ${s.days} ${s.days === 1 ? 'day' : 'days'} · ${format(s.isk, 'isk')}</small></li>`).join('')}</ul>` : '<p class="hint">No mining in the last 30 days.</p>';
+  };
+  const best = mine1.list[0];
+  const shipRows = Object.keys(SHIPS).map(Number).map(id => {
+    const rate = yieldRate(id, me.level), hold = holdOf(id, me.level), perM3 = best?.ores[0].perM3 || 0, fill = hold / rate;
+    return `<tr><td>${esc(SHIPS[id].name)}${me.ship === id ? '<small>current ship</small>' : ''}</td><td>${canFly(id, me.level) ? '<span class="pos">Yes</span>' : `<span class="neg">Train ${id === 32880 ? 'Mining Frigate' : 'Mining Barge'} I</span>`}</td><td>${Math.round(rate * 60).toLocaleString()}</td><td>${Math.round(hold).toLocaleString()}</td><td>${perM3 ? format(rate * 3600 * fill / (fill + 240) * perM3, 'isk') : '—'}</td></tr>`;
+  }).join('');
+  const NEXT = [[SKILL.miningFrigate, 1, 'Fly the Venture: a free-to-replace starter miner'], [SKILL.mining, 4, 'Miner II: +50% laser yield, and +5% per level'], [SKILL.astrogeology, 3, '+5% yield per level'],
+    [SKILL.miningBarge, 1, 'Fly the Procurer, Retriever or Covetor: about 3× a Venture'], [SKILL.reprocessing, 4, 'Better mineral yield when ore sells for less than its minerals'], [SKILL.miningFrigate, 3, '+5% Venture yield per level']];
+  const next = me.known ? NEXT.filter(([id, lvl]) => me.level(id) < lvl).slice(0, 3) : [];
+  const skillName = id => ({[SKILL.mining]:'Mining', [SKILL.astrogeology]:'Astrogeology', [SKILL.miningFrigate]:'Mining Frigate', [SKILL.miningBarge]:'Mining Barge', [SKILL.reprocessing]:'Reprocessing'})[id];
+  const oreRows = [...mine1.values.values()].sort((a, b) => b.perM3 - a.perM3).map(v => `<tr><td>${esc(v.n)}</td><td>${format(v.perM3, 'isk')}</td><td>${esc(v.how)}</td><td>${format(v.raw, 'isk')}</td><td>${format(v.compressed, 'isk')}</td><td>${format(v.refined, 'isk')}</td></tr>`).join('');
+  status.textContent = `Ore priced from hub buy orders, kills and traffic from the last hour · scanned ${Math.max(1, Math.round((Date.now() - Math.min(...marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
+  content.innerHTML = `
+  <article class="card reveal" style="--i:1"><div class="card-head"><div><h3>Mine now · ${esc(me.p.name)}</h3><p class="hint">${shipLine(mine1)}. Ranked by ISK per hour at the belt, lowered by recent kills, heavy traffic and travel time over a 2-hour session.</p></div></div>
+    ${me.known ? '' : `<p class="hint">Connect ${esc(me.p.name)} to use real skills, ship and location.</p>`}
+    ${sitesHtml(mine1)}
+  </article>
+  <div class="grid">
+    <article class="card reveal" style="--i:2"><h3>${mate ? `${esc(mate.p.name)}’s best spots` : 'Wingmate'}</h3>
+      ${mate1 ? `<p class="hint">${shipLine(mate1)} · from ${esc(sysName(mate1.start))}${mate.location ? '' : ' (their location isn’t shared, so this uses yours)'}.</p>${mate1.list.length ? `<ul class="plain">${mate1.list.map(s => `<li><b>${chip(s.system)} ${esc(s.system.name)}</b><small>${s.jumps ? `${s.jumps} ${s.jumps === 1 ? 'jump' : 'jumps'}` : 'here'} · ${esc(s.ores[0].n)} · ${format(s.iskHour, 'isk')}/h${s.kills ? ` · <span class="neg">${s.kills} killed last hour</span>` : ''}</small></li>`).join('')}</ul>` : '<p class="hint">No belts in range.</p>'}${mate1.list[0] && best && mate1.list[0].system.id === best.system.id ? '<p class="alert ok">You both rank the same system first: mine together and share one hauler trip.</p>' : ''}` : '<p class="hint">No wingmate data yet.</p>'}
+    </article>
+    <article class="card reveal" style="--i:3"><h3>Last 30 days</h3><h4>${esc(me.p.name)}</h4>${ledgerHtml(me)}${mate ? `<h4>${esc(mate.p.name)}</h4>${ledgerHtml(mate)}` : ''}</article>
+  </div>
+  <article class="card reveal" style="--i:4"><h3>Ships</h3><p class="hint">Two Miner I/II on the Venture, two Strip Miner I on barges, with ${esc(me.p.name)}’s skills; ISK/h at ${best ? esc(best.system.name) : 'the best site'}. Hull bonuses are estimates; your ledger shows the real rate.</p>
+    <table class="bill"><thead><tr><th>Ship</th><th>Can fly</th><th>m³/min</th><th>Hold m³</th><th>ISK/h</th></tr></thead><tbody>${shipRows}</tbody></table>
+    ${next.length ? `<h3>Train next</h3><ul class="plain">${next.map(([id, lvl, why]) => `<li><b>${skillName(id)} ${ROMAN[lvl]}</b><small>${me.level(id) ? `from ${ROMAN[me.level(id)]} · ` : ''}${esc(why)}</small></li>`).join('')}</ul>` : ''}
+  </article>
+  <article class="card reveal" style="--i:5"><h3>What ore is worth</h3><p class="hint">ISK per unit after sales tax, sold into the best hub buy order. Reprocessed uses ${esc(me.p.name)}’s reprocessing skills at an NPC station. II–IV-Grade ore pays 5–15% more.</p>
+    <table class="bill"><thead><tr><th>Ore</th><th>ISK/m³</th><th>Best as</th><th>Raw</th><th>Compressed</th><th>Minerals</th></tr></thead><tbody>${oreRows}</tbody></table>
+  </article>`;
+}
 function renderAll() {
   renderStatus(); renderMe(); renderOverview(); renderEmpire(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions();
   if (!$('#hero').hidden) renderHero();
   if (!$('#market').hidden) renderMarket();
   if (!$('#industry').hidden) renderIndustry();
+  if (!$('#mining').hidden) renderMining();
   countUps();
 }
 
@@ -676,6 +763,7 @@ function selectTab(id) {
   countUps();
   if (id === 'market') renderMarket();
   if (id === 'industry') renderIndustry();
+  if (id === 'mining') renderMining();
 }
 // The wing summary also carries the pilot's own figures, so drop it with their session.
 function forgetWing(id) {
@@ -733,6 +821,7 @@ $('#refresh').onclick = () => { marketData = null; costIndices = null; loadPilot
 $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
 $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
 $('#industry-system').onchange = $('#industry-category').onchange = $('#industry-sort').onchange = () => renderIndustry();
+$('#mining-system').onchange = $('#mining-ship').onchange = $('#mining-jumps').onchange = $('#mining-lowsec').onchange = () => renderMining();
 $('#industry-budget').onchange = event => { event.target.dataset.touched = '1'; renderIndustry(); };
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#hero').hidden && me) choosePilot(me); });
 $('#goal-form').onsubmit = event => {

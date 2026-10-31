@@ -223,3 +223,5 @@ h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.8p
 .plan{background:var(--panel-2);border-radius:10px;padding:12px 14px;min-width:0}.plan h4{margin:0 0 6px}.plan .facts{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.plan .facts div{background:var(--panel)}
 .bill{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px}.bill caption{text-align:left;font-size:12px;color:var(--muted);padding-bottom:4px}.bill th{font-size:11px;color:var(--muted);text-align:left;font-weight:500;text-transform:uppercase}.bill tbody{display:table-row-group;max-height:none}.bill tbody tr{display:table-row}.bill td:first-child{color:var(--text);white-space:normal;width:auto}.bill td,.bill th{padding:5px 6px;border-bottom:1px solid var(--line)}.bill td:not(:first-child),.bill th:not(:first-child){text-align:right;white-space:nowrap}
 @media (max-width:560px){.bill td small{display:none}}
+label.check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);padding-bottom:10px}label.check input{width:auto;margin:0}
+.tag.dim{background:transparent;color:var(--muted);border:1px solid var(--line)}

@@ -121,7 +121,7 @@ export function starters(blueprints, types, groups, categories, prices, {maxPric
   return out.sort((a, b) => b.score - a.score).slice(0, limit).map(({score, ...s}) => s);
 }
 // Known space only: gate graph with security, plus NPC stations that offer manufacturing (1) or research (2).
-export function universe({mapSolarSystems, mapStargates, npcStations, stationOperations, stationServices}) {
+export function universe({mapSolarSystems, mapStargates, npcStations, stationOperations, stationServices, mapAsteroidBelts = []}) {
   const service = name => stationServices.find(s => sdeName(s.serviceName) === name)?._key;
   const factory = service('Factory'), lab = service('Laboratory');
   const systems = {};
@@ -130,6 +130,8 @@ export function universe({mapSolarSystems, mapStargates, npcStations, stationOpe
     const from = systems[gate.solarSystemID], to = gate.destination?.solarSystemID;
     if (from && systems[to] && !from[3].includes(to)) from[3].push(to);
   }
+  // Asteroid belt count per system; zero means nothing to mine outside anomalies.
+  for (const belt of mapAsteroidBelts) if (systems[belt.solarSystemID]) systems[belt.solarSystemID][4] = (systems[belt.solarSystemID][4] || 0) + 1;
   const services = new Map(stationOperations.map(o => [o._key, new Set(o.services || [])]));
   const stations = [];
   for (const st of npcStations) {
@@ -152,6 +154,20 @@ async function sde(files) {
   }));
 }
 const byKey = rows => new Map(rows.map(row => [row._key, row]));
+// Belt ores found in high- and low-sec, with their compressed form, grades and reprocessing output per portion.
+export const BELT_ORES = ['Veldspar', 'Scordite', 'Pyroxeres', 'Plagioclase', 'Omber', 'Kernite', 'Jaspet', 'Hemorphite', 'Hedbergite'];
+const GRADES = {'II-Grade':0.05, 'III-Grade':0.10, 'IV-Grade':0.15};
+export function ores(types, typeMaterials) {
+  const byName = new Map([...types.values()].filter(t => t.published).map(t => [sdeName(t.name), t]));
+  const mats = new Map(typeMaterials.map(t => [t._key, (t.materials || []).map(m => [m.materialTypeID, m.quantity])]));
+  return BELT_ORES.map(n => {
+    const ore = byName.get(n), comp = byName.get(`Compressed ${n}`);
+    if (!ore || !mats.get(ore._key)?.length) return null;
+    const grades = {[ore._key]:0};
+    for (const [suffix, bonus] of Object.entries(GRADES)) { const t = byName.get(`${n} ${suffix}`); if (t) grades[t._key] = bonus; }
+    return {n, ore:ore._key, comp:comp?._key, vol:ore.volume, portion:ore.portionSize || 100, m:mats.get(ore._key), grades};
+  }).filter(Boolean);
+}
 
 async function main() {
   const secret = process.env.EVE_CLIENT_SECRET?.trim();
@@ -171,7 +187,7 @@ async function main() {
   meta.starters = [];
   let map = null;
   try {
-    const data = await sde(['blueprints', 'types', 'groups', 'categories', 'mapSolarSystems', 'mapStargates', 'npcStations', 'stationOperations', 'stationServices']);
+    const data = await sde(['blueprints', 'types', 'groups', 'categories', 'mapSolarSystems', 'mapStargates', 'npcStations', 'stationOperations', 'stationServices', 'mapAsteroidBelts', 'typeMaterials']);
     try {
       map = universe(data);
       const linked = Object.values(map.systems).filter(s => s[3].length).length;
@@ -181,6 +197,7 @@ async function main() {
     const prices = new Map((await esi('/markets/prices/')).body.map(p => [p.type_id, {average:p.average_price || p.adjusted_price || 0, adjusted:p.adjusted_price}]));
     const types = byKey(data.types);
     meta.starters = starters(data.blueprints, types, byKey(data.groups), byKey(data.categories), prices);
+    meta.ores = ores(types, data.typeMaterials);
     meta.skillNames = Object.fromEntries([...new Set(meta.starters.flatMap(s => s.sk.map(([k]) => k)))].map(k => [k, sdeName(types.get(k)?.name) || `Skill ${k}`]));
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
@@ -222,7 +239,16 @@ async function main() {
     meta.bpoSurvey = {regions:covered, of:regions.length, names:Object.fromEntries(Object.entries(survey.names).filter(([loc]) => locs.has(Number(loc))))};
     report.push(`${meta.starters.length} of ${screened} screened blueprints sold by NPCs; surveyed ${covered} of ${regions.length} high-sec regions (${surveyed} this run)`);
   }
-  const scan = [...new Set([...wanted, ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
+  const scan = [...new Set([...wanted, ...(meta.ores || []).flatMap(o => [o.ore, o.comp].filter(Boolean)), ...(meta.ores || []).flatMap(o => o.m.map(([id]) => id)), ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
+
+  // Last hour's kills and jumps per known-space system: danger and crowding for the Mining tab.
+  try {
+    const [kills, jumps] = await Promise.all([esi('/universe/system_kills/'), esi('/universe/system_jumps/')]);
+    const activity = {};
+    for (const k of kills.body) if (!map || map.systems[k.system_id]?.[1] > 0) activity[k.system_id] = [k.ship_kills + k.pod_kills, k.npc_kills, 0];
+    for (const j of jumps.body) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
+    meta.activity = activity;
+  } catch (error) { console.log(`::warning title=Activity::${error.message}`); }
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
     advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research'};
@@ -272,6 +298,6 @@ async function main() {
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

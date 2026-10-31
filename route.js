@@ -7,7 +7,7 @@ export const secClass = sec => secShown(sec) >= 0.5 ? 'hi' : secShown(sec) > 0 ?
 
 export function graph(universe) {
   const systems = new Map(), stations = new Map();
-  for (const [id, [name, sec, region, links]] of Object.entries(universe?.systems || {})) systems.set(Number(id), {id:Number(id), name, sec, region, links});
+  for (const [id, [name, sec, region, links, belts = 0]] of Object.entries(universe?.systems || {})) systems.set(Number(id), {id:Number(id), name, sec, region, links, belts});
   for (const [id, system, flags, name] of universe?.stations || []) stations.set(id, {id, system, flags, name});
   return {systems, stations};
 }

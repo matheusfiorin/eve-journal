@@ -19,7 +19,7 @@
  <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -52,6 +52,18 @@
   </div>
  </div>
  <div id="industry-content"></div>
+</section>
+<section id="mining" class="tab" hidden>
+ <div class="card market-controls">
+  <div class="card-head"><div><h2>Mining</h2><p id="mining-status" class="hint">Loading ore prices…</p></div></div>
+  <div class="row">
+   <label>Start from<select id="mining-system"></select></label>
+   <label>Ship<select id="mining-ship"><option value="">Current or best I can fly</option><option value="32880">Venture</option><option value="17480">Procurer</option><option value="17478">Retriever</option><option value="17476">Covetor</option></select></label>
+   <label>Max jumps<select id="mining-jumps"><option value="3">3 jumps</option><option value="6" selected>6 jumps</option><option value="10">10 jumps</option></select></label>
+   <label class="check"><input id="mining-lowsec" type="checkbox"> Include low-sec</label>
+  </div>
+ </div>
+ <div id="mining-content"></div>
 </section>
 <section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
 <section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>

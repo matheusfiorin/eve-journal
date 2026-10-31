@@ -4,6 +4,7 @@ export const OPERATIONS_SCOPES = {
   location:'esi-location.read_location.v1',
   ship:'esi-location.read_ship_type.v1',
   jobs:'esi-industry.read_character_jobs.v1',
+  mining:'esi-industry.read_character_mining.v1',
   journal:'esi-wallet.read_character_wallet.v1',
   transactions:'esi-wallet.read_character_wallet.v1',
   attributes:'esi-skills.read_skills.v1',

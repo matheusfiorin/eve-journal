@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -74,4 +74,15 @@ test('merging a region replaces only its sellers and keeps a few stations per re
  const sellers={7:[[60000001,1,100,9],[60000002,2,100,8]],8:[[60000003,3,50,9]]};
  mergeRegion(sellers,9,[7,8],{7:[[60000004,4,90],[60000005,5,95],[60000006,6,99]]});
  assert.deepEqual(sellers,{7:[[60000004,4,90,9],[60000005,5,95,9],[60000002,2,100,8]]});
+});
+test('belts are counted per system and belt ores carry compressed form, grades and reprocessing output',()=>{
+ const map=universe({mapSolarSystems:[{_key:30000142,name:{en:'Jita'},securityStatus:0.9,regionID:10000002}],mapStargates:[],npcStations:[],stationOperations:[],stationServices:[],
+  mapAsteroidBelts:[{_key:1,solarSystemID:30000142},{_key:2,solarSystemID:30000142},{_key:3,solarSystemID:39999999}]});
+ assert.equal(map.systems[30000142][4],2);
+ const t=(k,name,extra={})=>[k,{_key:k,name:{en:name},published:true,volume:0.1,portionSize:100,...extra}];
+ const types=new Map([t(1230,'Veldspar'),t(17470,'Veldspar II-Grade'),t(62516,'Compressed Veldspar',{volume:0.001}),t(1228,'Scordite',{volume:0.15}),t(18,'Plagioclase',{published:false})]);
+ const list=ores(types,[{_key:1230,materials:[{materialTypeID:34,quantity:400}]},{_key:1228,materials:[{materialTypeID:34,quantity:150},{materialTypeID:35,quantity:110}]}]);
+ assert.deepEqual(list.map(o=>o.n),['Veldspar','Scordite']);
+ assert.deepEqual(list[0],{n:'Veldspar',ore:1230,comp:62516,vol:0.1,portion:100,m:[[34,400]],grades:{1230:0,17470:0.05}});
+ assert.equal(list[1].comp,undefined);
 });

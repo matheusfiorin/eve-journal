@@ -95,7 +95,7 @@ test('optional permission failure does not destroy the training snapshot',async(
  const app=setup({walletFail:true});await connect(app);const row=app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get();const snap=JSON.parse(row.snapshot);assert.equal(snap.skills.total_sp,125000);assert.match(snap.operations.wallet.error,/temporarily unavailable/);assert.equal(snap.operations.ship.value.ship_type_id,605);
 });
 test('training-only consent does not fetch optional private endpoints',async()=>{
- const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets)\//.test(call.url)));
+ const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets|mining)\//.test(call.url)));
 });
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
@@ -125,13 +125,17 @@ test('wing summaries need a session and include only pilots who opted in',async(
  const {bearer}=await connect(app,{wing:false});
  let wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();
  assert.equal(wing.pilots.length,1);assert.equal(wing.pilots[0].sharing,false);assert.equal(wing.pilots[0].wallet,12345678.25);
- app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,0)").run(JSON.stringify({operations:{wallet:{value:777}}}));
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,0)").run(JSON.stringify({operations:{wallet:{value:777},location:{value:{solar_system_id:30000142}},mining:{value:[{type_id:1230,quantity:5}]}}}));
  wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,1);
  app.env.DB.raw.exec('UPDATE pilots SET share_wing = 1 WHERE character_id = 2124815118');
  wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,2);assert.equal(wing.pilots.find(p=>p.name==='Decxus').wallet,777);assert.ok(!JSON.stringify(wing).includes('credentials'));
+ assert.equal(wing.pilots.find(p=>p.name==='Decxus').location,undefined,'the first consent did not cover location');
+ app.env.DB.raw.exec('UPDATE pilots SET share_wing = 2 WHERE character_id = 2124815118');
+ wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();const d=wing.pilots.find(p=>p.name==='Decxus');
+ assert.equal(d.location.solar_system_id,30000142);assert.equal(d.mining[0].quantity,5);
 });
 test('consent records the wingmate choice',async()=>{
- const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,1);
+ const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,2);
 });
 test('market pipeline must authenticate, stores snapshots per region and the public read returns them',async()=>{
  const app=setup();await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);

@@ -110,9 +110,9 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),id,now+90000).run();
   }
   const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{}};
-  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/'};
+  const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/',mining:'mining/'};
   // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
-  const trim={journal:50,transactions:50};
+  const trim={journal:50,transactions:50,mining:400};
   const prior=parseSnapshot(row);
   await Promise.all(Object.entries(paths).map(async([key,path])=>{
    const optional=OPERATIONS_SCOPES[key];
@@ -146,7 +146,7 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
   const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance and asset summary with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance, asset summary, ship, location and mining ledger with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
@@ -171,7 +171,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!tokens.refresh_token)throw new ServiceError('EVE did not return a refresh token. Reconnect the pilot.',502);
   const identity=await verify(tokens.access_token,env,payload.id,fetchImpl);
   const encrypted=await encrypt({accessToken:tokens.access_token,refreshToken:tokens.refresh_token,expires:identity.expires,scopes:identity.scopes},env.TOKEN_ENCRYPTION_KEY);
-  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?1:0).run();
+  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?2:0).run();
   const bearer=random(),expires=Date.now()+SESSION_MS;
   await env.DB.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').bind(await hash(bearer),payload.id,expires).run();
   await syncPilot(payload.id,env,fetchImpl,{force:true});
@@ -212,10 +212,12 @@ async function route(request,env,ctx,fetchImpl){
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);
-  const rows=await env.DB.prepare('SELECT character_id, name, snapshot, share_wing FROM pilots WHERE share_wing = 1 OR character_id = ?').bind(s.character_id).all();
+  const rows=await env.DB.prepare('SELECT character_id, name, snapshot, share_wing FROM pilots WHERE share_wing > 0 OR character_id = ?').bind(s.character_id).all();
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
-   return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null};
+   return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
+    // Consent version 2 also covers ship, location and the mining ledger.
+    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null}:{})};
   })});
  }
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){
