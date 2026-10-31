@@ -1,0 +1,16 @@
+name: dump
+on: {push: {branches: [tmp-dump]}}
+permissions: {contents: write}
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p dump
+          curl -sSf https://eve-journal-api.eve-pilots-f6933080.workers.dev/api/market -o dump/market.json
+          for s in 30000142 30002187; do curl -sSf "https://esi.evetech.net/latest/industry/systems/" -o dump/indices.json; done
+          curl -sSf "https://esi.evetech.net/latest/markets/prices/" -o dump/prices.json
+          curl -sSf "https://eve-journal-api.eve-pilots-f6933080.workers.dev/api/pilots" -o dump/pilots.json || true
+          git config user.name dump; git config user.email dump@example.com
+          git add dump && git commit -qm "[skip ci] dump" && git push -q
