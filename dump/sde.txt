@@ -1,0 +1,538 @@
+FILES ['characterTitles.jsonl', 'npcCorporationDivisions.jsonl', 'corporationRoles.jsonl', 'skinrComponentRarities.jsonl', 'missions.jsonl', 'epicArcs.jsonl', 'skinrSlotCategories.jsonl', 'bloodlines.jsonl', 'typeMaterials.jsonl', 'schoolMap.jsonl', 'mapMoons.jsonl', 'schools.jsonl', 'dynamicItemAttributes.jsonl', 'mapSecondarySuns.jsonl', 'skillPlans.jsonl', 'corporationRoleGroups.jsonl', 'skinMaterials.jsonl', 'skinrComponents.jsonl', 'skinrComponentCategories.jsonl', 'skinrSlots.jsonl', 'blueprints.jsonl', 'militaryCampaigns.jsonl', 'dogmaUnits.jsonl', 'dogmaAttributes.jsonl', 'expertSystems.jsonl', 'proximityTrap.jsonl', 'stationServices.jsonl', 'characterAttributes.jsonl', 'categories.jsonl', 'mapAsteroidBelts.jsonl', 'skins.jsonl', 'mapRegions.jsonl', 'stationStandingsRestrictions.jsonl', 'graphics.jsonl', 'notificationTypes.jsonl', 'freelanceJobSchemas.jsonl', 'mercenaryTacticalOperations.jsonl', 'controlTowerResources.jsonl', 'fighterAbilities.jsonl', 'accountingEntryTypes.jsonl', 'translationLanguages.jsonl', 'landmarks.jsonl', 'npcStations.jsonl', 'dogmaAttributeCategories.jsonl', 'systemWideEffects.jsonl', 'graphicMaterialSets.jsonl', 'dungeons.jsonl', 'archetypes.jsonl', 'skinrSlotConfigurations.jsonl', 'fighterAbilitiesByType.jsonl', 'shipTreeFactions.jsonl', 'industryTargetFilters.jsonl', 'cloneGrades.jsonl', 'agentsInSpace.jsonl', 'metenoxMoonDrill.jsonl', 'skinLicenses.jsonl', 'npcCharacters.jsonl', 'marketGroups.jsonl', 'npcCorporations.jsonl', 'skinrComponentPointValues.jsonl', 'planetSchematics.jsonl', 'icons.jsonl', 'skinrTierThresholds.jsonl', 'ancestries.jsonl', 'mapConstellations.jsonl', 'typeBonus.jsonl', 'agentTypes.jsonl', 'skinrSlotsToMaterials.jsonl', 'certificates.jsonl', 'industryModifierSources.jsonl', 'factions.jsonl', 'planetResources.jsonl', 'militaryCampaignObjectives.jsonl', 'industryAssemblyLines.jsonl', 'groups.jsonl', 'compressibleTypes.jsonl', 'mapStargates.jsonl', 'shipTreeElements.jsonl', 'typeLists.jsonl', 'mapStars.jsonl', 'linkWithShip.jsonl', 'contrabandTypes.jsonl', 'skinrSlotNames.jsonl', 'types.jsonl', 'appliedProximityEffects.jsonl', 'dbuffCollections.jsonl', 'races.jsonl', '_sde.jsonl', 'mapPlanets.jsonl', 'mapSolarSystems.jsonl', 'stationOperations.jsonl', 'shipTreeGroups.jsonl', 'dogmaEffects.jsonl', 'metaGroups.jsonl', 'corporationActivities.jsonl', 'sovereigntyUpgrades.jsonl', 'masteries.jsonl', 'industryActivities.jsonl', 'systemDbuffEmitters.jsonl', 'industryInstallationTypes.jsonl', 'typeElements.jsonl', 'typeDogma.jsonl']
+GROUP SAMPLE {'_key': 0, 'anchorable': False, 'anchored': False, 'categoryID': 0, 'fittableNonSingleton': False, 'name': {'de': '#System', 'en': '#System', 'es': '#System', 'fr': '#Système', 'ja': '#システム', 'ko': '#항성계', 'ru': '#Система', 'zh': '#星系'}, 'published': False, 'useBasePrice': False}
+ORE GROUPS {450: 'Arkonor', 451: 'Bistot', 452: 'Crokite', 453: 'Dark Ochre', 454: 'Hedbergite', 455: 'Hemorphite', 456: 'Jaspet', 457: 'Kernite', 458: 'Plagioclase', 459: 'Pyroxeres', 460: 'Scordite', 461: 'Spodumain', 462: 'Veldspar', 465: 'Ice', 467: 'Gneiss', 468: 'Mercoxit', 469: 'Omber', 519: 'Terran Artifacts', 903: 'Ancient Compressed Ice', 1884: 'Ubiquitous Moon Asteroids', 1911: 'Empire Asteroids', 1920: 'Common Moon Asteroids', 1921: 'Uncommon Moon Asteroids', 1922: 'Rare Moon Asteroids', 1923: 'Exceptional Moon Asteroids', 2006: 'Deadspace Asteroids', 2022: 'Temporal Resources', 2024: 'Fluorite', 4029: 'Talassonite', 4030: 'Rakovene', 4031: 'Bezdnacine', 4094: 'Scalable Decorative Asteroid', 4161: 'AIR Ore Asteroid Resources', 4513: 'Mordunium', 4514: 'Ytirium', 4515: 'Eifyrium', 4516: 'Ducinium', 4568: 'Mutanite', 4714: 'Non-Interactable Asteroids', 4755: 'Kylixium', 4756: 'Nocxite', 4757: 'Ueganite', 4758: 'Hezorime', 4759: 'Griemeer', 4857: 'Tyranite', 5083: 'Raspite', 5084: 'Polycrase', 5085: 'Moissanite', 5086: 'Kangite'}
+TYPE 482 Miner II group 54 vol 5.0 cap None portion 1
+TYPE 483 Miner I group 54 vol 5.0 cap None portion 1
+TYPE 1228 Scordite group 460 vol 0.15 cap None portion 100
+TYPE 1230 Veldspar group 462 vol 0.1 cap None portion 100
+TYPE 3385 Reprocessing group 1218 vol 0.01 cap None portion 1
+TYPE 3386 Mining group 1218 vol 0.01 cap None portion 1
+TYPE 3389 Reprocessing Efficiency group 1218 vol 0.01 cap None portion 1
+TYPE 3410 Astrogeology group 1218 vol 0.01 cap None portion 1
+TYPE 16278 Ice Harvester I group 464 vol 5.0 cap None portion 1
+TYPE 17476 Covetor group 463 vol 150000.0 cap 350.0 portion 1
+TYPE 17478 Retriever group 463 vol 150000.0 cap 450.0 portion 1
+TYPE 17480 Procurer group 463 vol 150000.0 cap 350.0 portion 1
+TYPE 17482 Strip Miner I group 464 vol 5.0 cap None portion 1
+TYPE 17940 Mining Barge group 257 vol 0.01 cap None portion 1
+TYPE 22542 Mining Laser Upgrade I group 546 vol 5.0 cap None portion 1
+TYPE 22544 Hulk group 543 vol 150000.0 cap 350.0 portion 1
+TYPE 22546 Skiff group 543 vol 150000.0 cap 350.0 portion 1
+TYPE 22548 Mackinaw group 543 vol 150000.0 cap 450.0 portion 1
+TYPE 22551 Exhumers group 257 vol 0.01 cap None portion 1
+TYPE 22578 Mining Upgrades group 1218 vol 0.01 cap None portion 1
+TYPE 28373 Ore Compression group 1218 vol 0.01 cap None portion 1
+TYPE 32880 Venture group 25 vol 29500.0 cap 50.0 portion 1
+TYPE 32918 Mining Frigate group 257 vol 0.01 cap None portion 1
+TYPE 33697 Prospect group 1283 vol 50000.0 cap 150.0 portion 1
+TYPE 33856 Expedition Frigates group 257 vol 0.01 cap None portion 1
+TYPE 37135 Endurance group 1283 vol 50000.0 cap 200.0 portion 1
+TYPE 60377 Simple Ore Processing group 1218 vol 0.01 cap None portion 1
+TYPE 60378 Coherent Ore Processing group 1218 vol 0.01 cap None portion 1
+TYPE 60379 Variegated Ore Processing group 1218 vol 0.01 cap None portion 1
+TYPE 62516 Compressed Veldspar group 462 vol 0.001 cap None portion 100
+TYPE 89240 Pioneer group 420 vol 55000.0 cap 250.0 portion 1
+TYPE 95192 Pioneer group 4091 vol 1.0 cap None portion 1
+ORES
+18 Plagioclase Plagioclase 0.35 100 None
+19 Spodumain Spodumain 16.0 100 None
+20 Kernite Kernite 1.2 100 None
+21 Hedbergite Hedbergite 3.0 100 None
+22 Arkonor Arkonor 16.0 100 None
+1223 Bistot Bistot 16.0 100 None
+1224 Pyroxeres Pyroxeres 0.3 100 None
+1225 Crokite Crokite 16.0 100 None
+1226 Jaspet Jaspet 2.0 100 None
+1227 Omber Omber 0.6 100 None
+1228 Scordite Scordite 0.15 100 None
+1229 Gneiss Gneiss 5.0 100 None
+1230 Veldspar Veldspar 0.1 100 None
+1231 Hemorphite Hemorphite 3.0 100 None
+1232 Dark Ochre Dark Ochre 8.0 100 None
+11396 Mercoxit Mercoxit 40.0 100 None
+16262 Ice Clear Icicle 1000.0 1 None
+16263 Ice Glacial Mass 1000.0 1 None
+16264 Ice Blue Ice 1000.0 1 None
+16265 Ice White Glaze 1000.0 1 None
+16266 Ice Glare Crust 1000.0 1 None
+16267 Ice Dark Glitter 1000.0 1 None
+16268 Ice Gelidus 1000.0 1 None
+16269 Ice Krystallos 1000.0 1 None
+17425 Arkonor Arkonor II-Grade 16.0 100 None
+17426 Arkonor Arkonor III-Grade 16.0 100 None
+17428 Bistot Bistot II-Grade 16.0 100 None
+17429 Bistot Bistot III-Grade 16.0 100 None
+17432 Crokite Crokite II-Grade 16.0 100 None
+17433 Crokite Crokite III-Grade 16.0 100 None
+17436 Dark Ochre Dark Ochre II-Grade 8.0 100 None
+17437 Dark Ochre Dark Ochre III-Grade 8.0 100 None
+17440 Hedbergite Hedbergite II-Grade 3.0 100 None
+17441 Hedbergite Hedbergite III-Grade 3.0 100 None
+17444 Hemorphite Hemorphite II-Grade 3.0 100 None
+17445 Hemorphite Hemorphite III-Grade 3.0 100 None
+17448 Jaspet Jaspet II-Grade 2.0 100 None
+17449 Jaspet Jaspet III-Grade 2.0 100 None
+17452 Kernite Kernite II-Grade 1.2 100 None
+17453 Kernite Kernite III-Grade 1.2 100 None
+17455 Plagioclase Plagioclase II-Grade 0.35 100 None
+17456 Plagioclase Plagioclase III-Grade 0.35 100 None
+17459 Pyroxeres Pyroxeres II-Grade 0.3 100 None
+17460 Pyroxeres Pyroxeres III-Grade 0.3 100 None
+17463 Scordite Scordite II-Grade 0.15 100 None
+17464 Scordite Scordite III-Grade 0.15 100 None
+17466 Spodumain Spodumain II-Grade 16.0 100 None
+17467 Spodumain Spodumain III-Grade 16.0 100 None
+17470 Veldspar Veldspar II-Grade 0.1 100 None
+17471 Veldspar Veldspar III-Grade 0.1 100 None
+17865 Gneiss Gneiss II-Grade 5.0 100 None
+17866 Gneiss Gneiss III-Grade 5.0 100 None
+17867 Omber Omber II-Grade 0.6 100 None
+17868 Omber Omber III-Grade 0.6 100 None
+17869 Mercoxit Mercoxit II-Grade 40.0 100 None
+17870 Mercoxit Mercoxit III-Grade 40.0 100 None
+17975 Ice Blue Ice IV-Grade 1000.0 1 None
+17976 Ice White Glaze IV-Grade 1000.0 1 None
+17977 Ice Glacial Mass IV-Grade 1000.0 1 None
+17978 Ice Clear Icicle IV-Grade 1000.0 1 None
+28367 Arkonor Batch Compressed Arkonor 8.8 1 None
+28385 Arkonor Batch Compressed Arkonor II-Grade 8.8 1 None
+28387 Arkonor Batch Compressed Arkonor III-Grade 8.8 1 None
+28388 Bistot Batch Compressed Bistot 4.4 1 None
+28389 Bistot Batch Compressed Bistot III-Grade 4.4 1 None
+28390 Bistot Batch Compressed Bistot II-Grade 4.4 1 None
+28391 Crokite Batch Compressed Crokite 7.81 1 None
+28392 Crokite Batch Compressed Crokite III-Grade 7.81 1 None
+28393 Crokite Batch Compressed Crokite II-Grade 7.81 1 None
+28394 Dark Ochre Batch Compressed Dark Ochre 4.2 1 None
+28395 Dark Ochre Batch Compressed Dark Ochre III-Grade 4.2 1 None
+28396 Dark Ochre Batch Compressed Dark Ochre II-Grade 4.2 1 None
+28397 Gneiss Batch Compressed Gneiss 1.8 1 None
+28398 Gneiss Batch Compressed Gneiss II-Grade 1.8 1 None
+28399 Gneiss Batch Compressed Gneiss III-Grade 1.8 1 None
+28400 Hedbergite Batch Compressed Hedbergite III-Grade 0.47 1 None
+28401 Hedbergite Batch Compressed Hedbergite 0.47 1 None
+28402 Hedbergite Batch Compressed Hedbergite II-Grade 0.47 1 None
+28403 Hemorphite Batch Compressed Hemorphite 0.86 1 None
+28404 Hemorphite Batch Compressed Hemorphite III-Grade 0.86 1 None
+28405 Hemorphite Batch Compressed Hemorphite II-Grade 0.86 1 None
+28406 Jaspet Batch Compressed Jaspet 0.15 1 None
+28407 Jaspet Batch Compressed Jaspet III-Grade 0.15 1 None
+28408 Jaspet Batch Compressed Jaspet II-Grade 0.15 1 None
+28409 Kernite Batch Compressed Kernite III-Grade 0.19 1 None
+28410 Kernite Batch Compressed Kernite 0.19 1 None
+28411 Kernite Batch Compressed Kernite II-Grade 0.19 1 None
+28412 Mercoxit Batch Compressed Mercoxit II-Grade 0.1 1 None
+28413 Mercoxit Batch Compressed Mercoxit 0.1 1 None
+28414 Mercoxit Batch Compressed Mercoxit III-Grade 0.1 1 None
+28415 Omber Batch Compressed Omber III-Grade 0.3 1 None
+28416 Omber Batch Compressed Omber 0.3 1 None
+28417 Omber Batch Compressed Omber II-Grade 0.3 1 None
+28418 Spodumain Batch Compressed Spodumain II-Grade 28.0 1 None
+28419 Spodumain Batch Compressed Spodumain III-Grade 28.0 1 None
+28420 Spodumain Batch Compressed Spodumain 28.0 1 None
+28421 Plagioclase Batch Compressed Plagioclase II-Grade 0.15 1 None
+28422 Plagioclase Batch Compressed Plagioclase 0.15 1 None
+28423 Plagioclase Batch Compressed Plagioclase III-Grade 0.15 1 None
+28424 Pyroxeres Batch Compressed Pyroxeres 0.16 1 None
+28425 Pyroxeres Batch Compressed Pyroxeres II-Grade 0.16 1 None
+28426 Pyroxeres Batch Compressed Pyroxeres III-Grade 0.16 1 None
+28427 Scordite Batch Compressed Scordite II-Grade 0.19 1 None
+28428 Scordite Batch Compressed Scordite III-Grade 0.19 1 None
+28429 Scordite Batch Compressed Scordite 0.19 1 None
+28430 Veldspar Batch Compressed Veldspar II-Grade 0.15 1 None
+28431 Veldspar Batch Compressed Veldspar III-Grade 0.15 1 None
+28432 Veldspar Batch Compressed Veldspar 0.15 1 None
+28433 Ice Compressed Blue Ice 100.0 1 None
+28434 Ice Compressed Clear Icicle 100.0 1 None
+28435 Ice Compressed Dark Glitter 100.0 1 None
+28436 Ice Compressed Clear Icicle IV-Grade 100.0 1 None
+28437 Ice Compressed Gelidus 100.0 1 None
+28438 Ice Compressed Glacial Mass 100.0 1 None
+28439 Ice Compressed Glare Crust 100.0 1 None
+28440 Ice Compressed Krystallos 100.0 1 None
+28441 Ice Compressed White Glaze IV-Grade 100.0 1 None
+28442 Ice Compressed Glacial Mass IV-Grade 100.0 1 None
+28443 Ice Compressed Blue Ice IV-Grade 100.0 1 None
+28444 Ice Compressed White Glaze 100.0 1 None
+28617 Veldspar Banidine 0.1 1 None
+28618 Pyroxeres Augumene 0.3 1 None
+28619 Omber Mercium 0.6 1 None
+28620 Kernite Lyavite 1.2 1 None
+28621 Jaspet Pithix 2.0 1 None
+28622 Gneiss Green Arisite 5.0 1 None
+28623 Dark Ochre Oeryl 8.0 1 None
+28624 Crokite Geodite 16.0 1 None
+28625 Arkonor Polygypsum 16.0 1 None
+28626 Mercoxit Zuthrine 40.0 1 None
+28627 Ice Azure Ice 1000.0 1 None
+28628 Ice Crystalline Icicle 1000.0 1 None
+45490 Ubiquitous Moon Asteroids Zeolites 10.0 100 None
+45491 Ubiquitous Moon Asteroids Sylvite 10.0 100 None
+45492 Ubiquitous Moon Asteroids Bitumens 10.0 100 None
+45493 Ubiquitous Moon Asteroids Coesite 10.0 100 None
+45494 Common Moon Asteroids Cobaltite 10.0 100 None
+45495 Common Moon Asteroids Euxenite 10.0 100 None
+45496 Common Moon Asteroids Titanite 10.0 100 None
+45497 Common Moon Asteroids Scheelite 10.0 100 None
+45498 Uncommon Moon Asteroids Otavite 10.0 100 None
+45499 Uncommon Moon Asteroids Sperrylite 10.0 100 None
+45500 Uncommon Moon Asteroids Vanadinite 10.0 100 None
+45501 Uncommon Moon Asteroids Chromite 10.0 100 None
+45502 Rare Moon Asteroids Carnotite 10.0 100 None
+45503 Rare Moon Asteroids Zircon 10.0 100 None
+45504 Rare Moon Asteroids Pollucite 10.0 100 None
+45506 Rare Moon Asteroids Cinnabar 10.0 100 None
+45510 Exceptional Moon Asteroids Xenotime 10.0 100 None
+45511 Exceptional Moon Asteroids Monazite 10.0 100 None
+45512 Exceptional Moon Asteroids Loparite 10.0 100 None
+45513 Exceptional Moon Asteroids Ytterbite 10.0 100 None
+46280 Ubiquitous Moon Asteroids Brimful Zeolites 10.0 100 None
+46281 Ubiquitous Moon Asteroids Glistening Zeolites 10.0 100 None
+46282 Ubiquitous Moon Asteroids Brimful Sylvite 10.0 100 None
+46283 Ubiquitous Moon Asteroids Glistening Sylvite 10.0 100 None
+46284 Ubiquitous Moon Asteroids Brimful Bitumens 10.0 100 None
+46285 Ubiquitous Moon Asteroids Glistening Bitumens 10.0 100 None
+46286 Ubiquitous Moon Asteroids Brimful Coesite 10.0 100 None
+46287 Ubiquitous Moon Asteroids Glistening Coesite 10.0 100 None
+46288 Common Moon Asteroids Copious Cobaltite 10.0 100 None
+46289 Common Moon Asteroids Twinkling Cobaltite 10.0 100 None
+46290 Common Moon Asteroids Copious Euxenite 10.0 100 None
+46291 Common Moon Asteroids Twinkling Euxenite 10.0 100 None
+46292 Common Moon Asteroids Copious Titanite 10.0 100 None
+46293 Common Moon Asteroids Twinkling Titanite 10.0 100 None
+46294 Common Moon Asteroids Copious Scheelite 10.0 100 None
+46295 Common Moon Asteroids Twinkling Scheelite 10.0 100 None
+46296 Uncommon Moon Asteroids Lavish Otavite 10.0 100 None
+46297 Uncommon Moon Asteroids Shimmering Otavite 10.0 100 None
+46298 Uncommon Moon Asteroids Lavish Sperrylite 10.0 100 None
+46299 Uncommon Moon Asteroids Shimmering Sperrylite 10.0 100 None
+46300 Uncommon Moon Asteroids Lavish Vanadinite 10.0 100 None
+46301 Uncommon Moon Asteroids Shimmering Vanadinite 10.0 100 None
+46302 Uncommon Moon Asteroids Lavish Chromite 10.0 100 None
+46303 Uncommon Moon Asteroids Shimmering Chromite 10.0 100 None
+46304 Rare Moon Asteroids Replete Carnotite 10.0 100 None
+46305 Rare Moon Asteroids Glowing Carnotite 10.0 100 None
+46306 Rare Moon Asteroids Replete Zircon 10.0 100 None
+46307 Rare Moon Asteroids Glowing Zircon 10.0 100 None
+46308 Rare Moon Asteroids Replete Pollucite 10.0 100 None
+46309 Rare Moon Asteroids Glowing Pollucite 10.0 100 None
+46310 Rare Moon Asteroids Replete Cinnabar 10.0 100 None
+46311 Rare Moon Asteroids Glowing Cinnabar 10.0 100 None
+46312 Exceptional Moon Asteroids Bountiful Xenotime 10.0 100 None
+46313 Exceptional Moon Asteroids Shining Xenotime 10.0 100 None
+46314 Exceptional Moon Asteroids Bountiful Monazite 10.0 100 None
+46315 Exceptional Moon Asteroids Shining Monazite 10.0 100 None
+46316 Exceptional Moon Asteroids Bountiful Loparite 10.0 100 None
+46317 Exceptional Moon Asteroids Shining Loparite 10.0 100 None
+46318 Exceptional Moon Asteroids Bountiful Ytterbite 10.0 100 None
+46319 Exceptional Moon Asteroids Shining Ytterbite 10.0 100 None
+46675 Dark Ochre Dark Ochre IV-Grade 8.0 100 None
+46676 Bistot Bistot IV-Grade 16.0 100 None
+46677 Crokite Crokite IV-Grade 16.0 100 None
+46678 Arkonor Arkonor IV-Grade 16.0 100 None
+46679 Gneiss Gneiss IV-Grade 5.0 100 None
+46680 Hedbergite Hedbergite IV-Grade 3.0 100 None
+46681 Hemorphite Hemorphite IV-Grade 3.0 100 None
+46682 Jaspet Jaspet IV-Grade 2.0 100 None
+46683 Kernite Kernite IV-Grade 1.2 100 None
+46684 Omber Omber IV-Grade 0.6 100 None
+46685 Plagioclase Plagioclase IV-Grade 0.35 100 None
+46686 Pyroxeres Pyroxeres IV-Grade 0.3 100 None
+46687 Scordite Scordite IV-Grade 0.15 100 None
+46688 Spodumain Spodumain IV-Grade 16.0 100 None
+46689 Veldspar Veldspar IV-Grade 0.1 100 None
+46691 Arkonor Batch Compressed Arkonor IV-Grade 8.8 1 None
+46692 Bistot Batch Compressed Bistot IV-Grade 4.4 1 None
+46693 Crokite Batch Compressed Crokite IV-Grade 7.81 1 None
+46694 Dark Ochre Batch Compressed Dark Ochre IV-Grade 4.2 1 None
+46695 Gneiss Batch Compressed Gneiss IV-Grade 1.8 1 None
+46696 Hedbergite Batch Compressed Hedbergite IV-Grade 0.47 1 None
+46697 Hemorphite Batch Compressed Hemorphite IV-Grade 0.86 1 None
+46698 Jaspet Batch Compressed Jaspet IV-Grade 0.15 1 None
+46699 Kernite Batch Compressed Kernite IV-Grade 0.19 1 None
+46700 Omber Batch Compressed Omber IV-Grade 0.3 1 None
+46701 Plagioclase Batch Compressed Plagioclase IV-Grade 0.15 1 None
+46702 Pyroxeres Batch Compressed Pyroxeres IV-Grade 0.16 1 None
+46703 Scordite Batch Compressed Scordite IV-Grade 0.19 1 None
+46704 Spodumain Batch Compressed Spodumain IV-Grade 28.0 1 None
+46705 Veldspar Batch Compressed Veldspar IV-Grade 0.15 1 None
+49789 Temporal Resources Hiemal Tricarboxyl Condensate 6.0 100 19
+50015 Fluorite Amethystic Crystallite 3.0 1000 19
+52306 Talassonite Talassonite 16.0 100 None
+52315 Rakovene Rakovene 16.0 100 None
+52316 Bezdnacine Bezdnacine 16.0 100 None
+56625 Talassonite Talassonite II-Grade 16.0 100 None
+56626 Talassonite Talassonite III-Grade 16.0 100 None
+56627 Bezdnacine Bezdnacine II-Grade 16.0 100 None
+56628 Bezdnacine Bezdnacine III-Grade 16.0 100 None
+56629 Rakovene Rakovene II-Grade 16.0 100 None
+56630 Rakovene Rakovene III-Grade 16.0 100 None
+60771 AIR Ore Asteroid Resources Nephrite 0.1 333 None
+62454 Ubiquitous Moon Asteroids Compressed Bitumens 0.1 100 None
+62455 Ubiquitous Moon Asteroids Compressed Brimful Bitumens 0.1 100 None
+62456 Ubiquitous Moon Asteroids Compressed Glistening Bitumens 0.1 100 None
+62457 Ubiquitous Moon Asteroids Compressed Coesite 0.1 100 None
+62458 Ubiquitous Moon Asteroids Compressed Brimful Coesite 0.1 100 None
+62459 Ubiquitous Moon Asteroids Compressed Glistening Coesite 0.1 100 None
+62460 Ubiquitous Moon Asteroids Compressed Sylvite 0.1 100 None
+62461 Ubiquitous Moon Asteroids Compressed Brimful Sylvite 0.1 100 None
+62463 Ubiquitous Moon Asteroids Compressed Zeolites 0.1 100 None
+62464 Ubiquitous Moon Asteroids Compressed Brimful Zeolites 0.1 100 None
+62466 Ubiquitous Moon Asteroids Compressed Glistening Sylvite 0.1 100 None
+62467 Ubiquitous Moon Asteroids Compressed Glistening Zeolites 0.1 100 None
+62468 Common Moon Asteroids Compressed Scheelite 0.1 100 None
+62469 Common Moon Asteroids Compressed Copious Scheelite 0.1 100 None
+62470 Common Moon Asteroids Compressed Twinkling Scheelite 0.1 100 None
+62471 Common Moon Asteroids Compressed Euxenite 0.1 100 None
+62472 Common Moon Asteroids Compressed Copious Euxenite 0.1 100 None
+62473 Common Moon Asteroids Compressed Twinkling Euxenite 0.1 100 None
+62474 Common Moon Asteroids Compressed Cobaltite 0.1 100 None
+62475 Common Moon Asteroids Compressed Copious Cobaltite 0.1 100 None
+62476 Common Moon Asteroids Compressed Twinkling Cobaltite 0.1 100 None
+62477 Common Moon Asteroids Compressed Titanite 0.1 100 None
+62478 Common Moon Asteroids Compressed Copious Titanite 0.1 100 None
+62479 Common Moon Asteroids Compressed Twinkling Titanite 0.1 100 None
+62480 Uncommon Moon Asteroids Compressed Chromite 0.1 100 None
+62481 Uncommon Moon Asteroids Compressed Lavish Chromite 0.1 100 None
+62482 Uncommon Moon Asteroids Compressed Shimmering Chromite 0.1 100 None
+62483 Uncommon Moon Asteroids Compressed Otavite 0.1 100 None
+62484 Uncommon Moon Asteroids Compressed Lavish Otavite 0.1 100 None
+62485 Uncommon Moon Asteroids Compressed Shimmering Otavite 0.1 100 None
+62486 Uncommon Moon Asteroids Compressed Sperrylite 0.1 100 None
+62487 Uncommon Moon Asteroids Compressed Lavish Sperrylite 0.1 100 None
+62488 Uncommon Moon Asteroids Compressed Shimmering Sperrylite 0.1 100 None
+62489 Uncommon Moon Asteroids Compressed Vanadinite 0.1 100 None
+62490 Uncommon Moon Asteroids Compressed Lavish Vanadinite 0.1 100 None
+62491 Uncommon Moon Asteroids Compressed Shimmering Vanadinite 0.1 100 None
+62492 Rare Moon Asteroids Compressed Carnotite 0.1 100 None
+62493 Rare Moon Asteroids Compressed Replete Carnotite 0.1 100 None
+62494 Rare Moon Asteroids Compressed Glowing Carnotite 0.1 100 None
+62495 Rare Moon Asteroids Compressed Cinnabar 0.1 100 None
+62496 Rare Moon Asteroids Compressed Replete Cinnabar 0.1 100 None
+62497 Rare Moon Asteroids Compressed Glowing Cinnabar 0.1 100 None
+62498 Rare Moon Asteroids Compressed Pollucite 0.1 100 None
+62499 Rare Moon Asteroids Compressed Replete Pollucite 0.1 100 None
+62500 Rare Moon Asteroids Compressed Glowing Pollucite 0.1 100 None
+62501 Rare Moon Asteroids Compressed Zircon 0.1 100 None
+62502 Rare Moon Asteroids Compressed Replete Zircon 0.1 100 None
+62503 Rare Moon Asteroids Compressed Glowing Zircon 0.1 100 None
+62504 Exceptional Moon Asteroids Compressed Loparite 0.1 100 None
+62505 Exceptional Moon Asteroids Compressed Bountiful Loparite 0.1 100 None
+62506 Exceptional Moon Asteroids Compressed Shining Loparite 0.1 100 None
+62507 Exceptional Moon Asteroids Compressed Monazite 0.1 100 None
+62508 Exceptional Moon Asteroids Compressed Bountiful Monazite 0.1 100 None
+62509 Exceptional Moon Asteroids Compressed Shining Monazite 0.1 100 None
+62510 Exceptional Moon Asteroids Compressed Xenotime 0.1 100 None
+62511 Exceptional Moon Asteroids Compressed Bountiful Xenotime 0.1 100 None
+62512 Exceptional Moon Asteroids Compressed Shining Xenotime 0.1 100 None
+62513 Exceptional Moon Asteroids Compressed Ytterbite 0.1 100 None
+62514 Exceptional Moon Asteroids Compressed Bountiful Ytterbite 0.1 100 None
+62515 Exceptional Moon Asteroids Compressed Shining Ytterbite 0.1 100 None
+62516 Veldspar Compressed Veldspar 0.001 100 None
+62517 Veldspar Compressed Veldspar II-Grade 0.001 100 None
+62518 Veldspar Compressed Veldspar III-Grade 0.001 100 None
+62519 Veldspar Compressed Veldspar IV-Grade 0.001 100 None
+62520 Scordite Compressed Scordite 0.0015 100 None
+62521 Scordite Compressed Scordite II-Grade 0.0015 100 None
+62522 Scordite Compressed Scordite III-Grade 0.0015 100 None
+62523 Scordite Compressed Scordite IV-Grade 0.0015 100 None
+62524 Pyroxeres Compressed Pyroxeres 0.003 100 None
+62525 Pyroxeres Compressed Pyroxeres II-Grade 0.003 100 None
+62526 Pyroxeres Compressed Pyroxeres III-Grade 0.003 100 None
+62527 Pyroxeres Compressed Pyroxeres IV-Grade 0.003 100 None
+62528 Plagioclase Compressed Plagioclase 0.0035 100 None
+62529 Plagioclase Compressed Plagioclase II-Grade 0.0035 100 None
+62530 Plagioclase Compressed Plagioclase III-Grade 0.0035 100 None
+62531 Plagioclase Compressed Plagioclase IV-Grade 0.0035 100 None
+62532 Omber Compressed Omber 0.006 100 None
+62533 Omber Compressed Omber II-Grade 0.006 100 None
+62534 Omber Compressed Omber III-Grade 0.006 100 None
+62535 Omber Compressed Omber IV-Grade 0.006 100 None
+62536 Kernite Compressed Kernite 0.012 100 None
+62537 Kernite Compressed Kernite II-Grade 0.012 100 None
+62538 Kernite Compressed Kernite III-Grade 0.012 100 None
+62539 Kernite Compressed Kernite IV-Grade 0.012 100 None
+62540 Jaspet Compressed Jaspet 0.02 100 None
+62541 Jaspet Compressed Jaspet II-Grade 0.02 100 None
+62542 Jaspet Compressed Jaspet III-Grade 0.02 100 None
+62543 Jaspet Compressed Jaspet IV-Grade 0.02 100 None
+62544 Hemorphite Compressed Hemorphite 0.03 100 None
+62545 Hemorphite Compressed Hemorphite II-Grade 0.03 100 None
+62546 Hemorphite Compressed Hemorphite III-Grade 0.03 100 None
+62547 Hemorphite Compressed Hemorphite IV-Grade 0.03 100 None
+62548 Hedbergite Compressed Hedbergite 0.03 100 None
+62549 Hedbergite Compressed Hedbergite II-Grade 0.03 100 None
+62550 Hedbergite Compressed Hedbergite III-Grade 0.03 100 None
+62551 Hedbergite Compressed Hedbergite IV-Grade 0.03 100 None
+62552 Gneiss Compressed Gneiss 0.05 100 None
+62553 Gneiss Compressed Gneiss II-Grade 0.05 100 None
+62554 Gneiss Compressed Gneiss III-Grade 0.05 100 None
+62555 Gneiss Compressed Gneiss IV-Grade 0.05 100 None
+62556 Dark Ochre Compressed Dark Ochre 0.08 100 None
+62557 Dark Ochre Compressed Dark Ochre II-Grade 0.08 100 None
+62558 Dark Ochre Compressed Dark Ochre III-Grade 0.08 100 None
+62559 Dark Ochre Compressed Dark Ochre IV-Grade 0.08 100 None
+62560 Crokite Compressed Crokite 0.16 100 None
+62561 Crokite Compressed Crokite II-Grade 0.16 100 None
+62562 Crokite Compressed Crokite III-Grade 0.16 100 None
+62563 Crokite Compressed Crokite IV-Grade 0.16 100 None
+62564 Bistot Compressed Bistot 0.16 100 None
+62565 Bistot Compressed Bistot II-Grade 0.16 100 None
+62566 Bistot Compressed Bistot III-Grade 0.16 100 None
+62567 Bistot Compressed Bistot IV-Grade 0.16 100 None
+62568 Arkonor Compressed Arkonor 0.16 100 None
+62569 Arkonor Compressed Arkonor II-Grade 0.16 100 None
+62570 Arkonor Compressed Arkonor III-Grade 0.16 100 None
+62571 Arkonor Compressed Arkonor IV-Grade 0.16 100 None
+62572 Spodumain Compressed Spodumain 0.16 100 None
+62573 Spodumain Compressed Spodumain II-Grade 0.16 100 None
+62574 Spodumain Compressed Spodumain III-Grade 0.16 100 None
+62575 Spodumain Compressed Spodumain IV-Grade 0.16 100 None
+62576 Bezdnacine Compressed Bezdnacine 0.16 100 None
+62577 Bezdnacine Compressed Bezdnacine II-Grade 0.16 100 None
+62578 Bezdnacine Compressed Bezdnacine III-Grade 0.16 100 None
+62579 Rakovene Compressed Rakovene 0.16 100 None
+62580 Rakovene Compressed Rakovene II-Grade 0.16 100 None
+62581 Rakovene Compressed Rakovene III-Grade 0.16 100 None
+62582 Talassonite Compressed Talassonite 0.16 100 None
+62583 Talassonite Compressed Talassonite II-Grade 0.16 100 None
+62584 Talassonite Compressed Talassonite III-Grade 0.16 100 None
+62586 Mercoxit Compressed Mercoxit 0.4 100 None
+62587 Mercoxit Compressed Mercoxit II-Grade 0.4 100 None
+62588 Mercoxit Compressed Mercoxit III-Grade 0.4 100 None
+72935 Empire Asteroids Dense Moissanite 0.1 100 None
+74521 Mordunium Mordunium 0.1 100 None
+74522 Mordunium Mordunium II-Grade 0.1 100 None
+74523 Mordunium Mordunium III-Grade 0.1 100 None
+74524 Mordunium Mordunium IV-Grade 0.1 100 None
+74525 Ytirium Ytirium 0.6 100 None
+74526 Ytirium Ytirium II-Grade 0.6 100 None
+74527 Ytirium Ytirium III-Grade 0.6 100 None
+74528 Ytirium Ytirium IV-Grade 0.6 100 None
+74529 Eifyrium Eifyrium 16.0 100 None
+74530 Eifyrium Eifyrium II-Grade 16.0 100 None
+74531 Eifyrium Eifyrium III-Grade 16.0 100 None
+74532 Eifyrium Eifyrium IV-Grade 16.0 100 None
+74533 Ducinium Ducinium 16.0 100 None
+74534 Ducinium Ducinium II-Grade 16.0 100 None
+74535 Ducinium Ducinium III-Grade 16.0 100 None
+74536 Ducinium Ducinium IV-Grade 16.0 100 None
+75275 Mordunium Compressed Mordunium 0.001 100 None
+75276 Mordunium Compressed Mordunium II-Grade 0.001 100 None
+75277 Mordunium Compressed Mordunium III-Grade 0.001 100 None
+75278 Mordunium Compressed Mordunium IV-Grade 0.001 100 None
+75279 Ytirium Compressed Ytirium 0.006 100 None
+75280 Ytirium Compressed Ytirium II-Grade 0.006 100 None
+75281 Ytirium Compressed Ytirium III-Grade 0.006 100 None
+75282 Ytirium Compressed Ytirium IV-Grade 0.006 100 None
+75283 Eifyrium Compressed Eifyrium 0.16 100 None
+75284 Eifyrium Compressed Eifyrium II-Grade 0.16 100 None
+75285 Eifyrium Compressed Eifyrium III-Grade 0.16 100 None
+75286 Eifyrium Compressed Eifyrium IV-Grade 0.16 100 None
+75287 Ducinium Compressed Ducinium 0.16 100 None
+75288 Ducinium Compressed Ducinium II-Grade 0.16 100 None
+75289 Ducinium Compressed Ducinium III-Grade 0.16 100 None
+75290 Ducinium Compressed Ducinium IV-Grade 0.16 100 None
+76373 Rakovene Nesosilicate Rakovene 0.5 100 None
+77118 Mutanite Amperum Mutanite 4.0 100 None
+77418 Mutanite Peregrinus Mutanite 4.0 100 None
+77419 Mutanite Conflagrati Mutanite 4.0 100 None
+77420 Mutanite Solis Mutanite 4.0 100 None
+77421 Mutanite Tenebraet Mutanite 4.0 100 None
+77524 Mutanite Admixti Mutanite 4.0 100 None
+81900 Kylixium Kylixium 1.2 100 None
+81901 Kylixium Kylixium II-Grade 1.2 100 None
+81902 Kylixium Kylixium III-Grade 1.2 100 None
+81903 Kylixium Kylixium IV-Grade 1.2 100 None
+81975 Griemeer Griemeer 0.8 100 None
+81976 Griemeer Griemeer II-Grade 0.8 100 None
+81977 Griemeer Griemeer III-Grade 0.8 100 None
+81978 Griemeer Griemeer IV-Grade 0.8 100 None
+82016 Nocxite Nocxite 4.0 100 None
+82017 Nocxite Nocxite II-Grade 4.0 100 None
+82018 Nocxite Nocxite III-Grade 4.0 100 None
+82019 Nocxite Nocxite IV-Grade 4.0 100 None
+82163 Hezorime Hezorime 5.0 100 None
+82164 Hezorime Hezorime II-Grade 5.0 100 None
+82165 Hezorime Hezorime III-Grade 5.0 100 None
+82166 Hezorime Hezorime IV-Grade 5.0 100 None
+82205 Ueganite Ueganite 5.0 100 None
+82206 Ueganite Ueganite II-Grade 5.0 100 None
+82207 Ueganite Ueganite III-Grade 5.0 100 None
+82208 Ueganite Ueganite IV-Grade 5.0 100 None
+82300 Kylixium Compressed Kylixium 0.012 100 None
+82301 Kylixium Compressed Kylixium II-Grade 0.012 100 None
+82302 Kylixium Compressed Kylixium III-Grade 0.012 100 None
+82303 Kylixium Compressed Kylixium IV-Grade 0.012 100 None
+82304 Nocxite Compressed Nocxite 0.04 100 None
+82305 Nocxite Compressed Nocxite II-Grade 0.04 100 None
+82306 Nocxite Compressed Nocxite III-Grade 0.04 100 None
+82307 Nocxite Compressed Nocxite IV-Grade 0.04 100 None
+82308 Ueganite Compressed Ueganite 0.05 100 None
+82309 Ueganite Compressed Ueganite II-Grade 0.05 100 None
+82310 Ueganite Compressed Ueganite III-Grade 0.05 100 None
+82311 Ueganite Compressed Ueganite IV-Grade 0.05 100 None
+82312 Hezorime Compressed Hezorime 0.05 100 None
+82313 Hezorime Compressed Hezorime II-Grade 0.05 100 None
+82314 Hezorime Compressed Hezorime III-Grade 0.05 100 None
+82315 Hezorime Compressed Hezorime IV-Grade 0.05 100 None
+82316 Griemeer Compressed Griemeer 0.008 100 None
+82317 Griemeer Compressed Griemeer II-Grade 0.008 100 None
+82318 Griemeer Compressed Griemeer III-Grade 0.008 100 None
+82319 Griemeer Compressed Griemeer IV-Grade 0.008 100 None
+88105 Tyranite Tyranite 0.6 100 19
+92371 Veldspar Veldspar 0-Grade 0.1 100 None
+92372 Veldspar Compressed Veldspar 0-Grade 0.001 100 None
+92373 Scordite Scordite 0-Grade 0.15 100 None
+92374 Scordite Compressed Scordite 0-Grade 0.0015 100 None
+92565 Raspite Raspite X-Grade 1.0 100 None
+92566 Polycrase Polycrase X-Grade 1.0 100 None
+92567 Moissanite Moissanite X-Grade 1.0 100 None
+92568 Kangite Kangite X-Grade 1.0 100 None
+92818 Raspite Compressed Raspite X-Grade 0.01 100 None
+92819 Polycrase Compressed Polycrase X-Grade 0.01 100 None
+92820 Moissanite Compressed Moissanite X-Grade 0.01 100 None
+92821 Kangite Compressed Kangite X-Grade 0.01 100 None
+95395 Pyroxeres Pyroxeres 0-Grade 0.3 100 None
+MATS {'_key': 1228, 'materials': [{'materialTypeID': 34, 'quantity': 150}, {'materialTypeID': 35, 'quantity': 110}]}
+MATS {'_key': 1230, 'materials': [{'materialTypeID': 34, 'quantity': 400}]}
+MATS {'_key': 62516, 'materials': [{'materialTypeID': 34, 'quantity': 400}]}
+DOGMA Miner II [(6, 'capacitorNeed', 18.0), (9, 'hp', 40.0), (30, 'power', 4.0), (47, 'slots', 1.0), (50, 'cpu', 80.0), (54, 'maxRange', 12000.0), (73, 'duration', 15000.0), (77, 'miningAmount', 15.0), (182, 'requiredSkill1', 3386.0), (277, 'requiredSkill1Level', 4.0), (422, 'techLevel', 2.0), (633, 'metaLevelOld', 5.0), (1768, 'typeColorScheme', 11347.0), (3153, 'miningWastedVolumeMultiplier', 1.0), (3154, 'miningWasteProbability', 34.0), (5967, 'miningCritChance', 0.01), (5969, 'miningCritBonusYield', 2.0)]
+EFFECTS [12, 16, 42, 67]
+DOGMA Miner I [(6, 'capacitorNeed', 5.0), (9, 'hp', 40.0), (30, 'power', 2.0), (47, 'slots', 1.0), (50, 'cpu', 60.0), (54, 'maxRange', 10000.0), (73, 'duration', 15000.0), (77, 'miningAmount', 10.0), (182, 'requiredSkill1', 3386.0), (277, 'requiredSkill1Level', 1.0), (422, 'techLevel', 1.0), (633, 'metaLevelOld', 0.0), (1768, 'typeColorScheme', 11346.0), (3153, 'miningWastedVolumeMultiplier', 0.0), (3154, 'miningWasteProbability', 0.0), (5967, 'miningCritChance', 0.01), (5969, 'miningCritBonusYield', 2.0)]
+EFFECTS [12, 16, 42, 67]
+DOGMA Reprocessing [(180, 'primaryAttribute', 166.0), (181, 'secondaryAttribute', 165.0), (182, 'requiredSkill1', 3380.0), (275, 'skillTimeConstant', 1.0), (277, 'requiredSkill1Level', 1.0), (280, 'skillLevel', 0.0), (379, 'refiningYieldMutator', 3.0)]
+EFFECTS [132, 331, 435]
+DOGMA Mining [(180, 'primaryAttribute', 166.0), (181, 'secondaryAttribute', 165.0), (275, 'skillTimeConstant', 1.0), (280, 'skillLevel', 0.0), (434, 'miningAmountBonus', 5.0)]
+EFFECTS [132, 389, 391]
+DOGMA Reprocessing Efficiency [(180, 'primaryAttribute', 166.0), (181, 'secondaryAttribute', 165.0), (182, 'requiredSkill1', 3385.0), (275, 'skillTimeConstant', 3.0), (277, 'requiredSkill1Level', 4.0), (280, 'skillLevel', 0.0), (379, 'refiningYieldMutator', 2.0)]
+EFFECTS [132, 331, 435]
+DOGMA Astrogeology [(180, 'primaryAttribute', 165.0), (181, 'secondaryAttribute', 166.0), (182, 'requiredSkill1', 3402.0), (183, 'requiredSkill2', 3386.0), (275, 'skillTimeConstant', 3.0), (277, 'requiredSkill1Level', 4.0), (278, 'requiredSkill2Level', 4.0), (280, 'skillLevel', 0.0), (434, 'miningAmountBonus', 5.0)]
+EFFECTS [132, 389, 391]
+DOGMA Covetor [(3, 'damage', 0.0), (9, 'hp', 3000.0), (11, 'powerOutput', 70.0), (12, 'lowSlots', 3.0), (13, 'medSlots', 2.0), (14, 'hiSlots', 2.0), (15, 'powerLoad', 0.0), (19, 'powerToSpeed', 1.0), (21, 'warpFactor', 0.0), (37, 'maxVelocity', 150.0), (48, 'cpuOutput', 240.0), (49, 'cpuLoad', 0.0), (55, 'rechargeRate', 187500.0), (70, 'agility', 0.6), (76, 'maxTargetRange', 40000.0), (79, 'scanSpeed', 1500.0), (101, 'launcherSlotsLeft', 0.0), (102, 'turretSlotsLeft', 0.0), (109, 'kineticDamageResonance', 0.67), (110, 'thermalDamageResonance', 0.67), (111, 'explosiveDamageResonance', 0.67), (113, 'emDamageResonance', 0.67), (124, 'mainColor', 16777215.0), (129, 'maxPassengers', 20.0), (136, 'uniformity', 1.0), (153, 'warpCapacitorNeed', 3.33e-07), (182, 'requiredSkill1', 17940.0), (183, 'requiredSkill2', 3410.0), (188, 'cargoScanResistance', 0.0), (192, 'maxLockedTargets', 6.0), (208, 'scanRadarStrength', 0.0), (209, 'scanLadarStrength', 0.0), (210, 'scanMagnetometricStrength', 9.0), (211, 'scanGravimetricStrength', 0.0), (217, 'propulsionGraphicID', 397.0), (246, 'gfxBoosterID', 397.0), (263, 'shieldCapacity', 3000.0), (265, 'armorHP', 2000.0), (267, 'armorEmDamageResonance', 0.4), (268, 'armorExplosiveDamageResonance', 0.9), (269, 'armorKineticDamageResonance', 0.75), (270, 'armorThermalDamageResonance', 0.65), (271, 'shieldEmDamageResonance', 1.0), (272, 'shieldExplosiveDamageResonance', 0.5), (273, 'shieldKineticDamageResonance', 0.6), (274, 'shieldThermalDamageResonance', 0.8), (277, 'requiredSkill1Level', 1.0), (278, 'requiredSkill2Level', 3.0), (283, 'droneCapacity', 50.0), (422, 'techLevel', 1.0), (479, 'shieldRechargeRate', 1000000.0), (482, 'capacitorCapacity', 350.0), (484, 'shieldUniformity', 0.75), (511, 'shipScanResistance', 0.0), (524, 'armorUniformity', 0.75), (525, 'structureUniformity', 1.0), (552, 'signatureRadius', 200.0), (564, 'scanResolution', 660.0), (600, 'warpSpeedMultiplier', 3.5), (633, 'metaLevelOld', 0.0), (661, 'maxDirectionalVelocity', 3000.0), (662, 'minTargetVelDmgMultiplier', 0.05), (1132, 'upgradeCapacity', 400.0), (1137, 'rigSlots', 3.0), (1154, 'upgradeSlotsLeft', 3.0), (1178, 'heatCapacityHi', 100.0), (1179, 'heatDissipationRateHi', 0.01), (1196, 'heatDissipationRateMed', 0.01), (1198, 'heatDissipationRateLow', 0.01), (1199, 'heatCapacityMed', 100.0), (1200, 'heatCapacityLow', 100.0), (1224, 'heatGenerationMultiplier', 0.75), (1259, 'heatAttenuationHi', 0.25), (1261, 'heatAttenuationMed', 0.25), (1262, 'heatAttenuationLow', 0.5), (1271, 'droneBandwidth', 50.0), (1281, 'baseWarpSpeed', 1.0), (1547, 'rigSize', 2.0), (1555, 'fwLpKill', 50.0), (1556, 'generalMiningHoldCapacity', 9000.0), (1768, 'typeColorScheme', 11346.0), (1891, 'allowedInCapIndustrialMaintenanceBay', 1.0), (2045, 'energyWarfareResistance', 1.0), (2112, 'sensorDampenerResistance', 1.0), (2113, 'weaponDisruptionResistance', 1.0), (2115, 'stasisWebifierResistance', 1.0), (2464, 'affectedByIndustrialInvulnModule', 1.0), (3178, 'shipRoleBonusIceHarvestingDuration', -30.0), (3181, 'miningBargeBonusOreMiningYield', 3.0), (3182, 'miningBargeBonusIceHarvestingDuration', -3.0), (3183, 'miningBargeBonusGasHarvestingDuration', -3.0), (3184, 'miningBargeBonusOreMiningRange', 6.0), (3185, 'miningBargeBonusIceHarvestingRange', 6.0), (3225, 'shipRoleBonusGasHarvesterDuration', -30.0), (3228, 'shipRoleBonusStripMinerActivationCost', -25.0), (3229, 'shipRoleBonusIceHarvesterActivationCost', -25.0), (3230, 'shipRoleBonusOreMiningDuration', -25.0), (3324, 'isIndustrialJumpConduitPassenger', 1.0), (3325, 'isIndustrialJumpPortalPassenger', 1.0), (5682, 'isCarrierJumpConduitPassenger', 0.0), (5796, 'maxDirectionalScanRange', 2147483647000.0), (5978, 'integratedMiningScanner', 1.0), (6364, 'baseJumpBridgeCapacitorCost', 1000.0)]
+EFFECTS [8224, 8227, 8228, 8229, 8230, 8231, 8300, 8303, 8304, 8305]
+DOGMA Retriever [(3, 'damage', 0.0), (9, 'hp', 4000.0), (11, 'powerOutput', 83.0), (12, 'lowSlots', 3.0), (13, 'medSlots', 2.0), (14, 'hiSlots', 2.0), (15, 'powerLoad', 0.0), (19, 'powerToSpeed', 1.0), (21, 'warpFactor', 0.0), (37, 'maxVelocity', 125.0), (48, 'cpuOutput', 260.0), (49, 'cpuLoad', 0.0), (55, 'rechargeRate', 187500.0), (70, 'agility', 0.7), (76, 'maxTargetRange', 40000.0), (79, 'scanSpeed', 1500.0), (101, 'launcherSlotsLeft', 0.0), (102, 'turretSlotsLeft', 0.0), (109, 'kineticDamageResonance', 0.67), (110, 'thermalDamageResonance', 0.67), (111, 'explosiveDamageResonance', 0.67), (113, 'emDamageResonance', 0.67), (124, 'mainColor', 16777215.0), (129, 'maxPassengers', 2.0), (136, 'uniformity', 1.0), (153, 'warpCapacitorNeed', 3.33e-07), (182, 'requiredSkill1', 17940.0), (183, 'requiredSkill2', 3410.0), (188, 'cargoScanResistance', 0.0), (192, 'maxLockedTargets', 6.0), (208, 'scanRadarStrength', 0.0), (209, 'scanLadarStrength', 0.0), (210, 'scanMagnetometricStrength', 9.0), (211, 'scanGravimetricStrength', 0.0), (217, 'propulsionGraphicID', 397.0), (246, 'gfxBoosterID', 397.0), (263, 'shieldCapacity', 4000.0), (265, 'armorHP', 3000.0), (267, 'armorEmDamageResonance', 0.4), (268, 'armorExplosiveDamageResonance', 0.9), (269, 'armorKineticDamageResonance', 0.75), (270, 'armorThermalDamageResonance', 0.65), (271, 'shieldEmDamageResonance', 1.0), (272, 'shieldExplosiveDamageResonance', 0.5), (273, 'shieldKineticDamageResonance', 0.6), (274, 'shieldThermalDamageResonance', 0.8), (277, 'requiredSkill1Level', 1.0), (278, 'requiredSkill2Level', 3.0), (283, 'droneCapacity', 50.0), (422, 'techLevel', 1.0), (479, 'shieldRechargeRate', 1500000.0), (482, 'capacitorCapacity', 350.0), (484, 'shieldUniformity', 0.75), (511, 'shipScanResistance', 0.0), (524, 'armorUniformity', 0.75), (525, 'structureUniformity', 1.0), (552, 'signatureRadius', 200.0), (564, 'scanResolution', 550.0), (600, 'warpSpeedMultiplier', 3.5), (633, 'metaLevelOld', 0.0), (661, 'maxDirectionalVelocity', 3000.0), (662, 'minTargetVelDmgMultiplier', 0.05), (1132, 'upgradeCapacity', 400.0), (1137, 'rigSlots', 3.0), (1154, 'upgradeSlotsLeft', 3.0), (1178, 'heatCapacityHi', 100.0), (1179, 'heatDissipationRateHi', 0.01), (1196, 'heatDissipationRateMed', 0.01), (1198, 'heatDissipationRateLow', 0.01), (1199, 'heatCapacityMed', 100.0), (1200, 'heatCapacityLow', 100.0), (1224, 'heatGenerationMultiplier', 0.75), (1259, 'heatAttenuationHi', 0.25), (1261, 'heatAttenuationMed', 0.25), (1262, 'heatAttenuationLow', 0.5), (1271, 'droneBandwidth', 50.0), (1281, 'baseWarpSpeed', 1.0), (1547, 'rigSize', 2.0), (1555, 'fwLpKill', 50.0), (1556, 'generalMiningHoldCapacity', 27500.0), (1768, 'typeColorScheme', 11346.0), (1891, 'allowedInCapIndustrialMaintenanceBay', 1.0), (2045, 'energyWarfareResistance', 1.0), (2112, 'sensorDampenerResistance', 1.0), (2113, 'weaponDisruptionResistance', 1.0), (2115, 'stasisWebifierResistance', 1.0), (2464, 'affectedByIndustrialInvulnModule', 1.0), (3177, 'shipRoleBonusOreMiningYield', 10.0), (3178, 'shipRoleBonusIceHarvestingDuration', -12.5), (3181, 'miningBargeBonusOreMiningYield', 3.0), (3182, 'miningBargeBonusIceHarvestingDuration', -2.0), (3183, 'miningBargeBonusGasHarvestingDuration', -2.0), (3187, 'miningBargeBonusGeneralMiningHoldCapacity', 5.0), (3225, 'shipRoleBonusGasHarvesterDuration', -12.5), (3324, 'isIndustrialJumpConduitPassenger', 1.0), (3325, 'isIndustrialJumpPortalPassenger', 1.0), (5682, 'isCarrierJumpConduitPassenger', 0.0), (5796, 'maxDirectionalScanRange', 2147483647000.0), (5978, 'integratedMiningScanner', 1.0), (6364, 'baseJumpBridgeCapacitorCost', 1000.0)]
+EFFECTS [5067, 8223, 8224, 8227, 8228, 8229, 8300]
+DOGMA Procurer [(3, 'damage', 0.0), (9, 'hp', 6000.0), (11, 'powerOutput', 90.0), (12, 'lowSlots', 3.0), (13, 'medSlots', 3.0), (14, 'hiSlots', 2.0), (15, 'powerLoad', 0.0), (19, 'powerToSpeed', 1.0), (21, 'warpFactor', 0.0), (37, 'maxVelocity', 100.0), (48, 'cpuOutput', 310.0), (49, 'cpuLoad', 0.0), (55, 'rechargeRate', 187500.0), (70, 'agility', 0.64), (76, 'maxTargetRange', 60000.0), (79, 'scanSpeed', 1500.0), (101, 'launcherSlotsLeft', 0.0), (102, 'turretSlotsLeft', 0.0), (109, 'kineticDamageResonance', 0.67), (110, 'thermalDamageResonance', 0.67), (111, 'explosiveDamageResonance', 0.67), (113, 'emDamageResonance', 0.67), (124, 'mainColor', 16777215.0), (129, 'maxPassengers', 2.0), (136, 'uniformity', 1.0), (153, 'warpCapacitorNeed', 3.33e-07), (182, 'requiredSkill1', 17940.0), (183, 'requiredSkill2', 3410.0), (188, 'cargoScanResistance', 0.0), (192, 'maxLockedTargets', 6.0), (208, 'scanRadarStrength', 0.0), (209, 'scanLadarStrength', 0.0), (210, 'scanMagnetometricStrength', 9.0), (211, 'scanGravimetricStrength', 0.0), (217, 'propulsionGraphicID', 397.0), (246, 'gfxBoosterID', 397.0), (263, 'shieldCapacity', 6000.0), (265, 'armorHP', 5000.0), (267, 'armorEmDamageResonance', 0.4), (268, 'armorExplosiveDamageResonance', 0.9), (269, 'armorKineticDamageResonance', 0.75), (270, 'armorThermalDamageResonance', 0.65), (271, 'shieldEmDamageResonance', 1.0), (272, 'shieldExplosiveDamageResonance', 0.5), (273, 'shieldKineticDamageResonance', 0.6), (274, 'shieldThermalDamageResonance', 0.8), (277, 'requiredSkill1Level', 1.0), (278, 'requiredSkill2Level', 3.0), (283, 'droneCapacity', 100.0), (422, 'techLevel', 1.0), (479, 'shieldRechargeRate', 2500000.0), (482, 'capacitorCapacity', 800.0), (484, 'shieldUniformity', 0.75), (511, 'shipScanResistance', 0.0), (524, 'armorUniformity', 0.75), (525, 'structureUniformity', 1.0), (552, 'signatureRadius', 200.0), (564, 'scanResolution', 440.0), (600, 'warpSpeedMultiplier', 3.5), (633, 'metaLevelOld', 0.0), (661, 'maxDirectionalVelocity', 3000.0), (662, 'minTargetVelDmgMultiplier', 0.05), (1132, 'upgradeCapacity', 400.0), (1137, 'rigSlots', 3.0), (1154, 'upgradeSlotsLeft', 3.0), (1178, 'heatCapacityHi', 100.0), (1179, 'heatDissipationRateHi', 0.01), (1196, 'heatDissipationRateMed', 0.01), (1198, 'heatDissipationRateLow', 0.01), (1199, 'heatCapacityMed', 100.0), (1200, 'heatCapacityLow', 100.0), (1224, 'heatGenerationMultiplier', 0.75), (1259, 'heatAttenuationHi', 0.25), (1261, 'heatAttenuationMed', 0.25), (1262, 'heatAttenuationLow', 0.5), (1271, 'droneBandwidth', 50.0), (1281, 'baseWarpSpeed', 1.0), (1547, 'rigSize', 2.0), (1555, 'fwLpKill', 50.0), (1556, 'generalMiningHoldCapacity', 16000.0), (1768, 'typeColorScheme', 11346.0), (1831, 'rookieDroneBonus', 50.0), (1891, 'allowedInCapIndustrialMaintenanceBay', 1.0), (2045, 'energyWarfareResistance', 1.0), (2112, 'sensorDampenerResistance', 1.0), (2113, 'weaponDisruptionResistance', 1.0), (2115, 'stasisWebifierResistance', 1.0), (2464, 'affectedByIndustrialInvulnModule', 1.0), (3179, 'shipRoleBonusDroneDamage', 50.0), (3180, 'shipRoleBonusDroneHitPoints', 50.0), (3181, 'miningBargeBonusOreMiningYield', 2.0), (3182, 'miningBargeBonusIceHarvestingDuration', -2.0), (3183, 'miningBargeBonusGasHarvestingDuration', -2.0), (3188, 'miningBargeBonusShieldCapacity', 6.0), (3324, 'isIndustrialJumpConduitPassenger', 1.0), (3325, 'isIndustrialJumpPortalPassenger', 1.0), (5682, 'isCarrierJumpConduitPassenger', 0.0), (5796, 'maxDirectionalScanRange', 2147483647000.0), (5978, 'integratedMiningScanner', 1.0), (6364, 'baseJumpBridgeCapacitorCost', 1000.0)]
+EFFECTS [5068, 8225, 8226, 8227, 8228, 8229]
+DOGMA Strip Miner I [(6, 'capacitorNeed', 23.0), (9, 'hp', 40.0), (30, 'power', 10.0), (50, 'cpu', 60.0), (54, 'maxRange', 15000.0), (73, 'duration', 45000.0), (77, 'miningAmount', 150.0), (182, 'requiredSkill1', 3386.0), (183, 'requiredSkill2', 3410.0), (277, 'requiredSkill1Level', 4.0), (278, 'requiredSkill2Level', 1.0), (422, 'techLevel', 1.0), (633, 'metaLevelOld', 0.0), (1298, 'canFitShipGroup01', 463.0), (1299, 'canFitShipGroup02', 543.0), (1768, 'typeColorScheme', 11346.0), (3153, 'miningWastedVolumeMultiplier', 0.0), (3154, 'miningWasteProbability', 0.0), (5967, 'miningCritChance', 0.01), (5969, 'miningCritBonusYield', 2.0)]
+EFFECTS [12, 16, 67]
+DOGMA Mining Barge [(180, 'primaryAttribute', 167.0), (181, 'secondaryAttribute', 168.0), (182, 'requiredSkill1', 3410.0), (183, 'requiredSkill2', 3380.0), (184, 'requiredSkill3', 32918.0), (275, 'skillTimeConstant', 4.0), (277, 'requiredSkill1Level', 3.0), (278, 'requiredSkill2Level', 5.0), (279, 'requiredSkill3Level', 3.0), (280, 'skillLevel', 0.0), (1047, 'canNotBeTrainedOnTrial', 1.0)]
+EFFECTS [132, 8232, 8233, 8234, 8235, 8236, 8240, 8241, 8242]
+DOGMA Mining Laser Upgrade I [(9, 'hp', 40.0), (30, 'power', 1.0), (50, 'cpu', 30.0), (182, 'requiredSkill1', 22578.0), (277, 'requiredSkill1Level', 1.0), (422, 'techLevel', 1.0), (434, 'miningAmountBonus', 5.0), (633, 'metaLevelOld', 0.0), (1082, 'cpuPenaltyPercent', 10.0)]
+EFFECTS [11, 16, 1882, 2444]
+DOGMA Venture [(3, 'damage', 0.0), (9, 'hp', 200.0), (11, 'powerOutput', 45.0), (12, 'lowSlots', 1.0), (13, 'medSlots', 3.0), (14, 'hiSlots', 3.0), (15, 'powerLoad', 0.0), (19, 'powerToSpeed', 1.0), (21, 'warpFactor', 0.0), (37, 'maxVelocity', 335.0), (48, 'cpuOutput', 240.0), (49, 'cpuLoad', 0.0), (55, 'rechargeRate', 125000.0), (70, 'agility', 3.6), (76, 'maxTargetRange', 15000.0), (79, 'scanSpeed', 2500.0), (101, 'launcherSlotsLeft', 0.0), (102, 'turretSlotsLeft', 2.0), (104, 'warpScrambleStatus', -2.0), (109, 'kineticDamageResonance', 0.67), (110, 'thermalDamageResonance', 0.67), (111, 'explosiveDamageResonance', 0.67), (113, 'emDamageResonance', 0.67), (124, 'mainColor', 16777215.0), (129, 'maxPassengers', 2.0), (136, 'uniformity', 1.0), (153, 'warpCapacitorNeed', 1.35e-06), (182, 'requiredSkill1', 32918.0), (188, 'cargoScanResistance', 0.0), (192, 'maxLockedTargets', 5.0), (207, 'miningAmountMultiplier', 2.0), (208, 'scanRadarStrength', 0.0), (209, 'scanLadarStrength', 0.0), (210, 'scanMagnetometricStrength', 4.0), (211, 'scanGravimetricStrength', 0.0), (217, 'propulsionGraphicID', 394.0), (246, 'gfxBoosterID', 394.0), (263, 'shieldCapacity', 225.0), (265, 'armorHP', 175.0), (267, 'armorEmDamageResonance', 0.4), (268, 'armorExplosiveDamageResonance', 0.9), (269, 'armorKineticDamageResonance', 0.75), (270, 'armorThermalDamageResonance', 0.65), (271, 'shieldEmDamageResonance', 1.0), (272, 'shieldExplosiveDamageResonance', 0.5), (273, 'shieldKineticDamageResonance', 0.6), (274, 'shieldThermalDamageResonance', 0.8), (277, 'requiredSkill1Level', 1.0), (283, 'droneCapacity', 10.0), (422, 'techLevel', 1.0), (462, 'shipBonusGF', 5.0), (479, 'shieldRechargeRate', 625000.0), (482, 'capacitorCapacity', 250.0), (484, 'shieldUniformity', 0.75), (511, 'shipScanResistance', 0.0), (524, 'armorUniformity', 0.75), (525, 'structureUniformity', 1.0), (552, 'signatureRadius', 40.0), (564, 'scanResolution', 750.0), (586, 'shipBonusGF2', 10.0), (600, 'warpSpeedMultiplier', 5.0), (633, 'metaLevelOld', 0.0), (661, 'maxDirectionalVelocity', 3000.0), (662, 'minTargetVelDmgMultiplier', 0.05), (1132, 'upgradeCapacity', 400.0), (1137, 'rigSlots', 3.0), (1154, 'upgradeSlotsLeft', 3.0), (1178, 'heatCapacityHi', 100.0), (1179, 'heatDissipationRateHi', 0.01), (1196, 'heatDissipationRateMed', 0.01), (1198, 'heatDissipationRateLow', 0.01), (1199, 'heatCapacityMed', 100.0), (1200, 'heatCapacityLow', 100.0), (1224, 'heatGenerationMultiplier', 1.0), (1259, 'heatAttenuationHi', 0.5), (1261, 'heatAttenuationMed', 0.5), (1262, 'heatAttenuationLow', 0.0), (1271, 'droneBandwidth', 10.0), (1281, 'baseWarpSpeed', 1.0), (1296, 'consumptionQuantityBonusPercentage', -50.0), (1547, 'rigSize', 1.0), (1555, 'fwLpKill', 25.0), (1556, 'generalMiningHoldCapacity', 5000.0), (1768, 'typeColorScheme', 11331.0), (1842, 'miningFrigatesBonusOreMiningYield', 5.0), (1891, 'allowedInCapIndustrialMaintenanceBay', 1.0), (2045, 'energyWarfareResistance', 1.0), (2112, 'sensorDampenerResistance', 1.0), (2113, 'weaponDisruptionResistance', 1.0), (2115, 'stasisWebifierResistance', 1.0), (2464, 'affectedByIndustrialInvulnModule', 1.0), (3237, 'miningFrigateBonusGasCloudHarvestingDuration', -5.0), (3239, 'shipRoleBonusGasHarvestingYield', 100.0), (3324, 'isIndustrialJumpConduitPassenger', 1.0), (3325, 'isIndustrialJumpPortalPassenger', 1.0), (5796, 'maxDirectionalScanRange', 2147483647000.0), (5978, 'integratedMiningScanner', 1.0), (6364, 'baseJumpBridgeCapacitorCost', 4000.0)]
+EFFECTS [3526, 5058, 5139, 8313, 8315]
+DOGMA Mining Frigate [(180, 'primaryAttribute', 167.0), (181, 'secondaryAttribute', 168.0), (182, 'requiredSkill1', 3327.0), (275, 'skillTimeConstant', 2.0), (277, 'requiredSkill1Level', 1.0), (280, 'skillLevel', 0.0), (1047, 'canNotBeTrainedOnTrial', 0.0)]
+EFFECTS [132, 5137, 8314, 8318, 12562]
+DOGMA Prospect [(3, 'damage', 0.0), (9, 'hp', 600.0), (11, 'powerOutput', 45.0), (12, 'lowSlots', 4.0), (13, 'medSlots', 3.0), (14, 'hiSlots', 3.0), (15, 'powerLoad', 0.0), (19, 'powerToSpeed', 1.0), (21, 'warpFactor', 0.0), (37, 'maxVelocity', 380.0), (48, 'cpuOutput', 290.0), (49, 'cpuLoad', 0.0), (55, 'rechargeRate', 125000.0), (70, 'agility', 3.0), (76, 'maxTargetRange', 20000.0), (79, 'scanSpeed', 2500.0), (101, 'launcherSlotsLeft', 0.0), (102, 'turretSlotsLeft', 2.0), (109, 'kineticDamageResonance', 0.67), (110, 'thermalDamageResonance', 0.67), (111, 'explosiveDamageResonance', 0.67), (113, 'emDamageResonance', 0.67), (124, 'mainColor', 16777215.0), (129, 'maxPassengers', 2.0), (136, 'uniformity', 1.0), (153, 'warpCapacitorNeed', 1.35e-06), (182, 'requiredSkill1', 32918.0), (183, 'requiredSkill2', 33856.0), (188, 'cargoScanResistance', 0.0), (192, 'maxLockedTargets', 6.0), (207, 'miningAmountMultiplier', 2.0), (208, 'scanRadarStrength', 0.0), (209, 'scanLadarStrength', 0.0), (210, 'scanMagnetometricStrength', 10.0), (211, 'scanGravimetricStrength', 0.0), (217, 'propulsionGraphicID', 394.0), (246, 'gfxBoosterID', 394.0), (263, 'shieldCapacity', 800.0), (265, 'armorHP', 600.0), (267, 'armorEmDamageResonance', 0.4), (268, 'armorExplosiveDamageResonance', 0.9), (269, 'armorKineticDamageResonance', 0.75), (270, 'armorThermalDamageResonance', 0.65), (271, 'shieldEmDamageResonance', 1.0), (272, 'shieldExplosiveDamageResonance', 0.5), (273, 'shieldKineticDamageResonance', 0.6), (274, 'shieldThermalDamageResonance', 0.8), (277, 'requiredSkill1Level', 5.0), (278, 'requiredSkill2Level', 1.0), (283, 'droneCapacity', 0.0), (422, 'techLevel', 2.0), (479, 'shieldRechargeRate', 625000.0), (482, 'capacitorCapacity', 300.0), (484, 'shieldUniformity', 0.75), (511, 'shipScanResistance', 0.0), (524, 'armorUniformity', 0.75), (525, 'structureUniformity', 1.0), (552, 'signatureRadius', 40.0), (564, 'scanResolution', 750.0), (600, 'warpSpeedMultiplier', 5.0), (633, 'metaLevelOld', 5.0), (661, 'maxDirectionalVelocity', 3000.0), (662, 'minTargetVelDmgMultiplier', 0.05), (793, 'shipBonusRole7', -100.0), (1034, 'covertOpsAndReconOpsCloakModuleDelay', 5000.0), (1132, 'upgradeCapacity', 400.0), (1137, 'rigSlots', 2.0), (1154, 'upgradeSlotsLeft', 2.0), (1178, 'heatCapacityHi', 100.0), (1179, 'heatDissipationRateHi', 0.01), (1196, 'heatDissipationRateMed', 0.01), (1198, 'heatDissipationRateLow', 0.01), (1199, 'heatCapacityMed', 100.0), (1200, 'heatCapacityLow', 100.0), (1224, 'heatGenerationMultiplier', 1.0), (1259, 'heatAttenuationHi', 0.5), (1261, 'heatAttenuationMed', 0.5), (1262, 'heatAttenuationLow', 0.63), (1271, 'droneBandwidth', 0.0), (1281, 'baseWarpSpeed', 1.0), (1547, 'rigSize', 1.0), (1555, 'fwLpKill', 25.0), (1556, 'generalMiningHoldCapacity', 12500.0), (1768, 'typeColorScheme', 11331.0), (1842, 'miningFrigatesBonusOreMiningYield', 5.0), (1891, 'allowedInCapIndustrialMaintenanceBay', 1.0), (2045, 'energyWarfareResistance', 1.0), (2102, 'ignoreCloakVelocityPenalty', 1.0), (2112, 'sensorDampenerResistance', 1.0), (2113, 'weaponDisruptionResistance', 1.0), (2115, 'stasisWebifierResistance', 1.0), (2464, 'affectedByIndustrialInvulnModule', 1.0), (3177, 'shipRoleBonusOreMiningYield', 100.0), (3190, 'expeditionFrigateBonusSignatureRadius', -5.0), (3191, 'expeditionFrigateBonusOreMiningYield', 5.0), (3237, 'miningFrigateBonusGasCloudHarvestingDuration', -5.0), (3239, 'shipRoleBonusGasHarvestingYield', 100.0), (3320, 'isBlackOpsJumpPortalPassenger', 1.0), (3322, 'isBlackOpsJumpConduitPassenger', 1.0), (3324, 'isIndustrialJumpConduitPassenger', 1.0), (3325, 'isIndustrialJumpPortalPassenger', 1.0), (5796, 'maxDirectionalScanRange', 2147483647000.0), (5978, 'integratedMiningScanner', 1.0), (6364, 'baseJumpBridgeCapacitorCost', 1000.0)]
+EFFECTS [2252, 5139, 5647, 5852, 5853, 6385, 8223, 8313, 8315]
+DOGMA Expedition Frigates [(180, 'primaryAttribute', 168.0), (181, 'secondaryAttribute', 167.0), (182, 'requiredSkill1', 3327.0), (183, 'requiredSkill2', 3432.0), (184, 'requiredSkill3', 3380.0), (275, 'skillTimeConstant', 4.0), (277, 'requiredSkill1Level', 3.0), (278, 'requiredSkill2Level', 5.0), (279, 'requiredSkill3Level', 5.0), (280, 'skillLevel', 0.0), (1047, 'canNotBeTrainedOnTrial', 1.0)]
+EFFECTS [132, 5851, 8212, 8213, 8214, 8216, 8239, 8282, 8285, 8316]
+DOGMA Simple Ore Processing [(180, 'primaryAttribute', 166.0), (181, 'secondaryAttribute', 165.0), (182, 'requiredSkill1', 3385.0), (183, 'requiredSkill2', 3402.0), (275, 'skillTimeConstant', 3.0), (277, 'requiredSkill1Level', 4.0), (278, 'requiredSkill2Level', 3.0), (280, 'skillLevel', 0.0), (379, 'refiningYieldMutator', 2.0), (1047, 'canNotBeTrainedOnTrial', 0.0)]
+EFFECTS [132]
+BELT {'_key': 40000003, 'celestialIndex': 1, 'orbitID': 40000002, 'orbitIndex': 1, 'position': {'x': 161967513600.0, 'y': 21288837120.0, 'z': -73505464320.0}, 'radius': 27043.400391, 'solarSystemID': 30000001, 'statistics': {'density': 277.882996, 'eccentricity': 0.0, 'escapeVelocity': 10.6728, 'locked': True, 'massDust': 2.3083200800620544e+16, 'massGas': 7.16671, 'orbitPeriod': 468161.0, 'orbitRadius': 80831296.0, 'rotationRate': 468161.0, 'spectralClass': '0.0', 'surfaceGravity': 0.0021, 'temperature': 90.7537}, 'typeID': 15}
+BELT {'_key': 40000006, 'celestialIndex': 2, 'orbitID': 40000005, 'orbitIndex': 1, 'position': {'x': -201122488320.0, 'y': -26546380800.0, 'z': -290924421120.0}, 'radius': 106355.0, 'solarSystemID': 30000001, 'statistics': {'density': 410.88501, 'eccentricity': 0.0, 'escapeVelocity': 51.039398, 'locked': True, 'massDust': 2.0760799885026918e+18, 'massGas': 326066.0, 'orbitPeriod': 2692600.0, 'orbitRadius': 298616992.0, 'rotationRate': 2692600.0, 'spectralClass': '0.0', 'surfaceGravity': 0.012214, 'temperature': 64.431099}, 'typeID': 15}
+BELT {'_key': 40000009, 'celestialIndex': 4, 'orbitID': 40000008, 'orbitIndex': 1, 'position': {'x': 331443363840.0, 'y': 43595489280.0, 'z': -586307051520.0}, 'radius': 53559.0, 'solarSystemID': 30000001, 'statistics': {'density': 254.921005, 'eccentricity': 0.0, 'escapeVelocity': 20.245199, 'locked': True, 'massDust': 1.644949968739369e+17, 'massGas': 6398.379883, 'orbitPeriod': 505311.0, 'orbitRadius': 83132200.0, 'rotationRate': 505311.0, 'spectralClass': '0.0', 'surfaceGravity': 0.003816, 'temperature': 46.745499}, 'typeID': 15}
+BELTS 40928
+SYSTEM KEYS ['_key', 'border', 'constellationID', 'hub', 'international', 'luminosity', 'name', 'planetIDs', 'position', 'position2D', 'radius', 'regionID', 'regional', 'securityClass', 'securityStatus', 'starID', 'stargateIDs']
