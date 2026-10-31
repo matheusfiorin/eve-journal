@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {skillLevels,isAlpha,slots,materialsFor,researchTarget,researchTime,researchCost,buildSeconds,evaluate,rank,stage,nextSkills,RESEARCH_SECONDS,SCC,NPC_FACILITY_TAX,ALPHA_TAX} from '../industry.js';
+import {skillLevels,isAlpha,slots,materialsFor,researchTarget,researchTime,researchCost,buildSeconds,evaluate,rank,portfolio,confidence,stage,nextSkills,RESEARCH_SECONDS,SCC,NPC_FACILITY_TAX,ALPHA_TAX} from '../industry.js';
 import {book} from '../market.js';
 const ids={industry:1,massProduction:2,metallurgy:3,advancedIndustry:4,labOperation:5};
 test('skill levels, alpha detection and job slots',()=>{
@@ -59,10 +59,34 @@ test('sells at the hub with the most volume and fetches materials where the main
  const twoHubs=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:100,s:[[1,9000,5]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]}}}},
   {data:{name:'Domain',stations:{2:[30002187,'Amarr']},types:{2454:{d:5000,s:[[2,11000,50]],b:[]},34:{d:1e6,s:[[2,6,1e7]],b:[]}}}}]);
  const r=evaluate(hob,{book:twoHubs,adjusted:new Map(),fees});
- assert.equal(r.sell.loc,2);assert.ok(Math.abs(r.revenue-11000*0.895)<1e-9);assert.equal(r.materialsAt,1);
+ assert.equal(r.sell.loc,2);assert.ok(Math.abs(r.revenue-11000*0.895)<1e-9);assert.equal(r.materialsAt,1);assert.equal(r.materialsRegion,'The Forge');
 });
 test('trend compares the hub ask with its 7-day average',()=>{
  const m=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:2000,p:8000,s:[[1,10000,500]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]}}}}]);
  const r=evaluate(hob,{book:m,adjusted:new Map(),fees});assert.ok(Math.abs(r.trend-0.25)<1e-9);assert.equal(r.listings,1);assert.equal(r.daily,2000);
  assert.equal(evaluate(hob,{book:market,adjusted:new Map(),fees}).trend,null);
+});
+test('a thin market is priced at most 15% over its 7-day average and not padded to one sale a day',()=>{
+ const m=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:3,p:10000,s:[[1,150000,1]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]}}}}]);
+ const r=evaluate(hob,{book:m,adjusted:new Map(),fees});
+ assert.equal(r.sellPrice,11500);assert.equal(r.price,250000,'the blueprint price is untouched');assert.ok(Math.abs(r.unitsPerDay-0.15)<1e-9);assert.equal(r.runs,1);assert.deepEqual(r.flags,['thin','spike','slow']);
+ assert.ok(confidence(r)<0.25);
+});
+test('the material bill comes from one region, even when another region is cheaper for one input',()=>{
+ const m=book([{data:{name:'The Forge',stations:{1:[30000142,'Jita']},types:{2454:{d:2000,s:[[1,10000,500]],b:[]},34:{d:1e6,s:[[1,5,1e7]],b:[]},35:{d:1e6,s:[[1,10,1e7]],b:[]}}}},
+  {data:{name:'Domain',stations:{2:[30002187,'Amarr']},types:{34:{d:1e6,s:[[2,4,1e7]],b:[]}}}}]);
+ const r=evaluate({...hob,m:[[34,1000],[35,10]]},{book:m,adjusted:new Map(),fees});
+ assert.equal(r.materialsRegion,'The Forge');assert.deepEqual(r.bill.map(b=>[b.type,b.price,b.loc]),[[34,5,1],[35,10,1]]);
+});
+test('required skills the pilot lacks are flagged and ranked after buildable picks',()=>{
+ const r=evaluate({...hob,sk:[[3436,3]]},{book:market,adjusted:new Map(),fees,skillOf:id=>id===3436?1:0});
+ assert.deepEqual(r.missing,[[3436,3]]);assert.ok(r.flags.includes('skills'));
+ assert.deepEqual(evaluate({...hob,sk:[[3436,3]]},{book:market,adjusted:new Map(),fees}).missing,[],'unknown skills are not held against the pick');
+ const ok=evaluate(hob,{book:market,adjusted:new Map(),fees});
+ assert.deepEqual(rank([{...ok,profitDay:ok.profitDay*0.1},r]).map(x=>x.missing.length),[0,1]);
+});
+test('the portfolio fills build slots with affordable, buildable picks within budget',()=>{
+ const pick=(invest,profitDay,flags=[])=>({invest,profitDay,flags,affordable:true});
+ const plan=portfolio([pick(10,5),pick(100,50,['skills']),pick(80,40),pick(20,3),pick(5,1)],{slots:2,budget:60});
+ assert.deepEqual(plan.chosen.map(x=>x.invest),[10,20]);assert.equal(plan.spent,30);assert.equal(plan.profitDay,8);
 });

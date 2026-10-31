@@ -7,25 +7,28 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  const setup=industry.locator('article').first();await expect(setup).toContainText('Alpha');await expect(setup).toContainText('Build slots');
  await expect(industry.locator('article').nth(1)).toContainText('Week 1');await expect(industry.locator('article').nth(1)).toContainText('Mass Production');
  const picks=industry.locator('.bpos .opp');await expect(picks).toHaveCount(2);
- await expect(picks.first()).toContainText('Hobgoblin I');await expect(picks.first()).toContainText('ME 0 → 10');await expect(picks.first()).toContainText('Suggested for Fiofka');await expect(picks.first()).toContainText('/day');
- await expect(picks.nth(1)).toContainText('Rifter');await expect(picks.nth(1)).toContainText('ME 0 → 6');await expect(picks.nth(1)).toContainText('Suggested for Decxus');
+ await expect(picks.first()).toContainText('Hobgoblin I');await expect(picks.first()).toContainText('ME 0 → 10');await expect(picks.first()).toContainText('In Fiofka’s plan');await expect(picks.first()).toContainText('/day');
+ await expect(picks.nth(1)).toContainText('Rifter');await expect(picks.nth(1)).toContainText('ME 0 → 6');await expect(picks.nth(1)).toContainText('In Decxus’s plan');await expect(picks.nth(1)).toContainText('Needs Spaceship Command III');
+ const plans=industry.locator('article').filter({hasText:'Your starting plan'}).locator('.plan');await expect(plans).toHaveCount(2);
+ await expect(plans.first()).toContainText('Hobgoblin I');await expect(plans.first()).not.toContainText('Rifter','Fiofka lacks the skill');await expect(plans.nth(1)).toContainText('Rifter');await expect(plans.first()).toContainText('1 of');
  const facilities=industry.locator('article').filter({hasText:'Where to build and research near Jita'});
  await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('Niarja III - Factory');await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('2 jumps');await expect(facilities).not.toContainText('Tama','low-sec stations are never suggested');
  await expect(facilities.locator('.facilities').nth(1).locator('li').first()).toContainText('Perimeter II - Moon 1 - Lab');
  await expect(facilities.locator('.facilities a').first()).toHaveAttribute('href','https://evemaps.dotlan.net/system/Niarja');
  const trip=picks.filter({hasText:'Rifter'}).locator('details.trip');await trip.locator('summary').click();
+ await expect(trip.locator('.bill tbody tr')).toHaveCount(2);await expect(trip.locator('.bill')).toContainText('Tritanium');await page.screenshot({path:testInfo.outputPath('industry.png'),fullPage:true});
  await expect(trip.locator('.legs>li').first()).toContainText('Amarr VIII');await expect(trip.locator('.legs>li').first()).toContainText('3 jumps');
  await expect(trip.locator('.legs>li').first().locator('.hops li')).toHaveText(['0.9Jita','1.0Perimeter','0.5Niarja','1.0Amarr']);
  await expect(trip.locator('.legs>li').nth(1)).toContainText('Research to ME 6');await expect(trip.locator('.legs>li').nth(3)).toContainText('Build');await expect(trip.locator('.legs>li').last()).toContainText('Sell');
  await expect(trip.locator('.trip-link')).toHaveAttribute('href',/dotlan\.net\/route\/Jita:Amarr:Perimeter:Jita:Niarja:Jita/);
  await expect(picks.first()).toContainText('NPC sells it at 1 station · nearest here');await expect(picks.nth(1)).toContainText('nearest 3 jumps');
  await expect(picks.first()).toContainText('Hub price +25% vs 7-day average · likely a spike');
- await page.screenshot({path:testInfo.outputPath('industry.png'),fullPage:true});
+ 
  await page.locator('#industry-category').selectOption('Frigate');await expect(picks).toHaveCount(1);await expect(picks.first()).toContainText('Rifter');
  await page.locator('#industry-category').selectOption('');await page.locator('#industry-sort').selectOption('near');await expect(picks.first()).toContainText('Hobgoblin I');
  await page.locator('#industry-sort').selectOption('cheap');await expect(picks.first()).toContainText('Hobgoblin I');await page.locator('#industry-sort').selectOption('');
  await page.locator('#industry-budget').fill('1000000');await page.locator('#industry-budget').dispatchEvent('change');
- await expect(picks.filter({hasText:'Rifter'})).toContainText('Over budget');await expect(picks.first()).toContainText('Hobgoblin I');
+ await expect(picks.filter({hasText:'Rifter'})).toContainText('In Decxus’s plan','a pick over your budget can still fit your wingmate');await expect(picks.first()).toContainText('Hobgoblin I');
  expect(errors).toEqual([]);
 });
 test('industry works for a visitor without a session, using base fees',async({page})=>{

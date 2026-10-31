@@ -25,7 +25,7 @@ test('the pipeline signs uploads exactly the way the Worker verifies them',async
 test('starters keep cheap published T1 blueprints whose materials cost less than the product',()=>{
  const mf=(product,mats,time=300)=>({manufacturing:{materials:mats.map(([typeID,quantity])=>({typeID,quantity})),products:[{typeID:product,quantity:1}],time},research_material:{time:105}});
  const blueprints=[
-  {_key:2456,maxProductionLimit:300,activities:mf(2454,[[34,1000]])},          // Hobgoblin I: cheap, profitable drone
+  {_key:2456,maxProductionLimit:300,activities:{...mf(2454,[[34,1000]]),manufacturing:{...mf(2454,[[34,1000]]).manufacturing,skills:[{typeID:3436,level:1}]}}},          // Hobgoblin I: cheap, profitable drone
   {_key:9001,activities:mf(9000,[[34,1000]])},                                   // T2 item: excluded
   {_key:691,activities:{...mf(587,[[34,30000]],6000),research_material:{time:2100}}}, // Rifter: frigate, rank 20
   {_key:24699,activities:mf(24698,[[34,10]])},                                   // Drake: battlecruiser, excluded
@@ -40,8 +40,8 @@ test('starters keep cheap published T1 blueprints whose materials cost less than
  const prices=new Map([[34,{adjusted:4}],[2454,{average:10000}],[9000,{average:1e6}],[587,{average:400000}],[24698,{average:5e7}],[5001,{average:10}],[7001,{average:1e6}]]);
  const list=starters(blueprints,types,groups,categories,prices);
  assert.deepEqual(list.map(s=>s.n),['Rifter','Hobgoblin I'],'ranked by screened profit per second of build time');
- assert.deepEqual(list[1],{type:2454,bp:2456,n:'Hobgoblin I',cat:'Drone',q:1,t:300,rank:1,limit:300,price:250000,m:[[34,1000]]});
- assert.equal(list[0].rank,20);assert.equal(list[0].cat,'Frigate');
+ assert.deepEqual(list[1],{type:2454,bp:2456,n:'Hobgoblin I',cat:'Drone',q:1,t:300,rank:1,limit:300,price:250000,m:[[34,1000]],sk:[[3436,1]]});
+ assert.deepEqual(list[0].sk,[]);assert.equal(list[0].rank,20);assert.equal(list[0].cat,'Frigate');
 });
 test('universe keeps known-space gates, security and NPC factories and labs',()=>{
  const map=universe({

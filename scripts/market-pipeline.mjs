@@ -116,7 +116,7 @@ export function starters(blueprints, types, groups, categories, prices, {maxPric
     if (!Number.isFinite(cost) || !(value > cost)) continue;
     out.push({type:id(product), bp:bpId, n:sdeName(item.name), cat:category === 'Ship' ? sdeName(group.name) : category, q:product.quantity, t:job.time,
       rank:Math.max(1, Math.round((bp.activities.research_material?.time || 105) / 105)), limit:bp.maxProductionLimit, price:blueprint.basePrice,
-      m:job.materials.map(m => [id(m), m.quantity]), score:(value - cost) / job.time});
+      m:job.materials.map(m => [id(m), m.quantity]), sk:(job.skills || []).map(k => [id(k), k.level]), score:(value - cost) / job.time});
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit).map(({score, ...s}) => s);
 }
@@ -179,7 +179,9 @@ async function main() {
     } catch (error) { map = null; console.log(`::warning title=Universe map::${error.message}`); }
     meta.recipes = recipes(data.blueprints, wanted);
     const prices = new Map((await esi('/markets/prices/')).body.map(p => [p.type_id, {average:p.average_price || p.adjusted_price || 0, adjusted:p.adjusted_price}]));
-    meta.starters = starters(data.blueprints, byKey(data.types), byKey(data.groups), byKey(data.categories), prices);
+    const types = byKey(data.types);
+    meta.starters = starters(data.blueprints, types, byKey(data.groups), byKey(data.categories), prices);
+    meta.skillNames = Object.fromEntries([...new Set(meta.starters.flatMap(s => s.sk.map(([k]) => k)))].map(k => [k, sdeName(types.get(k)?.name) || `Skill ${k}`]));
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
   let pilotSystems = [];
