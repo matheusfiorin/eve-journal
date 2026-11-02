@@ -102,14 +102,14 @@ body.picking{overflow:hidden}
 .hero-brand{display:inline-flex;align-items:center;gap:10px;margin:0;font:400 15px var(--ff-display);letter-spacing:.06em;color:var(--text)}
 .hero h1{font:400 var(--fs-3xl)/1.1 var(--ff-display);letter-spacing:.01em;margin:18px 0 12px}
 .hero-sub{color:var(--text-muted);margin:0 auto 36px;max-width:520px;font-size:17px}
-.hero-pilots{display:flex;gap:0;justify-content:center;align-items:center;flex-wrap:wrap}
+.hero-pilots{display:flex;gap:0;justify-content:center;align-items:stretch;flex-wrap:wrap}
 .plate{display:grid;justify-items:center;gap:6px;width:230px;min-height:0;padding:22px 18px 18px;background:rgb(18 28 46 / .82);backdrop-filter:blur(8px);
   border:1px solid var(--line-strong);border-radius:var(--r-panel);color:var(--text);font-weight:400;text-align:center;
   transition:border-color var(--dur-2),box-shadow var(--dur-2),transform var(--dur-2) var(--ease-out);animation:rise .8s calc(.25s + var(--i) * .15s) var(--ease-out) both}
 .plate:hover,.plate:focus-visible{background:rgb(18 28 46 / .9);border-color:var(--pilot);box-shadow:0 0 0 1px var(--pilot),0 20px 60px rgb(3 6 14 / .5);transform:translateY(-4px)}
 .plate b{font:600 22px var(--ff-ui);margin-top:6px}.plate small{color:var(--text-muted);font-size:var(--fs-sm)}
 .hero-portrait{width:150px;height:150px;border-radius:var(--r-ctl)}
-.tether{width:120px;height:20px;flex:none}.tether line{stroke:var(--line-strong);stroke-dasharray:3 5}.tether circle{fill:var(--accent)}
+.tether{width:120px;height:20px;flex:none;align-self:center}.tether line{stroke:var(--line-strong);stroke-dasharray:3 5}.tether circle{fill:var(--accent)}
 .hero.warp .hero-content{animation:warp-out .8s var(--ease-in) forwards}
 .hero.warp{animation:fade-out .9s ease-in forwards}
 

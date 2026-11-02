@@ -24,3 +24,5 @@
 .goal-steps li:has(input:checked) label{color:var(--text-muted);text-decoration:line-through}
 .goal.done .goal-steps label{text-decoration:none}
 .goal-notes{white-space:pre-wrap;font-size:var(--fs-sm);color:var(--text-muted);margin:6px 0 0;max-width:72ch}
+.share-row .fill,.goal-target .fill{background:var(--accent)}
+.title-card .share-row .fill{background:var(--pilot)}

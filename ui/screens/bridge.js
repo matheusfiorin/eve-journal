@@ -24,7 +24,7 @@ export function render() {
   const birthday = p.profile?.birthday, age = birthday ? Math.floor((Date.now() - Date.parse(birthday)) / 86400000) : null;
   const loc = ops.location?.value, ship = ops.ship?.value;
   $('#pilots').innerHTML = `
-  <section class="me-banner panel--primary" data-pilot="${esc(p.name.toLowerCase())}">
+  <section class="me-banner panel panel--primary" data-pilot="${esc(p.name.toLowerCase())}">
     <div class="me-portrait">${portrait(p, 128, 'xl')}</div>
     <div class="me-info"><span class="role-badge title-chip">${esc(s.title || 'Unranked capsuleer')}</span><h1 class="screen-title">${esc(p.name)}</h1><p class="hint">${corpLine(p)}${age === null ? '' : ` · capsuleer for ${age.toLocaleString()} days`}</p>${trainingAlert(p)}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}${connectButtons(p, i)}</div>
     <dl class="me-stats readout">${fact('Skill points', count('me-sp', s.sp))}${fact('Net worth', count('me-worth', s.worth, 'isk'))}</dl>

@@ -4,6 +4,7 @@ import {S, mine, summary} from './state.js';
 import {$, esc, format, openDrawer, closeDrawer, go} from './shared.js';
 import {mapGraph} from './routes.js';
 import {openMap} from './mapmodal.js';
+import {loadMarket} from './marketdata.js';
 
 export const DESTS = [
   {id:'bridge', label:'Bridge', key:'b', views:[{id:'bridge', slug:'', label:'Bridge'}]},
@@ -35,7 +36,7 @@ export const currentView = () => document.querySelector('.view:not([hidden])')?.
 
 const icon = name => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 export function build() {
-  $('#rail-list').innerHTML = DESTS.map((d, i) => `${d.sep ? '<li class="rail__sep" role="separator"></li>' : ''}<li><button class="rail__item" data-go="${d.id}" data-dest="${d.id}" data-key="${d.key}" data-label="${d.label}" aria-keyshortcuts="G ${d.key.toUpperCase()}" style="--i:${i}">${icon(d.id)}<span>${d.label}</span><kbd>G ${d.key.toUpperCase()}</kbd></button></li>`).join('');
+  $('#rail-list').innerHTML = DESTS.map((d, i) => `${d.sep ? '<li class="rail__sep" role="separator"></li>' : ''}<li><button class="rail__item" data-go="${d.id}" data-dest="${d.id}" data-key="${d.key}" data-label="${d.label}" aria-label="${d.label}" aria-keyshortcuts="G ${d.key.toUpperCase()}" style="--i:${i}">${icon(d.id)}<span>${d.label}</span><kbd>G ${d.key.toUpperCase()}</kbd></button></li>`).join('');
   $('#tabbar').insertAdjacentHTML('afterbegin', TABBAR.map(id => `<button class="tabbar__item" data-go="${id}" data-dest="${id}">${icon(id)}<span>${DEST[id].label}</span></button>`).join(''));
   if (store.get('eve.rail') === 'collapsed') toggleRail(true);
 }
@@ -61,7 +62,6 @@ export function toggleRail(force) {
   document.body.dataset.rail = collapsed ? 'collapsed' : '';
   $('#rail-toggle').setAttribute('aria-expanded', String(!collapsed));
   $('#rail-toggle').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
-  document.querySelectorAll('.rail__item').forEach(b => collapsed ? b.setAttribute('aria-label', b.dataset.label) : b.removeAttribute('aria-label'));
   if (force === undefined) store.set('eve.rail', collapsed ? 'collapsed' : '');
 }
 // The one orchestrated moment: rail items, the strip sweep and the primary ruler, once per browser session.
@@ -113,7 +113,11 @@ function paletteMove(d) {
   $('#palette-input').setAttribute('aria-activedescendant', el.id);
 }
 function runItem(i) { const x = palItems[i]; if (!x) return; $('#palette').close(); x.run(); }
-export function openPalette() { closeDrawer(); $('#palette-input').value = ''; paletteRender(); if (!$('#palette').open) $('#palette').showModal(); $('#palette-input').focus(); }
+export function openPalette() {
+  closeDrawer(); $('#palette-input').value = ''; paletteRender(); if (!$('#palette').open) $('#palette').showModal(); $('#palette-input').focus();
+  // Systems come from the market snapshot's gate graph; load it so they can be searched from any screen.
+  if (S.backend && !S.marketData) loadMarket().then(() => { if ($('#palette').open) paletteRender(); }, () => {});
+}
 
 // Roving focus over a view's main list rows ([data-row]); screens opt in by marking their rows.
 function moveRow(view, d) {
