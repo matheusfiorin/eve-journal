@@ -1,5 +1,5 @@
 STATUS 5,485 systems · 70 regions · 1,262 ship kills and 252,504 jumps in the last hour · 3 incursions
 SYSTEMS 88 REGION 10000002
 PANEL Jita |  | Kimotoro · The Forge |  | 0.9 | Haul here | Dotlan ↗ | zKillboard ↗ |  | SHIP KILLS | 22 | last hour · ~67 over 24 h | PODS / NPCS | 8 / 120 | last hour | JUMPS | 3,552 | last hour | BELTS | 0 | INDUSTRY | 17.14% | build · ME 0.14% |  | Sovereignty CONCORD Assembly |  | GATES | 0.9 Maurasi | 0.9 Perimeter | 0.9 New Caldari | 0.8 Sobaseki Lonetrek | 0
-FRAMES 179
+FRAMES 180
 UEDAMA Uedama 81
