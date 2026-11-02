@@ -9,7 +9,7 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  const picks=industry.locator('.bpos .opp');await expect(picks).toHaveCount(2);
  await expect(picks.first()).toContainText('Hobgoblin I');await expect(picks.first()).toContainText('ME 0 → 10');await expect(picks.first()).toContainText('In Fiofka’s plan');await expect(picks.first()).toContainText('/day');
  await expect(picks.nth(1)).toContainText('Rifter');await expect(picks.nth(1)).toContainText('ME 0 → 6');await expect(picks.nth(1)).toContainText('In Decxus’s plan');await expect(picks.nth(1)).toContainText('Needs Spaceship Command III');
- const plans=industry.locator('article').filter({hasText:'Your starting plan'}).locator('.plan');await expect(plans).toHaveCount(2);
+ const plans=industry.locator('article').filter({hasText:'Wing build plan'}).locator('.plan');await expect(plans).toHaveCount(2);
  await expect(plans.first()).toContainText('Hobgoblin I');await expect(plans.first()).not.toContainText('Rifter','Fiofka lacks the skill');await expect(plans.nth(1)).toContainText('Rifter');await expect(plans.first()).toContainText('1 of');
  const facilities=industry.locator('article').filter({hasText:'Where to build and research near Jita'});
  await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('Niarja III - Factory');await expect(facilities.locator('.facilities').first().locator('li').first()).toContainText('2 jumps');await expect(facilities).not.toContainText('Tama','low-sec stations are never suggested');

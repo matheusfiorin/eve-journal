@@ -1,15 +1,16 @@
 import {test,expect} from '@playwright/test';
+import {tab} from './fixtures.js';
 test.describe.configure({timeout:60000});
 test('LIVE: a new visitor picks a pilot and sees Fiofka through real ESI',async({page},testInfo)=>{
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(process.env.LIVE_SITE||'https://matheusfiorin.github.io/eve-journal/');
  const hero=page.locator('#hero');await expect(hero).toBeVisible();await expect(hero.locator('.hero-pilot')).toHaveCount(2);
- await expect(page.locator('#sync-status')).toContainText('Last refresh',{timeout:45000});
+ await expect(page.locator('#sync-status')).toContainText('Synced',{timeout:45000});
  await expect.poll(()=>hero.locator('img.portrait').evaluateAll(images=>images.length===2&&images.every(image=>image.complete&&image.naturalWidth>0)),{timeout:20000}).toBe(true);
  await hero.getByRole('button',{name:/Fiofka/}).click();await expect(hero).toBeHidden();
  const banner=page.locator('.me-banner');await expect(banner.locator('h1')).toHaveText('Fiofka');await expect(banner).not.toContainText('Corporation unavailable');await expect(banner.locator('.error')).toHaveCount(0);
- await expect(page.locator('#server-status')).toContainText('pilots online');await expect(page.locator('#overview details')).toContainText('Joined');
- await page.locator('nav [data-tab="market"]').click();await expect(page.locator('#market-status')).not.toContainText('Loading market data',{timeout:20000});
+ await expect(page.locator('#server-status')).toContainText('pilots online');await expect(page.locator('#bridge details')).toContainText('Joined');
+ await tab(page,'market');await expect(page.locator('#market-status')).not.toContainText('Loading market data',{timeout:20000});
  expect(errors).toEqual([]);
  await page.screenshot({path:testInfo.outputPath('live-dashboard.png'),fullPage:true});
 });

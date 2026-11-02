@@ -113,8 +113,20 @@ export async function mockApp(page,options={}) {
  },{options,KEY,IDS,API,opaque});
  return {state,errors,calls,privateEsi};
 }
-export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText('Last refresh');}
-export async function tab(page,name){const id=['journal','goals'].includes(name)?'notes':name;await page.locator(`nav [data-tab="${id}"]`).click();await expect(page.locator(`#${id}`)).toBeVisible();}
+export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText('Synced');}
+// The Echelon IA: old tab ids map to a view, and each view lives in one of seven destinations.
+const VIEW={overview:'bridge',empire:'strengths',wallet:'ledger',notes:'logbook',journal:'logbook'};
+export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
+export const isMobile=page=>page.viewportSize().width<=720;
+// Navigate like a person: the rail on desktop, the tab bar or More sheet on a phone, then the view's sub-view tab.
+export async function tab(page,name){
+ const id=VIEW[name]||name,dest=DEST[id];
+ if(isMobile(page)){const item=page.locator(`#tabbar [data-dest="${dest}"]`);if(await item.count())await item.click();else{await page.locator('#tabbar-more').click();await page.locator(`#drawer [data-go="${id}"]`).click();}}
+ else await page.locator(`.rail [data-dest="${dest}"]`).click();
+ const sub=page.locator(`#viewbar [data-go="${id}"]`);
+ if(await sub.count()&&await sub.getAttribute('aria-selected')!=='true')await sub.click();
+ await expect(page.locator(`#${id}`)).toBeVisible();
+}
 export async function addEntry(page,{title='First expedition',body='We found a quiet wormhole.',pilot='Fiofka',category='Adventure',date='2026-10-30'}={}){
  await tab(page,'journal');const f=page.locator('#journal-form');await f.getByLabel('Entry title').fill(title);await f.getByLabel('Private notes').fill(body);await f.getByRole('combobox',{name:'Pilot',exact:true}).selectOption(pilot);await f.getByLabel('Date',{exact:true}).fill(date);await f.getByRole('combobox',{name:'Focus',exact:true}).selectOption(category);await f.getByRole('button',{name:'Save entry locally'}).click();await expect(page.locator('#entries')).toContainText(title);
 }

@@ -13,6 +13,8 @@ test('hauling plans a risk-weighted route with live gate camps and sends it to t
  await page.screenshot({path:testInfo.outputPath('hauling.png'),fullPage:true});
  await haul.getByRole('button',{name:'Send to Fiofka’s autopilot'}).click();await expect(page.locator('#haul-sent')).toContainText('Autopilot set: 3 waypoints');
  expect(ctx.state.waypoints).toEqual([30000144,30003504,30002187]);
+ // A refresh re-plans with the live camps still priced in.
+ await page.locator('#refresh').click();await expect(page.locator('#sync-status')).toContainText('Synced');await expect(page.locator('#haul-status')).toContainText('Live: 3 kills');await expect(niarja).toContainText('3 on your gates');
  await page.locator('#haul-add').click();await stops.nth(1).fill('Niarja');await page.locator('#haul-optimize').check();await page.locator('#haul-end').selectOption('free');
  await stops.nth(2).fill('Perimeter');await page.locator('#haul-plan').click();
  await expect(haul.locator('.card h3')).toContainText('Jita → Perimeter → Niarja');

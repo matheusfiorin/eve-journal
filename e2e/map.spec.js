@@ -24,7 +24,7 @@ test('map draws the region with security lights, overlays, jump range, search an
  const xy=(await canvas.getAttribute('data-focus-xy')).split(',').map(Number);
  await page.locator('#map-view').selectOption('region3d');await page.locator('#map-jump').selectOption('');
  // The camera keeps turning; hover-test a still frame with reduced motion.
- await page.emulateMedia({reducedMotion:'reduce'});await page.reload();await expect(page.locator('#sync-status')).toContainText('Last refresh');
+ await page.emulateMedia({reducedMotion:'reduce'});await page.reload();await expect(page.locator('#sync-status')).toContainText('Synced');
  await page.locator('#map-search').fill('Niarja');await page.locator('#map-find button').click();await page.locator('#map-view').selectOption('region3d');
  await expect.poll(async()=>await canvas.getAttribute('data-focus-xy')).not.toBeNull();
  const p=(await canvas.getAttribute('data-focus-xy')).split(',').map(Number);const box=await canvas.boundingBox();
@@ -44,7 +44,7 @@ test('routes across the app preview on hover and open in the 3D modal, then in t
  await expect(modal.locator('.hop-strip li')).toHaveCount(4);await expect(modal).toContainText('The Forge → Domain');
  const canvas=modal.locator('canvas');await expect.poll(async()=>Number(await canvas.getAttribute('data-frames'))).toBeGreaterThan(3);
  await page.screenshot({path:testInfo.outputPath('map-modal.png')});
- await modal.getByRole('button',{name:'Open in Map tab'}).click();await expect(modal).toBeHidden();await expect(page.locator('#map')).toBeVisible();
+ await modal.getByRole('button',{name:'Open in Star map'}).click();await expect(modal).toBeHidden();await expect(page.locator('#map')).toBeVisible();
  await expect(page.locator('#map-route')).toContainText('Balanced route · 3 jumps');await expect(page.locator('svg.region-map .route-line')).toHaveCount(1,'Jita–Perimeter is inside Domain? no: the Forge part');
  await page.locator('#map-route-clear').click();await expect(page.locator('#map-route')).toBeHidden();
  await tab(page,'industry');const trip=page.locator('.bpos .opp').filter({hasText:'Rifter'}).locator('details.trip');await trip.locator('summary').click();

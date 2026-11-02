@@ -2,8 +2,8 @@ import {test,expect} from '@playwright/test';
 import {mockApp,openApp,tab,addEntry,data,KEY} from './fixtures.js';
 test('public profiles, navigation and overview are usable without login',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);
- await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#overview .vs').first()).toContainText('Skill points');
- await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.locator('#overview')).toContainText('Security status');
+ await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#bridge .wing-card')).toContainText('Wing skill points');
+ await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.locator('#bridge')).toContainText('Security status');
  for(const name of ['empire','market','training','skills','wallet','clones','goals','overview'])await tab(page,name);
  await tab(page,'journal');await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);
 });
@@ -66,7 +66,7 @@ test('two browser tabs cannot overwrite each other and the draft survives reload
  await mockApp(page);await openApp(page);const second=await context.newPage();await mockApp(second);await openApp(second);await addEntry(second,{title:'Saved in second tab'});await expect(page.locator('#notice')).toContainText('Another tab');await tab(page,'journal');await page.locator('#journal-form').getByLabel('Entry title').fill('First tab draft');await page.locator('#journal-form').getByLabel('Private notes').fill('Keep both stories.');await page.getByRole('button',{name:'Save entry locally'}).click();await expect(page.locator('#notice')).toContainText('Reload');await page.reload();await expect(page.locator('#entries')).toContainText('Saved in second tab');await expect(page.locator('#journal-form').getByLabel('Entry title')).toHaveValue('First tab draft');await second.close();
 });
 test('private notes never leave the browser in API requests',async({page})=>{
- const requests=[];page.on('request',r=>{if(r.url().startsWith('https://'))requests.push(r.url()+' '+(r.postData()||''));});await mockApp(page);await openApp(page);await addEntry(page,{body:'PRIVATE-NOTE-SENTINEL-93812'});await tab(page,'overview');await page.getByRole('button',{name:/Refresh/}).click();await expect(page.locator('#sync-status')).toContainText('Last refresh');expect(requests.join('\n')).not.toContain('PRIVATE-NOTE-SENTINEL-93812');
+ const requests=[];page.on('request',r=>{if(r.url().startsWith('https://'))requests.push(r.url()+' '+(r.postData()||''));});await mockApp(page);await openApp(page);await addEntry(page,{body:'PRIVATE-NOTE-SENTINEL-93812'});await tab(page,'overview');await page.getByRole('button',{name:/Refresh/}).click();await expect(page.locator('#sync-status')).toContainText('Synced');expect(requests.join('\n')).not.toContain('PRIVATE-NOTE-SENTINEL-93812');
 });
 test('entry edits recover as edits instead of creating a duplicate',async({page})=>{
  await mockApp(page,{data});await openApp(page);await tab(page,'journal');await page.locator('.entry').first().getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#journal-form').getByLabel('Private notes').fill('Recovered edit.');await expect(page.locator('#draft-status')).toContainText('Draft saved');await page.reload();await expect(page.locator('#entry-submit')).toHaveText('Save changes');await page.locator('#entry-submit').click();await expect(page.locator('.entry')).toHaveCount(2);await expect(page.locator('#entries')).toContainText('Recovered edit.');
