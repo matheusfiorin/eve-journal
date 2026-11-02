@@ -289,3 +289,8 @@ a.button{display:inline-block;font-weight:600;font-size:13px;border:1px solid va
 .meter{display:block;height:6px;border-radius:99px;background:var(--panel-2);overflow:hidden;margin-bottom:4px;max-width:220px}.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),var(--warn),var(--danger))}
 .explore .opp-profit button{margin-top:6px}.bands{align-items:center;gap:16px}.bands .hint{margin:0 4px 10px 0}
 .loop{counter-reset:stop}.loop li{counter-increment:stop}.loop li::before{content:counter(stop);display:inline-block;width:20px;color:var(--muted);font-size:12px}
+.goal-target{margin:8px 0 4px;max-width:420px}.goal-target small{display:block;font-size:12px;color:var(--muted)}
+.goal-steps{list-style:none;padding:0;margin:8px 0;display:grid;gap:2px}.goal-steps label{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text);text-decoration:none}.goal-steps input{width:auto;margin:0}
+.goal-steps li:has(input:checked) label{color:var(--muted);text-decoration:line-through}
+.goal-notes{white-space:pre-wrap;font-size:13px;color:var(--muted);margin:6px 0 0}
+.goal.done .goal-steps label{text-decoration:none}

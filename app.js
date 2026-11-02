@@ -1195,9 +1195,16 @@ function renderLocal() {
   const filter = $('#goal-filter').value;
   const goals = data.goals.filter(g => filter === 'all' || (filter === 'done' ? g.done : !g.done));
   $('#goal-count').textContent = `${done} of ${data.goals.length} goals complete`;
-  $('#goal-list').innerHTML = goals.length ? goals.map(g => `<article class="goal ${g.done ? 'done' : ''}"><div><label><input type="checkbox" data-goal="${esc(g.id)}" ${g.done ? 'checked' : ''}>${esc(g.title)}</label><small>${esc(g.pilot)} · ${esc(g.category || 'Other')}${g.due ? ` · <span class="${!g.done && g.due < localDate() ? 'error' : ''}">Target ${esc(g.due)}</span>` : ''}</small></div><div class="actions"><button data-edit-goal="${esc(g.id)}" class="secondary small">Edit</button><button data-delete-goal="${esc(g.id)}" class="secondary small" aria-label="Delete ${esc(g.title)}">Delete</button></div></article>`).join('') : `<div class="empty">${data.goals.length ? 'No goals in this view.' : 'A new ship? A new system? Give your next adventure a goal.'}</div>`;
+  $('#goal-list').innerHTML = goals.length ? goals.map(g => `<article class="goal ${g.done ? 'done' : ''}"><div><label><input type="checkbox" data-goal="${esc(g.id)}" ${g.done ? 'checked' : ''}>${esc(g.title)}</label><small>${esc(g.pilot)} · ${esc(g.category || 'Other')}${g.due ? ` · <span class="${!g.done && g.due < localDate() ? 'error' : ''}">Target ${esc(g.due)}</span>` : ''}</small>${goalDetails(g)}</div><div class="actions"><button data-edit-goal="${esc(g.id)}" class="secondary small">Edit</button><button data-delete-goal="${esc(g.id)}" class="secondary small" aria-label="Delete ${esc(g.title)}">Delete</button></div></article>`).join('') : `<div class="empty">${data.goals.length ? 'No goals in this view.' : 'A new ship? A new system? Give your next adventure a goal.'}</div>`;
   pilotOptions();
   renderEntries();
+}
+// A goal's target against its result, its steps as a checklist, and its notes.
+function goalDetails(g) {
+  const doneSteps = (g.steps || []).filter(st => st.done).length;
+  const target = Number.isFinite(g.target) ? `<div class="goal-target"><span class="stack"><i class="fill me" style="width:${Number.isFinite(g.result) && g.target > 0 ? Math.max(0, Math.min(100, g.result / g.target * 100)).toFixed(1) : 0}%"></i></span><small>${Number.isFinite(g.result) ? `${format(g.result, 'isk')} of ${format(g.target, 'isk')}${g.result >= g.target ? ' · <span class="pos">target reached</span>' : ''}` : `Target ${format(g.target, 'isk')} · no result yet`}</small></div>` : '';
+  const steps = g.steps?.length ? `<ol class="goal-steps" aria-label="Steps, ${doneSteps} of ${g.steps.length} done">${g.steps.map((st, i) => `<li><label><input type="checkbox" data-goal-step="${esc(g.id)}:${i}" ${st.done ? 'checked' : ''}>${esc(st.text)}</label></li>`).join('')}</ol>` : '';
+  return `${target}${steps}${g.notes ? `<p class="goal-notes">${esc(g.notes)}</p>` : ''}`;
 }
 function renderEntries() {
   const entries = filterEntries(data.entries, {query:$('#journal-search').value, pilot:$('#journal-pilot').value, category:$('#journal-category').value});
@@ -1339,7 +1346,10 @@ $('#goal-form').onsubmit = event => {
   event.preventDefault();
   const fields = Object.fromEntries(new FormData(event.target));
   if (!fields.title.trim()) return;
-  const goal = {...fields, title:fields.title.trim(), id:editingGoal || crypto.randomUUID(), done:data.goals.find(g => g.id === editingGoal)?.done || false};
+  const prior = data.goals.find(g => g.id === editingGoal), number = v => v === '' || v === undefined ? undefined : Number(v);
+  // Steps keep their ticks when the goal is edited and the line text is unchanged.
+  const steps = fields.steps.split('\n').map(t => t.trim()).filter(Boolean).slice(0, 30).map(text => ({text:text.slice(0, 160), done:prior?.steps?.find(st => st.text === text.slice(0, 160))?.done || false}));
+  const goal = {...fields, title:fields.title.trim(), notes:fields.notes.trim(), target:number(fields.target), result:number(fields.result), steps, id:editingGoal || crypto.randomUUID(), done:prior?.done || false};
   if (persist({...data, goals:editingGoal ? data.goals.map(g => g.id === editingGoal ? goal : g) : [...data.goals, goal]})) { resetGoal(); notice('Goal saved in this browser.'); }
 };
 $('#journal-form').onsubmit = event => {
@@ -1361,6 +1371,11 @@ $('#journal-search').oninput = renderEntries;
 $('#journal-pilot').onchange = renderEntries;
 $('#journal-category').onchange = renderEntries;
 document.addEventListener('change', event => {
+  if (event.target.matches('[data-goal-step]')) {
+    const [id, i] = event.target.dataset.goalStep.split(':');
+    if (!persist({...data, goals:data.goals.map(g => g.id === id ? {...g, steps:g.steps.map((st, n) => n === Number(i) ? {...st, done:event.target.checked} : st)} : g)})) event.target.checked = !event.target.checked;
+    return;
+  }
   if (!event.target.matches('[data-goal]')) return;
   if (!persist({...data, goals:data.goals.map(g => g.id === event.target.dataset.goal ? {...g, done:event.target.checked} : g)})) event.target.checked = !event.target.checked;
 });
@@ -1397,7 +1412,8 @@ document.addEventListener('click', async event => {
       editingGoal = g.id;
       const f = $('#goal-form');
       if (g.category && ![...f.elements.category.options].some(o => o.value === g.category)) f.elements.category.add(new Option(g.category, g.category));
-      for (const key of ['title','pilot','due','category']) f.elements[key].value = g[key] || (key === 'category' ? 'Other' : '');
+      for (const key of ['title','pilot','due','category','notes']) f.elements[key].value = g[key] || (key === 'category' ? 'Other' : '');
+      f.elements.target.value = g.target ?? ''; f.elements.result.value = g.result ?? ''; f.elements.steps.value = (g.steps || []).map(st => st.text).join('\n');
       $('#goal-submit').textContent = 'Save changes'; $('#cancel-goal-edit').hidden = false; f.scrollIntoView({behavior:'smooth'}); f.elements.title.focus();
     }
     if (b.dataset.deleteGoal && confirm('Delete this local goal?')) {

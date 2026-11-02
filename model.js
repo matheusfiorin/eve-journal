@@ -15,9 +15,12 @@ export function validateBackup(value) {
   }
   for (const g of value.goals) if (typeof g.done !== 'boolean') throw new Error('Invalid goal.');
   for (const g of value.goals) if ((g.due !== undefined && g.due !== '' && !validDate(g.due)) || (g.category !== undefined && !text(g.category,40))) throw new Error('Invalid goal details.');
+  // Optional goal details: notes, an ISK target, the actual result, and a checklist of steps.
+  const isk = v => v === undefined || v === '' || (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e15);
+  for (const g of value.goals) if ((g.notes !== undefined && !text(g.notes,4000)) || !isk(g.target) || !isk(g.result) || (g.steps !== undefined && (!Array.isArray(g.steps) || g.steps.length > 30 || g.steps.some(st => !text(st?.text,160) || !st.text.trim() || typeof st.done !== 'boolean')))) throw new Error('Invalid goal details.');
   for (const e of value.entries) if (!text(e.body,20000) || !e.body.trim() || !validDate(e.date) || (e.category !== undefined && !text(e.category,40))) throw new Error('Invalid journal entry.');
   for (const list of [value.goals,value.entries]) if(new Set(list.map(x=>x.id)).size!==list.length) throw new Error('Duplicate record IDs in backup.');
-  return {version:1, goals:value.goals.map(({id,title,pilot,done,due,category})=>({id,title,pilot,done,...(due?{due}:{}),...(category?{category}:{})})), entries:value.entries.map(({id,title,pilot,date,body,category})=>({id,title,pilot,date,body,...(category?{category}:{})}))};
+  return {version:1, goals:value.goals.map(({id,title,pilot,done,due,category,notes,target,result,steps})=>({id,title,pilot,done,...(due?{due}:{}),...(category?{category}:{}),...(notes?{notes}:{}),...(typeof target==='number'?{target}:{}),...(typeof result==='number'?{result}:{}),...(steps?.length?{steps:steps.map(({text,done})=>({text,done}))}:{})})), entries:value.entries.map(({id,title,pilot,date,body,category})=>({id,title,pilot,date,body,...(category?{category}:{})}))};
 }
 export function mergeBackups(current, incoming) {
   const a=validateBackup(current), b=validateBackup(incoming);

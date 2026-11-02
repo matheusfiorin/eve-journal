@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {readFileSync} from 'node:fs';
 import {mockApp,openApp,tab,addEntry,data,KEY} from './fixtures.js';
 test('public profiles, navigation and overview are usable without login',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);
@@ -70,4 +71,19 @@ test('private notes never leave the browser in API requests',async({page})=>{
 });
 test('entry edits recover as edits instead of creating a duplicate',async({page})=>{
  await mockApp(page,{data});await openApp(page);await tab(page,'journal');await page.locator('.entry').first().getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#journal-form').getByLabel('Private notes').fill('Recovered edit.');await expect(page.locator('#draft-status')).toContainText('Draft saved');await page.reload();await expect(page.locator('#entry-submit')).toHaveText('Save changes');await page.locator('#entry-submit').click();await expect(page.locator('.entry')).toHaveCount(2);await expect(page.locator('#entries')).toContainText('Recovered edit.');
+});
+test('a goal with a target, steps and notes imports, ticks off and records its result',async({page})=>{
+ const ctx=await mockApp(page);await openApp(page);await tab(page,'goals');
+ const file=readFileSync('/tmp/claude-0/-home-claude/ea60a3cb-b5b8-5485-bac5-c7a6e9ca7bcd/scratchpad/out/first-antimatter-goal.json');
+ page.once('dialog',d=>d.accept());await page.locator('#import').setInputFiles({name:'goal.json',mimeType:'application/json',buffer:file});
+ const goal=page.locator('.goal').filter({hasText:'Antimatter Charge S'});await expect(goal).toBeVisible();
+ await expect(goal).toContainText('Target 1.0M ISK · no result yet');await expect(goal.locator('.goal-steps li')).toHaveCount(6);await expect(goal).toContainText('Mass Production III');
+ await expect(goal.locator('[data-goal-step$=":0"]')).toBeChecked();await goal.locator('[data-goal-step$=":2"]').check();
+ await goal.getByRole('button',{name:'Edit',exact:true}).click();const f=page.locator('#goal-form');
+ await expect(f.getByLabel('Steps (one per line; tick them off on the goal)')).toHaveValue(/Copy job/);await f.getByLabel('Result so far (ISK)').fill('1350000');await f.getByRole('button',{name:'Save changes'}).click();
+ await expect(goal).toContainText('1.4M ISK of 1.0M ISK · target reached');await expect(goal.locator('[data-goal-step$=":2"]')).toBeChecked();
+ await page.locator('#goal-filter').selectOption('all');await goal.locator('[data-goal]').check();await expect(goal).toHaveClass(/done/);
+ await page.locator('#goal-filter').selectOption('done');await expect(page.locator('.goal').filter({hasText:'Antimatter'})).toBeVisible();
+ await page.reload();await expect(page.locator('#sync-status')).toContainText('Last refresh');await tab(page,'goals');await page.locator('#goal-filter').selectOption('all');
+ await expect(page.locator('.goal').filter({hasText:'Antimatter'})).toContainText('target reached');expect(ctx.errors).toEqual([]);
 });
