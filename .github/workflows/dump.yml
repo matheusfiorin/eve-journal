@@ -6,11 +6,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: 22}
       - run: |
           mkdir -p dump
-          npm ci >/dev/null && npx playwright install --with-deps chromium >/dev/null
-          node check.mjs 2> dump/err.txt || (echo FAILED >> dump/live.txt; tail -c 2000 dump/err.txt >> dump/live.txt)
+          curl -sSf https://eve-journal-api.eve-pilots-f6933080.workers.dev/api/market | python3 -c "import json,sys; d=json.load(sys.stdin); json.dump(d['universe'], open('dump/universe.json','w'))"
           git config user.name dump; git config user.email dump@example.com
           git add dump && git commit -qm "[skip ci] dump" && git push -q
