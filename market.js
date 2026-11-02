@@ -1,9 +1,9 @@
+import {levelOf} from './model.js';
+import {SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
 // Ranks trade opportunities from the pipeline's market snapshot. Pure functions: the UI adds routes.
-export const SCC_AND_FACILITY = 0.0425; // shortcut: 4% SCC surcharge + 0.25% NPC facility tax; structures with rigs differ.
 
 export function fees(skills, ids = {}) {
-  const level = id => skills?.skills?.find(s => s.skill_id === id)?.active_skill_level || 0;
-  return {salesTax:0.075 * (1 - 0.11 * level(ids.accounting)), brokerFee:Math.max(0.01, 0.03 - 0.003 * level(ids.brokerRelations))};
+  return {salesTax:0.075 * (1 - 0.11 * levelOf(skills, ids.accounting)), brokerFee:Math.max(0.01, 0.03 - 0.003 * levelOf(skills, ids.brokerRelations))};
 }
 // Merge every scanned region into one view per item: sells, buys and the station each sits in.
 export function book(regions) {
@@ -61,7 +61,8 @@ export function stationTrades(market, {salesTax, brokerFee, capture = 0.05, budg
   return out.sort((a,b) => b.daily - a.daily).slice(0, limit);
 }
 // One manufacturing run at ME 0: materials bought at the cheapest scanned ask, product listed at the best ask.
-export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, costIndex = 0}) {
+// Job cost uses Industry's rates; pass alpha for an alpha clone's extra tax.
+export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, costIndex = 0, alpha = false}) {
   const cheapest = type => market.items.get(type)?.sells[0];
   const out = [];
   for (const [product, r] of Object.entries(recipes || {})) {
@@ -74,7 +75,7 @@ export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, c
       materials += ask.price * qty; eiv += (adjusted.get(type) || 0) * qty;
     }
     if (missing) continue;
-    const job = eiv * (costIndex + SCC_AND_FACILITY);
+    const job = eiv * (costIndex + SCC.manufacturing + NPC_FACILITY_TAX + (alpha ? ALPHA_TAX : 0)); // shortcut: NPC stations only; rigged structures differ.
     const revenue = sell.price * r.q * (1 - salesTax - brokerFee);
     const profit = revenue - materials - job;
     out.push({type:Number(product), materials, job, revenue, profit, margin:profit / (materials + job), capital:materials + job, loc:sell.loc, daily:market.items.get(Number(product)).daily});

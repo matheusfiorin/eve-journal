@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fees,book,hauls,stationTrades,manufacturing,SCC_AND_FACILITY} from '../market.js';
+import {fees,book,hauls,stationTrades,manufacturing} from '../market.js';
 const JITA=60003760,AMARR=60008494,DODIXIE=60011866;
 const regions=[
  {data:{name:'The Forge',stations:{[JITA]:[30000142,'Jita 4-4']},types:{34:{d:1000,s:[[JITA,5,100000]],b:[[JITA,4.5,50000]]},587:{d:10,s:[[JITA,400000,5]],b:[[JITA,350000,3]]},35:{d:100,s:[[JITA,10,1e6]],b:[]}}}},
@@ -30,7 +30,8 @@ test('station trades need both sides in one station and a margin after fees',()=
 });
 test('manufacturing prices materials at the cheapest ask and adds job cost from adjusted prices',()=>{
  const list=manufacturing(market,{587:{q:1,m:[[34,30000],[35,6000]]},999:{q:1,m:[[34,1]]}},{salesTax:0.04,brokerFee:0.02,adjusted:new Map([[34,4],[35,9]]),costIndex:0.01});
- assert.equal(list.length,1);const r=list[0];assert.equal(r.materials,30000*5+6000*10);assert.ok(Math.abs(r.job-(30000*4+6000*9)*(0.01+SCC_AND_FACILITY))<1e-6);assert.ok(Math.abs(r.profit-(400000*0.94-r.materials-r.job))<1e-6);
+ assert.equal(list.length,1);const r=list[0];assert.equal(r.materials,30000*5+6000*10);assert.ok(Math.abs(r.job-(30000*4+6000*9)*(0.01+0.0425))<1e-6);assert.ok(Math.abs(r.profit-(400000*0.94-r.materials-r.job))<1e-6);
+ const alpha=manufacturing(market,{587:{q:1,m:[[34,30000],[35,6000]]}},{salesTax:0.04,brokerFee:0.02,adjusted:new Map([[34,4],[35,9]]),costIndex:0.01,alpha:true})[0];assert.ok(Math.abs(alpha.job-r.job-(30000*4+6000*9)*0.02)<1e-6,'alpha clones pay the alpha tax, as in Industry');
 });
 test('a budget caps hauled units, station-trade orders and drops what the wallet cannot cover',()=>{
  assert.equal(hauls(market,{salesTax:0.05,cargo:1000,volumeOf:()=>0.01,budget:50000})[0].units,10000,'50k ISK buys 10,000 units at 5');

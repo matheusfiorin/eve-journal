@@ -1,3 +1,4 @@
+import {levelOf} from './model.js';
 // Early-game industry: slots, research and BPO payback from live prices. Pure functions; the UI supplies data.
 // Formulas follow EVE University (Manufacturing, Research, Job cost) and CCP patch notes as of Oct 2026.
 export const SCC = {manufacturing:0.04, research:0.02}; // shortcut: research SCC was halved "temporarily" in July 2025; verify in-game.
@@ -7,8 +8,7 @@ export const ALPHA_TAX = 0.02; // shortcut: CCP sources disagree (0.25% vs 2%); 
 export const RESEARCH_SECONDS = [0, 105, 250, 595, 1414, 3360, 8000, 19000, 45255, 107700, 256000];
 
 export function skillLevels(skills, ids = {}) {
-  const level = id => skills?.skills?.find(s => s.skill_id === id)?.active_skill_level || 0;
-  return Object.fromEntries(Object.entries(ids).map(([key, id]) => [key, level(id)]));
+  return Object.fromEntries(Object.entries(ids).map(([key, id]) => [key, levelOf(skills, id)]));
 }
 // Alpha clones see a lower active level than the level they trained.
 export const isAlpha = skills => Boolean(skills?.skills?.some(s => s.active_skill_level < s.trained_skill_level));

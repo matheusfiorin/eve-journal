@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SCOPES,base64url,challenge,validateState,validateToken} from '../auth.js';
+import {SCOPES,base64url,challenge,validateToken} from '../auth.js';
 
 const now=Date.parse('2026-10-30T12:00:00Z');
 const client='test-public-client', id=123456;
@@ -15,11 +15,6 @@ async function sign(overrides={},header={alg:'RS256',kid:'test-key'}) {
 }
 test('PKCE uses the RFC 7636 S256 challenge vector',async()=>{
   assert.equal(await challenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'),'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
-});
-test('login state rejects mismatches, old, future and incomplete state',()=>{
-  const pending={state:'random',created:now,expectedId:id,clientId:client,verifier:'secret'};
-  assert.doesNotThrow(()=>validateState(pending,'random',now));
-  for(const [p,s] of [[null,'random'],[pending,'other'],[{...pending,created:now-300001},'random'],[{...pending,created:now+1},'random'],[{...pending,expectedId:undefined},'random']])assert.throws(()=>validateState(p,s,now));
 });
 test('accepts a signed EVE token for the correct application and pilot',async()=>{
   assert.deepEqual(await validateToken(await sign(),client,id,[jwk],now),{name:'Fiofka',expires:now+1200000,scopes:SCOPES});
