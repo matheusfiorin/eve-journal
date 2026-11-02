@@ -1,41 +1,25 @@
-import json, glob, zipfile, sys, io
-z = zipfile.ZipFile('sde.zip')
-names = z.namelist()
-out = open('dump/sde.txt', 'w')
-print('FILES', names, file=out)
-def rows(name):
-    n = next((x for x in names if x.endswith('/' + name + '.jsonl') or x == name + '.jsonl'), None)
-    if not n: print('MISSING', name, file=out); return
-    for line in io.TextIOWrapper(z.open(n), encoding='utf-8'):
-        if line.strip(): yield json.loads(line)
-nm = lambda d: d.get('en') if isinstance(d, dict) else d
-groups = {g['_key']: g for g in rows('groups')}
-print('GROUP SAMPLE', next(iter(groups.values())), file=out)
-ore_groups = {k: nm(g['name']) for k, g in groups.items() if g.get('categoryID') == 25}
-print('ORE GROUPS', ore_groups, file=out)
-types = {}
-for t in rows('types'): types[t['_key']] = t
-WANT = {'Venture','Procurer','Retriever','Covetor','Skiff','Mackinaw','Hulk','Prospect','Endurance','Pioneer','Miner I','Miner II','Strip Miner I','Mining Laser Upgrade I','Mining','Astrogeology','Mining Barge','Mining Frigate','Exhumers','Reprocessing','Reprocessing Efficiency','Simple Ore Processing','Coherent Ore Processing','Variegated Ore Processing','Compressed Veldspar','Expedition Frigates','Mining Upgrades','Ice Harvester I','Ore Compression','Veldspar','Scordite'}
-ids = {}
-for k, t in types.items():
-    n = nm(t.get('name'))
-    if n in WANT: ids[n] = k; print('TYPE', k, n, 'group', t.get('groupID'), 'vol', t.get('volume'), 'cap', t.get('capacity'), 'portion', t.get('portionSize'), file=out)
-print('ORES', file=out)
-for k, t in types.items():
-    if t.get('groupID') in ore_groups and t.get('published'):
-        print(k, ore_groups[t['groupID']], nm(t['name']), t.get('volume'), t.get('portionSize'), t.get('metaGroupID'), file=out)
-for t in rows('typeMaterials'):
-    if t['_key'] in (ids.get('Veldspar'), ids.get('Scordite'), ids.get('Compressed Veldspar')): print('MATS', t, file=out)
-attrs = {a['_key']: a.get('name') for a in rows('dogmaAttributes')}
-want = {ids[n] for n in ('Venture','Procurer','Retriever','Covetor','Prospect','Miner I','Miner II','Strip Miner I','Mining Laser Upgrade I','Mining','Astrogeology','Mining Frigate','Mining Barge','Expedition Frigates','Reprocessing','Reprocessing Efficiency','Simple Ore Processing') if n in ids}
-for t in rows('typeDogma'):
-    if t['_key'] in want:
-        print('DOGMA', nm(types[t['_key']]['name']), [(a['attributeID'], attrs.get(a['attributeID']), a['value']) for a in t.get('dogmaAttributes', [])], file=out)
-        print('EFFECTS', [e.get('effectID') for e in t.get('dogmaEffects', [])], file=out)
-n = 0
-for b in rows('mapAsteroidBelts'):
-    if n < 3: print('BELT', b, file=out)
-    n += 1
-print('BELTS', n, file=out)
-s = next(rows('mapSolarSystems'))
-print('SYSTEM KEYS', list(s.keys()), file=out)
+import json, urllib.request, time
+H = {'User-Agent': 'eve-journal gatecamp probe (github.com/matheusfiorin/eve-journal; matheus)', 'Accept-Encoding': 'identity', 'Accept': 'application/json'}
+out = open('dump/zkill.txt', 'w')
+def get(url):
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=30)
+        return r.status, dict(r.headers), r.read().decode()
+    except Exception as e:
+        return getattr(e, 'code', None), dict(getattr(e, 'headers', {}) or {}), str(e) + ' ' + (e.read().decode()[:300] if hasattr(e, 'read') else '')
+for url in ['https://zkillboard.com/api/regionID/10000002/pastSeconds/3600/', 'https://zkillboard.com/api/kills/regionID/10000032/pastSeconds/3600/', 'https://zkillboard.com/api/systemID/30002813/pastSeconds/86400/']:
+    st, h, body = get(url)
+    print('URL', url, st, {k: v for k, v in h.items() if k.lower() in ('content-type', 'access-control-allow-origin', 'retry-after', 'x-bin-attempts', 'cache-control')}, file=out)
+    print(body[:1500], file=out)
+    try:
+        data = json.loads(body)
+        print('COUNT', len(data), file=out)
+        gates = [k for k in data if 50000000 <= k['zkb'].get('locationID', 0) < 60000000]
+        print('GATE KILLS', len(gates), 'labels sample', [k['zkb'].get('labels') for k in data[:5]], file=out)
+        if data:
+            k = (gates or data)[0]
+            st2, _, km = get(f"https://esi.evetech.net/latest/killmails/{k['killmail_id']}/{k['zkb']['hash']}/")
+            print('KILLMAIL', st2, km[:1500], file=out)
+    except Exception as e:
+        print('PARSE', e, file=out)
+    time.sleep(2)
