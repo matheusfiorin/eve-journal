@@ -21,7 +21,7 @@ The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker
 - **Skills** — the full skill sheet grouped by skill group, with levels, SP per skill and group, and search.
 - **Wallet** — balance, the latest 50 journal entries and market transactions, and current industry jobs.
 - **Clones** — attributes and remaps, active implants, home station, jump clones and the next clone jump time.
-- **Notes** — goals and a journal stored only in this browser, with export, import and draft recovery.
+- **Notes** — goals and a journal stored only in this browser, with export, import and draft recovery. A goal can carry an ISK target, the result so far (shown as progress, with “target reached”), a checklist of steps you tick off on the goal, and notes.
 
 Visitors without a session see public profiles plus each pilot's shared skill total and queue. Everything else needs that pilot's own session.
 

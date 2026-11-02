@@ -76,3 +76,10 @@ test('shares ignore missing values and never divide by zero',()=>{
 test('compact numbers for big ISK values',()=>{
   assert.equal(compactNumber(1234),'1.2k');assert.equal(compactNumber(12500000.25),'12.5M');assert.equal(compactNumber(250e9),'250B');assert.equal(compactNumber(-5500),'-5.5k');assert.equal(compactNumber(undefined),'—');assert.equal(compactNumber(999),'999');
 });
+test('goals keep optional notes, an ISK target, the result and checklist steps, and reject bad ones',async()=>{
+ const {validateBackup}=await import('../model.js');
+ const g={id:'g1',title:'Profit 1M',pilot:'Fiofka',done:false,notes:'ME 7 / TE 18',target:1e6,result:250000,steps:[{text:'Copy BPCs',done:true},{text:'Sell',done:false}]};
+ assert.deepEqual(validateBackup({version:1,goals:[g],entries:[]}).goals[0],g);
+ assert.deepEqual(validateBackup({version:1,goals:[{id:'g2',title:'Old',pilot:'A',done:true}],entries:[]}).goals[0],{id:'g2',title:'Old',pilot:'A',done:true},'old goals still load');
+ for(const bad of [{target:'lots'},{result:Infinity},{steps:[{text:'',done:false}]},{steps:'x'},{notes:'x'.repeat(4001)}])assert.throws(()=>validateBackup({version:1,goals:[{...g,...bad}],entries:[]}),/Invalid goal/);
+});

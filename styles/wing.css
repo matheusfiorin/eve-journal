@@ -16,3 +16,11 @@
 .goal .actions{margin:0;flex-shrink:0}
 .toolbar-row{margin-top:12px}.toolbar-row input,.toolbar-row select{margin-bottom:0}
 @media (max-width:720px){ .wing-hero{grid-template-columns:1fr} .goal{flex-direction:column} }
+.goal-target,.goal-steps,.goal-notes{margin-left:26px!important}
+.goal-target{margin:8px 0 4px;max-width:420px}.goal-target small{display:block;font-size:var(--fs-xs);color:var(--text-muted);margin:4px 0 0}
+.goal-target .fill{background:var(--accent)}
+.goal-steps{list-style:none;padding:0;margin:8px 0;display:grid;gap:2px}
+.goal-steps label{display:flex;gap:8px;align-items:center;font-size:var(--fs-sm);color:var(--text);text-decoration:none}
+.goal-steps li:has(input:checked) label{color:var(--text-muted);text-decoration:line-through}
+.goal.done .goal-steps label{text-decoration:none}
+.goal-notes{white-space:pre-wrap;font-size:var(--fs-sm);color:var(--text-muted);margin:6px 0 0;max-width:72ch}
