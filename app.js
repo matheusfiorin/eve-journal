@@ -931,7 +931,10 @@ async function renderMap() {
   if (!backend) { status.textContent = 'The map needs the backend.'; return; }
   try { await loadMarket(); } catch (error) { status.textContent = `Map unavailable: ${error.message}`; return; }
   const g = mapGraph();
-  if (!g || !Object.keys(g.regions).length) { status.textContent = 'The map appears after the next pipeline run.'; return; }
+  if (!g || !Object.keys(g.regions).length || ![...g.systems.values()].some(x => x.pos)) {
+    status.textContent = 'Map data (star positions, region layouts and stations) is still being built by the hourly pipeline. Reload in a few minutes.';
+    $('#map-canvas-wrap').innerHTML = '<div class="card shimmer">Charting New Eden…</div>'; return;
+  }
   fillSystemList(g);
   const regionSelect = $('#map-region');
   if (!regionSelect.options.length) regionSelect.innerHTML = regionIdsWithLayout(g).map(r => `<option value="${r}">${esc(regionName(r))}</option>`).join('');
