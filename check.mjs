@@ -4,6 +4,7 @@ const b = await chromium.launch(), page = await b.newPage({viewport:{width:1280,
 const log = [];
 page.on('pageerror', e => log.push(`PAGEERROR ${e.message}`));
 page.on('console', m => { if (m.type() === 'error') log.push(`CONSOLE ${m.text()}`); });
+try {
 await page.addInitScript(() => localStorage.setItem('eve-me:v1', 'Fiofka'));
 await page.goto('https://matheusfiorin.github.io/eve-journal/#map', {waitUntil:'networkidle'});
 await page.waitForTimeout(8000);
@@ -18,5 +19,6 @@ await page.locator('#map-search').fill('Uedama'); await page.locator('#map-find 
 log.push(`UEDAMA ${await page.locator('#map-panel h3').textContent()} ${await page.locator('svg.region-map .sys').count()}`);
 await page.locator('#map-overlay').selectOption('shipKills'); await page.waitForTimeout(1000);
 await page.screenshot({path:'dump/live-kills.png'});
+} catch (e) { log.push(`ERROR ${e.message.slice(0, 800)}`); await page.screenshot({path:'dump/live-map.png'}).catch(() => {}); }
 writeFileSync('dump/live.txt', log.join('\n'));
 await b.close();
