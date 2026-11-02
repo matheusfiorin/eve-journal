@@ -150,6 +150,9 @@ test('market pipeline must authenticate, stores snapshots per region and the pub
  assert.equal((await app.request('/api/market/survey')).status,401);
  assert.deepEqual((await(await app.request('/api/market/survey',{headers:{Authorization:`Bearer ${token}`}})).json()).survey,{done:{10000002:1}});
  const market=await(await app.request('/api/market')).json();assert.equal(market.meta.data.types[34].n,'Tritanium');assert.equal(market.regions.length,1);assert.deepEqual(market.regions[0].data.types,{});
+ assert.equal((await ingest(token,{region:10000043,data:{name:'Domain',types:{}}})).status,200);
+ app.env.DB.raw.exec(`UPDATE market_snapshots SET updated_at = ${Date.now()-7*3600000} WHERE region_id IN (0, 10000043)`);
+ const fresh=await(await app.request('/api/market')).json();assert.deepEqual(fresh.regions.map(r=>r.region),[10000002],'a region not scanned for 6 hours is dropped');assert.ok(fresh.meta,'meta is kept however old');
  assert.equal((await app.request('/api/market/regions')).status,401);
  const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);
 });

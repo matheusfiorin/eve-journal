@@ -39,7 +39,7 @@ function html(body,status=200,headers={}){
  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EVE Pilot Console</title><style>body{background:#0a1019;color:#edf2f6;font:16px system-ui;max-width:620px;margin:60px auto;padding:24px;line-height:1.7}h1{line-height:1.2}button,a{color:#b9ee8d}button{background:#172b21;border:1px solid #b9ee8d;padding:14px;cursor:pointer;font:inherit}p,li{color:#b6c3d0}label{display:block;margin:20px 0}</style>${body}</html>`,{status,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://login.eveonline.com; frame-ancestors 'none'; base-uri 'none'",...headers}});
 }
 export async function encrypt(value,secret){
- const bytes=Uint8Array.from(atob(secret),c=>c.charCodeAt(0));
+ const bytes=unbase64(secret);
  if(bytes.length!==32)throw new ServiceError('Backend encryption is not configured.',503);
  const key=await crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['encrypt']);
  const iv=crypto.getRandomValues(new Uint8Array(12));
@@ -49,7 +49,7 @@ export async function encrypt(value,secret){
 function unbase64(value){return Uint8Array.from(atob(value.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));}
 export async function decrypt(value,secret){
  const item=JSON.parse(value);if(item.v!==1)throw new ServiceError('Stored authorization could not be read.',503);
- const key=await crypto.subtle.importKey('raw',Uint8Array.from(atob(secret),c=>c.charCodeAt(0)),'AES-GCM',false,['decrypt']);
+ const key=await crypto.subtle.importKey('raw',unbase64(secret),'AES-GCM',false,['decrypt']);
  const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:unbase64(item.iv)},key,unbase64(item.data));
  return JSON.parse(new TextDecoder().decode(bytes));
 }
@@ -233,7 +233,8 @@ async function route(request,env,ctx,fetchImpl){
   return response({stored:body.region});
  }
  if(url.pathname==='/api/market'&&request.method==='GET'){
-  const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots').all();
+  // Region rows the pipeline stopped scanning (a pilot flew home) go stale; serve only the last 6 hours of them.
+  const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id <= 2 OR updated_at > ?').bind(Date.now()-6*3600000).all();
   const parsed=rows.results.map(row=>({region:row.region_id,updatedAt:row.updated_at,data:JSON.parse(row.data)}));
   // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations; region 2 the pipeline's blueprint survey.
   return response({meta:parsed.find(r=>r.region===0)||null,universe:parsed.find(r=>r.region===1)?.data||null,regions:parsed.filter(r=>r.region>2)},200,{'Cache-Control':'public, max-age=300'});
