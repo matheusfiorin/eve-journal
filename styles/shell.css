@@ -34,6 +34,8 @@ body.picking{overflow:hidden}
 .booting .rail__item{animation:rail-in var(--dur-3) var(--ease-out) both;animation-delay:calc(var(--i,0) * 40ms)}
 
 /* Status strip. */
+/* Anything scrolled into view (focus, find, links) clears the sticky bars. */
+html{scroll-padding-top:calc(var(--strip-h) + var(--viewbar-h) + 8px)}
 .strip{position:sticky;top:0;z-index:20;height:var(--strip-h);display:flex;align-items:center;gap:6px;padding:0 var(--gutter);
   background:rgb(12 20 36 / .86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .strip__brand{display:none}
@@ -133,6 +135,7 @@ body.picking{overflow:hidden}
   .viewbar{position:static;padding:10px var(--gutter);gap:8px}
   .viewbar .screen-title{font-size:17px;width:100%}
   .seg{max-width:100%;overflow-x:auto;scrollbar-width:none}.seg button{flex:none;padding:0 12px}
+  html{scroll-padding-top:calc(var(--strip-h) + 8px);scroll-padding-bottom:calc(76px + env(safe-area-inset-bottom))}
   #views{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
   .tabbar{position:fixed;inset:auto 0 0 0;z-index:30;display:grid;grid-template-columns:repeat(5,1fr);
     padding:6px 4px calc(6px + env(safe-area-inset-bottom));background:rgb(14 22 38 / .94);backdrop-filter:blur(12px);border-top:1px solid var(--line)}

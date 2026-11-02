@@ -74,7 +74,7 @@ test('entry edits recover as edits instead of creating a duplicate',async({page}
 });
 test('a goal with a target, steps and notes imports, ticks off and records its result',async({page})=>{
  const ctx=await mockApp(page);await openApp(page);await tab(page,'goals');
- const file=readFileSync('/tmp/claude-0/-home-claude/ea60a3cb-b5b8-5485-bac5-c7a6e9ca7bcd/scratchpad/out/first-antimatter-goal.json');
+ const file=readFileSync(new URL('./data/goal-backup.json',import.meta.url));
  page.once('dialog',d=>d.accept());await page.locator('#import').setInputFiles({name:'goal.json',mimeType:'application/json',buffer:file});
  const goal=page.locator('.goal').filter({hasText:'Antimatter Charge S'});await expect(goal).toBeVisible();
  await expect(goal).toContainText('Target 1.0M ISK · no result yet');await expect(goal.locator('.goal-steps li')).toHaveCount(6);await expect(goal).toContainText('Mass Production III');

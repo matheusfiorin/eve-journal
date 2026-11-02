@@ -1,0 +1,41 @@
+{
+ "version": 1,
+ "goals": [
+  {
+   "id": "goal-first-antimatter-run",
+   "title": "First manufacturing run: profit at least 1M ISK on Antimatter Charge S",
+   "pilot": "Fiofka",
+   "done": false,
+   "category": "Industry",
+   "target": 1000000,
+   "steps": [
+    {
+     "text": "Research the Antimatter Charge S BPO to ME 7 / TE 18",
+     "done": true
+    },
+    {
+     "text": "Buy materials for 1,200 runs (at yesterday's average prices)",
+     "done": true
+    },
+    {
+     "text": "Copy job: 4 BPCs × 300 runs (ends Wednesday)",
+     "done": false
+    },
+    {
+     "text": "Wednesday: start all 4 BPC jobs in parallel (300 runs each)",
+     "done": false
+    },
+    {
+     "text": "Sell the output",
+     "done": false
+    },
+    {
+     "text": "Record the profit: sales − materials − job and copy fees − research",
+     "done": false
+    }
+   ],
+   "notes": "Invested ISK in ME/TE research on my Antimatter Charge S original (now ME 7, TE 18) and bought materials for 1,200 runs at yesterday's average prices. A copy job is making 4 BPCs of 300 runs each; when it ends on Wednesday I run all four in parallel.\nCount profit as sales after tax and broker fee, minus materials, job and copy fees, and the research cost.\nRunning 4 jobs at once needs 4 manufacturing slots (Mass Production III)."
+  }
+ ],
+ "entries": []
+}
