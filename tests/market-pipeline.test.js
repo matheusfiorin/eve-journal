@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -85,4 +85,18 @@ test('belts are counted per system and belt ores carry compressed form, grades a
  assert.deepEqual(list.map(o=>o.n),['Veldspar','Scordite']);
  assert.deepEqual(list[0],{n:'Veldspar',ore:1230,comp:62516,vol:0.1,portion:100,m:[[34,400]],grades:{1230:0,17470:0.05}});
  assert.equal(list[1].comp,undefined);
+});
+test('kill history decays over a day and a week and fills missed hours',()=>{
+ const t0=Date.UTC(2026,10,1);
+ const first=decayRisk(null,[{system_id:1,ship_kills:4,pod_kills:2},{system_id:2,ship_kills:0}],t0);
+ assert.deepEqual(first,{at:t0,since:t0,s:{1:[4,4]}});
+ const next=decayRisk(first,[{system_id:1,ship_kills:2}],t0+3600000);
+ assert.ok(Math.abs(next.s[1][0]-(Math.round((4*Math.exp(-1/24)+2)*100)/100))<1e-9);assert.equal(next.since,t0);
+ const gap=decayRisk(first,[{system_id:3,ship_kills:1}],t0+10*3600000);assert.equal(gap.s[3][0],6,'ten missed hours count as six');
+ const old=decayRisk({at:t0,s:{9:[0.01,0.06]}},[],t0+3600000*24*7);assert.equal(old.s[9],undefined,'faded systems are dropped');
+});
+test('combat types are smartbombs, interdictors and HICs',()=>{
+ const types=new Map([[1,{_key:1,published:true,groupID:72}],[2,{_key:2,published:true,groupID:541}],[3,{_key:3,published:true,groupID:894}],[4,{_key:4,published:true,groupID:25}],[5,{_key:5,published:false,groupID:72}]]);
+ const groups=new Map([[72,{name:{en:'Smart Bomb'}}],[541,{name:{en:'Interdictor'}}],[894,{name:{en:'Heavy Interdiction Cruiser'}}],[25,{name:{en:'Frigate'}}]]);
+ assert.deepEqual(combatTypes(types,groups),{sb:[1],dictor:[2,3]});
 });

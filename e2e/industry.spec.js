@@ -28,7 +28,8 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  await page.locator('#industry-category').selectOption('');await page.locator('#industry-sort').selectOption('near');await expect(picks.first()).toContainText('Hobgoblin I');
  await page.locator('#industry-sort').selectOption('cheap');await expect(picks.first()).toContainText('Hobgoblin I');await page.locator('#industry-sort').selectOption('');
  await page.locator('#industry-budget').fill('1000000');await page.locator('#industry-budget').dispatchEvent('change');
- await expect(picks.filter({hasText:'Rifter'})).toContainText('In Decxus’s plan','a pick over your budget can still fit your wingmate');await expect(picks.first()).toContainText('Hobgoblin I');
+ await expect(picks.filter({hasText:'Rifter'})).toHaveCount(0,'picks over budget are hidden');await expect(industry).toContainText('1 more pick needs a bigger one');
+ await page.locator('#industry-over').check();await expect(picks.filter({hasText:'Rifter'})).toContainText('In Decxus’s plan','a pick over your budget can still fit your wingmate');await expect(picks.first()).toContainText('Hobgoblin I');
  expect(errors).toEqual([]);
 });
 test('industry works for a visitor without a session, using base fees',async({page})=>{

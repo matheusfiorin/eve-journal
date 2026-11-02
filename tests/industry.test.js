@@ -90,3 +90,12 @@ test('the portfolio fills build slots with affordable, buildable picks within bu
  const plan=portfolio([pick(10,5),pick(100,50,['skills']),pick(80,40),pick(20,3),pick(5,1)],{slots:2,budget:60});
  assert.deepEqual(plan.chosen.map(x=>x.invest),[10,20]);assert.equal(plan.spent,30);assert.equal(plan.profitDay,8);
 });
+test('a small budget shrinks the batch to what the wallet covers after the blueprint and research',()=>{
+ const full=evaluate(hob,{book:market,adjusted:new Map([[34,4]]),fees,levels:{massProduction:3}});
+ const cash=hob.price+full.research.cost+(full.materialCost+full.jobFee)*10.5;
+ const small=evaluate(hob,{book:market,adjusted:new Map([[34,4]]),fees,levels:{massProduction:3},budget:cash});
+ assert.equal(small.runs,10);assert.equal(small.unitsPerDay,10);assert.ok(small.invest<=cash);assert.ok(small.flags.includes('capital'));
+ assert.ok(small.profitDay<full.profitDay);
+ assert.equal(evaluate(hob,{book:market,adjusted:new Map([[34,4]]),fees,budget:hob.price}).flags.includes('capital'),false,'nothing left for materials: stays over budget');
+ assert.ok(evaluate(hob,{book:market,adjusted:new Map([[34,4]]),fees,budget:hob.price}).invest>hob.price);
+});

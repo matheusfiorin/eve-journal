@@ -16,12 +16,12 @@ export class BackendClient {
   if(![2124810474,2124815118].includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+MAX_SESSION)throw new Error('Backend session response was invalid. Connect the pilot again.');
   this.sessions.set(id,{token,expires});this.save();return true;
  }
- async call(path,{id,method='GET'}={}){
-  const headers={Accept:'application/json'};if(id){if(!this.has(id))throw new Error('Connect this pilot again.');headers.Authorization=`Bearer ${this.sessions.get(id).token}`;}
-  const response=await this.fetch(`${this.url}${path}`,{method,headers,signal:AbortSignal.timeout(30000)});
-  const body=await response.json();
-  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(body.error||`Backend returned ${response.status}.`);}
-  return body;
+ async call(path,{id,method='GET',body}={}){
+  const headers={Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})};if(id){if(!this.has(id))throw new Error('Connect this pilot again.');headers.Authorization=`Bearer ${this.sessions.get(id).token}`;}
+  const response=await this.fetch(`${this.url}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
+  const data=await response.json();
+  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(data.error||`Backend returned ${response.status}.`);}
+  return data;
  }
  async publicPilots(){const data=await this.call('/api/public/pilots');if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid public snapshot.');return data.pilots;}
  async privatePilot(id,force=false){
@@ -35,6 +35,7 @@ export class BackendClient {
  authURL(id){return `${this.url}/auth/start?pilot=${encodeURIComponent(id)}`;}
  async wing(id){const data=await this.call('/api/wing',{id});if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid wing summary.');return data.pilots;}
  async market(){return this.call('/api/market');}
+ async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  async disconnect(id){await this.call('/api/disconnect',{id,method:'POST'});this.sessions.delete(id);this.save();}
  expire(){const ids=[];for(const[id,s]of this.sessions)if(s.expires<=Date.now()){ids.push(id);this.sessions.delete(id);}if(ids.length)this.save();return ids;}
 }

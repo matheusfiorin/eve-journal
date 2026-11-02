@@ -44,6 +44,11 @@ test('market ranks hauls, station trades and manufacturing from the pilot’s lo
  await expect(market.locator('article').nth(2)).toContainText('Rifter');await expect(market.locator('article').nth(2)).toContainText('5.00% system index');
  await page.screenshot({path:testInfo.outputPath('market.png'),fullPage:true});
  await page.locator('#market-cargo').fill('100');await page.locator('#market-cargo').dispatchEvent('change');await expect(haul).toContainText('10,000 units');
+ await expect(page.locator('#market-budget')).toHaveValue('12500000');await expect(page.locator('#market-fees')).toContainText('budget 12.5M ISK');
+ await page.locator('#market-budget').fill('20000');await page.locator('#market-budget').dispatchEvent('change');
+ await expect(haul).toContainText('4,000 units');await expect(haul).toContainText('your whole budget');
+ await expect(market.locator('article').nth(1)).not.toContainText('Rifter','a Rifter buy order costs more than 20k');
+ await expect(market.locator('article').nth(2)).toContainText('1 more profitable build needs more than 20.0k ISK');
  expect(errors).toEqual([]);
 });
 test('market explains an empty pipeline',async({page})=>{

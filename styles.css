@@ -225,3 +225,15 @@ h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.8p
 @media (max-width:560px){.bill td small{display:none}}
 label.check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);padding-bottom:10px}label.check input{width:auto;margin:0}
 .tag.dim{background:transparent;color:var(--muted);border:1px solid var(--line)}
+a.button{display:inline-block;font-weight:600;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:9px 14px;color:var(--text);text-decoration:none}a.button:hover{border-color:var(--accent)}
+.stops{display:grid;gap:8px;margin:12px 0 4px}.stop-row{display:grid;grid-template-columns:48px 1fr auto auto auto;gap:6px;align-items:center}.stop-n{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}.stop-row button{padding:6px 10px}
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.mode{display:grid;gap:2px;text-align:left;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-weight:400;transition:border-color .2s,transform .2s}.mode:hover{transform:translateY(-2px)}.mode.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.mode b{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}.mode.on b{color:var(--accent)}.mode-big{font-size:22px;font-weight:700}.mode small{color:var(--muted);font-size:12px}
+.hop-list{list-style:none;margin:14px 0 0;padding:0;border-left:2px solid var(--line)}
+.hop-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 0 8px 12px;border-bottom:1px solid var(--line);position:relative}
+.hop-row::before{content:'';position:absolute;left:-6px;top:15px;width:10px;height:10px;border-radius:50%;background:var(--ok)}.hop-row.warn::before{background:var(--warn)}.hop-row.danger::before{background:var(--danger);box-shadow:0 0 8px var(--danger)}
+.hop-row small{display:block;color:var(--muted);font-size:12px}.hop-row a{color:var(--text)}
+.risk{font-weight:700;font-size:13px}.risk.ok{color:var(--ok)}.risk.warn{color:var(--warn)}.risk.danger{color:var(--danger)}
+.gk-none{color:var(--ok)}.gk-lo{color:var(--warn);font-weight:600}.gk-hi{color:var(--danger);font-weight:700}
+@media (max-width:640px){.modes{grid-template-columns:1fr}.stop-row{grid-template-columns:40px 1fr auto auto auto}}

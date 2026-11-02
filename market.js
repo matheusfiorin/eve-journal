@@ -24,7 +24,8 @@ export function book(regions) {
   return {items, stations};
 }
 // Buy from a sell order in one station, haul, sell into a buy order elsewhere.
-export function hauls(market, {salesTax, cargo, volumeOf, limit = 60}) {
+// With a budget, buy only as many units as the wallet covers.
+export function hauls(market, {salesTax, cargo, volumeOf, budget = Infinity, limit = 60}) {
   const out = [];
   for (const [type, item] of market.items) {
     const m3 = volumeOf(type);
@@ -34,7 +35,7 @@ export function hauls(market, {salesTax, cargo, volumeOf, limit = 60}) {
       if (from.loc === to.loc) continue;
       const unit = to.price * (1 - salesTax) - from.price;
       if (unit <= 0) continue;
-      const units = Math.min(from.volume, to.volume, Math.floor(cargo / m3));
+      const units = Math.min(from.volume, to.volume, Math.floor(cargo / m3), Math.floor(budget / from.price));
       if (units < 1) continue;
       const profit = unit * units;
       if (!best || profit > best.profit) best = {type, from, to, unit, units, profit, invest:from.price * units, m3:units * m3};
@@ -44,7 +45,7 @@ export function hauls(market, {salesTax, cargo, volumeOf, limit = 60}) {
   return out.sort((a,b) => b.profit - a.profit).slice(0, limit);
 }
 // Station trading: buy order at the top bid, relist at the lowest ask, inside one station.
-export function stationTrades(market, {salesTax, brokerFee, capture = 0.05, limit = 60}) {
+export function stationTrades(market, {salesTax, brokerFee, capture = 0.05, budget = Infinity, limit = 60}) {
   const out = [];
   for (const [type, item] of market.items) for (const sell of item.sells) {
     const buy = item.buys.find(b => b.loc === sell.loc);
@@ -52,8 +53,10 @@ export function stationTrades(market, {salesTax, brokerFee, capture = 0.05, limi
     const unit = sell.price * (1 - salesTax - brokerFee) - buy.price * (1 + brokerFee);
     if (unit <= 0) continue;
     // shortcut: assumes we fill `capture` of the scanned regions' daily volume; real fills depend on competition.
-    const daily = unit * Math.min(item.daily * capture, buy.volume, sell.volume);
-    out.push({type, loc:sell.loc, buy:buy.price, sell:sell.price, unit, margin:unit / buy.price, volume:item.daily, daily});
+    // Capital tied up is one day's worth of buy orders; a small wallet caps how many units you can hold.
+    const units = Math.min(item.daily * capture, buy.volume, sell.volume, Math.floor(budget / (buy.price * (1 + brokerFee))));
+    if (!(units > 0)) continue;
+    out.push({type, loc:sell.loc, buy:buy.price, sell:sell.price, unit, margin:unit / buy.price, volume:item.daily, units, capital:units * buy.price * (1 + brokerFee), daily:unit * units});
   }
   return out.sort((a,b) => b.daily - a.daily).slice(0, limit);
 }
@@ -74,7 +77,7 @@ export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, c
     const job = eiv * (costIndex + SCC_AND_FACILITY);
     const revenue = sell.price * r.q * (1 - salesTax - brokerFee);
     const profit = revenue - materials - job;
-    out.push({type:Number(product), materials, job, revenue, profit, margin:profit / (materials + job), loc:sell.loc, daily:market.items.get(Number(product)).daily});
+    out.push({type:Number(product), materials, job, revenue, profit, margin:profit / (materials + job), capital:materials + job, loc:sell.loc, daily:market.items.get(Number(product)).daily});
   }
   return out.sort((a,b) => b.profit - a.profit);
 }

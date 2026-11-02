@@ -12,7 +12,8 @@ export function graph(universe) {
   return {systems, stations};
 }
 // Single-source Dijkstra with a small binary heap; `path(to)` rebuilds the jump list.
-export function paths(g, from, {safe = true} = {}) {
+// `weight(id)` prices entering a system; by default a jump costs 1, or LOW_SEC_PENALTY into low/null-sec when safe.
+export function paths(g, from, {safe = true, weight} = {}) {
   const dist = new Map([[from, 0]]), prev = new Map(), heap = [[0, from]];
   const push = item => { heap.push(item); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
   const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
@@ -20,12 +21,14 @@ export function paths(g, from, {safe = true} = {}) {
     const [d, id] = pop();
     if (d > dist.get(id)) continue;
     for (const next of g.systems.get(id)?.links || []) {
-      const cost = d + (safe && secClass(g.systems.get(next)?.sec ?? -1) !== 'hi' ? LOW_SEC_PENALTY : 1);
+      const step = weight ? weight(next) : safe && secClass(g.systems.get(next)?.sec ?? -1) !== 'hi' ? LOW_SEC_PENALTY : 1;
+      if (!Number.isFinite(step)) continue;
+      const cost = d + step;
       if (cost < (dist.get(next) ?? Infinity)) { dist.set(next, cost); prev.set(next, id); push([cost, next]); }
     }
   }
   return {
-    reachable:to => dist.has(to),
+    reachable:to => dist.has(to), cost:to => dist.get(to),
     path(to) {
       if (!dist.has(to)) return null;
       const list = [to];

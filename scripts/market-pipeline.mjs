@@ -98,6 +98,20 @@ export function mergeRegion(sellers, region, ids, found, perRegion = 2) {
   }
   return sellers;
 }
+// Ship kills per system as exponentially decayed sums over ~24 h and ~7 days, updated from ESI's last-hour counts.
+// shortcut: hours the pipeline missed are filled with the latest hour's rate (at most 6).
+export function decayRisk(prev, kills, now) {
+  const hours = prev?.at ? Math.max(0, (now - prev.at) / 3600000) : 1, weight = Math.min(hours, 6), s = {};
+  for (const [id, [d, w]] of Object.entries(prev?.s || {})) s[id] = [d * Math.exp(-hours / 24), w * Math.exp(-hours / 168)];
+  for (const k of kills) if (k.ship_kills) { const v = s[k.system_id] ||= [0, 0]; v[0] += k.ship_kills * weight; v[1] += k.ship_kills * weight; }
+  for (const id of Object.keys(s)) { s[id] = s[id].map(x => Math.round(x * 100) / 100); if (s[id][1] < 0.05) delete s[id]; }
+  return {at:now, since:prev?.since || now, s};
+}
+// Weapon and hull types that mark a gate camp: smartbombs and interdiction ships.
+export function combatTypes(types, groups) {
+  const ids = re => [...types.values()].filter(t => t.published && re.test(sdeName(groups.get(t.groupID)?.name) || '')).map(t => t._key);
+  return {sb:ids(/^smart ?bomb$/i), dictor:ids(/^(interdictor|heavy interdiction cruiser)$/i)};
+}
 export function highsecRegions(map) {
   return [...new Set(Object.values(map.systems).filter(([, sec, region]) => sec >= 0.45 && region < 11000000).map(s => s[2]))];
 }
@@ -198,6 +212,7 @@ async function main() {
     const types = byKey(data.types);
     meta.starters = starters(data.blueprints, types, byKey(data.groups), byKey(data.categories), prices);
     meta.ores = ores(types, data.typeMaterials);
+    meta.combat = combatTypes(types, byKey(data.groups));
     meta.skillNames = Object.fromEntries([...new Set(meta.starters.flatMap(s => s.sk.map(([k]) => k)))].map(k => [k, sdeName(types.get(k)?.name) || `Skill ${k}`]));
     console.log(`Recipes: ${Object.keys(meta.recipes).length} watchlist items; ${meta.starters.length} starter blueprints.`);
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
@@ -248,6 +263,9 @@ async function main() {
     for (const k of kills.body) if (!map || map.systems[k.system_id]?.[1] > 0) activity[k.system_id] = [k.ship_kills + k.pod_kills, k.npc_kills, 0];
     for (const j of jumps.body) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
     meta.activity = activity;
+    let previous = null;
+    try { previous = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data?.risk; } catch { /* Start a new history. */ }
+    meta.risk = decayRisk(previous, kills.body, Date.now());
   } catch (error) { console.log(`::warning title=Activity::${error.message}`); }
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
@@ -298,6 +316,6 @@ async function main() {
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, kill history for ${Object.keys(meta.risk?.s || {}).length} systems, ${meta.combat?.sb.length ?? 0} smartbombs/${meta.combat?.dictor.length ?? 0} interdictors, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

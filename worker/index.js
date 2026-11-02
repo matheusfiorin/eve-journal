@@ -93,6 +93,37 @@ function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {}
 function privatePayload(row,sessionRow){
  return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...parseSnapshot(row),lastError:row.last_error};
 }
+// Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
+async function freshCredentials(row,env,fetchImpl,lockUntil){
+ let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY);
+ if(credentials.expires<Date.now()+60000){
+  const refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);
+  const identity=await verify(refreshed.access_token,env,row.character_id,fetchImpl);
+  credentials={accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:identity.expires,scopes:identity.scopes};
+  // Persist rotation before any ESI request; the prior refresh token may already be invalid.
+  await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();
+ }
+ return credentials;
+}
+// Replace the pilot's in-game autopilot route with these systems, in order.
+const MAX_WAYPOINTS=40; // shortcut: Cloudflare's free plan allows 50 subrequests per request
+async function setWaypoints(id,systems,env,fetchImpl){
+ if(!Array.isArray(systems)||!systems.length||systems.length>MAX_WAYPOINTS||!systems.every(n=>Number.isSafeInteger(n)&&n>30000000&&n<33000000))throw new ServiceError(`Send between 1 and ${MAX_WAYPOINTS} known-space system IDs.`);
+ const now=Date.now(),lock=now+90000;
+ const row=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(lock,id,now).first();
+ if(!row)throw new ServiceError('This pilot is syncing. Try again in a moment.',409);
+ try {
+  const credentials=await freshCredentials(row,env,fetchImpl,lock);
+  if(!credentials.scopes.includes(OPERATIONS_SCOPES.waypoints))throw new ServiceError('Permission not granted. Reconnect to allow setting autopilot waypoints.',403);
+  for(const [i,system] of systems.entries()){
+   const res=await fetchImpl(`${ESI}/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${i===0}&destination_id=${system}`,{method:'POST',headers:{Authorization:`Bearer ${credentials.accessToken}`},signal:AbortSignal.timeout(15000)});
+   if(!res.ok)throw new ServiceError(`EVE refused waypoint ${i+1} (HTTP ${res.status}). Is the pilot logged in to the game?`,502);
+  }
+  return {waypoints:systems.length};
+ } finally {
+  await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();
+ }
+}
 export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
  const now=Date.now();
  const previous=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
@@ -101,14 +132,7 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
  const row=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(now+90000,id,now).first();
  if(!row)return previous;
  try {
-  let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY);
-  if(credentials.expires<Date.now()+60000){
-   const refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);
-   const identity=await verify(refreshed.access_token,env,id,fetchImpl);
-   credentials={accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:identity.expires,scopes:identity.scopes};
-   // Persist rotation before any ESI request; the prior refresh token may already be invalid.
-   await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),id,now+90000).run();
-  }
+  const credentials=await freshCredentials(row,env,fetchImpl,now+90000);
   const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{}};
   const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/',mining:'mining/'};
   // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
@@ -219,6 +243,11 @@ async function route(request,env,ctx,fetchImpl){
     // Consent version 2 also covers ship, location and the mining ledger.
     ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null}:{})};
   })});
+ }
+ if(url.pathname==='/api/waypoints'&&request.method==='POST'){
+  const s=await session(request,env);
+  let body;try{body=await request.json();}catch{throw new ServiceError('Waypoints must be JSON.');}
+  return response(await setWaypoints(s.character_id,body?.systems,env,fetchImpl));
  }
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){
   if(url.pathname==='/api/session'&&request.method!=='GET')throw new ServiceError('Method not allowed.',405);

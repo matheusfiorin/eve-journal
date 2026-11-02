@@ -39,6 +39,7 @@ function setup(options={}){
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
   if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true}]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':'2'}});}
+  if(path.endsWith('/ui/autopilot/waypoint/'))return new Response(null,{status:options.gameOffline?404:204});
   throw new Error(`Unexpected request ${path}`);
  };
  const request=(path,init={})=>handleRequest(new Request(`https://api.example${path}`,init),env,{},fetchImpl);
@@ -159,4 +160,17 @@ test('active sessions slide forward at most once a day and expire after 30 idle 
  app.env.DB.raw.prepare('UPDATE sessions SET expires_at = ?').run(Date.now()+86400000);
  const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
  assert.ok(read()>Date.now()+29*86400000);assert.equal(payload.expires,read());
+});
+test('autopilot waypoints replace the in-game route in order, only with the permission',async()=>{
+ const app=setup();const {bearer}=await connect(app);
+ const send=(body,auth=bearer)=>app.request('/api/waypoints',{method:'POST',headers:{Authorization:`Bearer ${auth}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await send({systems:[]})).status,400);assert.equal((await send({systems:[1]})).status,400);
+ const ok=await send({systems:[30000142,30000144]});assert.equal(ok.status,200);assert.deepEqual(await ok.json(),{waypoints:2});
+ const calls=app.calls.filter(c=>c.url.includes('/ui/autopilot/waypoint/'));
+ assert.deepEqual(calls.map(c=>new URL(c.url).searchParams.get('clear_other_waypoints')),['true','false']);assert.deepEqual(calls.map(c=>new URL(c.url).searchParams.get('destination_id')),['30000142','30000144']);
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until FROM pilots').get().sync_lock_until,0,'the lock is released');
+ const limited=setup({scopes:SCOPES});const s2=await connect(limited);
+ assert.equal((await limited.request('/api/waypoints',{method:'POST',headers:{Authorization:`Bearer ${s2.bearer}`},body:JSON.stringify({systems:[30000142]})})).status,403);
+ const offline=setup({gameOffline:true});const s3=await connect(offline);
+ assert.equal((await offline.request('/api/waypoints',{method:'POST',headers:{Authorization:`Bearer ${s3.bearer}`},body:JSON.stringify({systems:[30000142]})})).status,502);
 });

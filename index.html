@@ -19,7 +19,7 @@
  <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="hauling">Hauling</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -34,6 +34,7 @@
    <label>Start from<select id="market-origin"></select></label>
    <label>Max jumps to buy<select id="market-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="20">20 jumps</option><option value="99">Any distance</option></select></label>
    <label>Cargo (m³)<input id="market-cargo" type="number" min="1" step="100" value="5000"></label>
+   <label>Budget (ISK)<input id="market-budget" type="number" min="0" step="1000000" placeholder="Your wallet"></label>
   </div>
   <p id="market-fees" class="hint"></p>
  </div>
@@ -50,6 +51,7 @@
    <label>Category<select id="industry-category"><option value="">All categories</option></select></label>
    <label>Sort by<select id="industry-sort"><option value="">Best overall</option><option value="profit">Profit per day</option><option value="payback">Fastest payback</option><option value="margin">Highest margin</option><option value="cheap">Cheapest blueprint</option><option value="near">Closest seller</option></select></label>
   </div>
+  <label class="check"><input id="industry-over" type="checkbox"> Show picks over budget</label>
  </div>
  <div id="industry-content"></div>
 </section>
@@ -64,6 +66,29 @@
   </div>
  </div>
  <div id="mining-content"></div>
+</section>
+<section id="hauling" class="tab" hidden>
+ <form id="haul-form" class="card market-controls">
+  <div class="card-head"><div><h2>Hauling</h2><p id="haul-status" class="hint">Plan a route to see its risk.</p></div></div>
+  <div id="haul-stops" class="stops"></div>
+  <div class="actions"><button type="button" id="haul-add" class="secondary small">+ Add stop</button></div>
+  <datalist id="haul-systems"></datalist>
+  <div class="row">
+   <label>Cargo value (ISK)<input id="haul-value" type="number" min="0" step="1000000" value="100000000"></label>
+   <label>Cargo volume (m³)<input id="haul-volume" type="number" min="0" step="100" value="5000"></label>
+   <label>Ship<select id="haul-hull"><option value="">Suggest from cargo</option><option value="br">Blockade runner</option><option value="t1">T1 industrial</option><option value="dst">Deep space transport</option><option value="freighter">Freighter</option></select></label>
+  </div>
+  <div class="row">
+   <label>Avoid systems<input id="haul-avoid" placeholder="Uedama, Sivala"></label>
+   <label>Stop order<select id="haul-end"><option value="fixed">Keep the last stop last</option><option value="free">Any order</option><option value="return">Return to start</option></select></label>
+  </div>
+  <div class="row">
+   <label class="check"><input id="haul-optimize" type="checkbox"> Find the best stop order</label>
+   <label class="check"><input id="haul-lowsec" type="checkbox"> Allow low-sec</label>
+   <button id="haul-plan">Plan route</button>
+  </div>
+ </form>
+ <div id="haul-content"></div>
 </section>
 <section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
 <section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>
