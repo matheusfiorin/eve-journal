@@ -6,7 +6,7 @@ page.on('pageerror', e => log.push(`PAGEERROR ${e.message}`));
 page.on('console', m => { if (m.type() === 'error') log.push(`CONSOLE ${m.text()}`); });
 try {
 await page.addInitScript(() => localStorage.setItem('eve-me:v1', 'Fiofka'));
-await page.goto('https://matheusfiorin.github.io/eve-journal/#map', {waitUntil:'networkidle'});
+await page.goto('https://matheusfiorin.github.io/eve-journal/?v=' + Date.now() + '#map', {waitUntil:'networkidle'});
 await page.waitForTimeout(8000);
 log.push(`STATUS ${await page.locator('#map-status').textContent()}`);
 log.push(`SYSTEMS ${await page.locator('svg.region-map .sys').count()} REGION ${await page.locator('#map-region').inputValue()}`);
