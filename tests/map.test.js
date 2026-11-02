@@ -47,3 +47,9 @@ test('two gates to the same outside system share one label',()=>{
  const u={systems:{1:['A',1,7,[3],0,null,[0,0]],2:['B',1,7,[3],0,null,[6.15,0]],3:['X',1,8,[1,2],0,null,[3.075,4.1]]},regions:{7:'R',8:'S'}};
  const r=regionLayout(graph(u),7);assert.equal(r.exits.length,2);assert.deepEqual(r.exits.map(e=>e.label),[true,false]);assert.deepEqual(r.exits[0].xy,r.exits[1].xy);
 });
+test('leg follows the safe route by default and the shortest when asked',async()=>{
+ const {leg}=await import('../route.js');
+ const u=graph({systems:{1:['A',0.9,1,[2,4]],2:['B',0.2,1,[1,3]],3:['C',0.9,1,[2,5]],4:['D',0.9,1,[1,5]],5:['E',0.9,1,[4,3]]}});
+ const cache=new Map();
+ assert.deepEqual(leg(u,1,3,cache).systems.map(s=>s.id),[1,4,5,3]);assert.deepEqual(leg(u,1,3,cache,{safe:false}).systems.map(s=>s.id),[1,2,3]);
+});

@@ -37,9 +37,11 @@ export function paths(g, from, {safe = true, weight} = {}) {
     }
   };
 }
-export function leg(g, from, to, cache = new Map()) {
-  if (!cache.has(from)) cache.set(from, paths(g, from));
-  const list = cache.get(from).path(to);
+// One gate route; `safe:false` allows the shortest path through low/null-sec. The cache is keyed per mode.
+export function leg(g, from, to, cache = new Map(), {safe = true} = {}) {
+  const key = safe ? from : `${from}:unsafe`;
+  if (!cache.has(key)) cache.set(key, paths(g, from, {safe}));
+  const list = cache.get(key).path(to);
   if (!list) return null;
   const systems = list.map(id => g.systems.get(id));
   return {from, to, systems, jumps:list.length - 1, risky:systems.slice(1).filter(s => secClass(s.sec) !== 'hi').length};
