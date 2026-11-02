@@ -1,0 +1,33 @@
+== https://api.eve-scout.com/v2/public/signatures
+HTTP/2 200 
+date: Mon, 02 Nov 2026 16:49:33 GMT
+content-type: application/json; charset=utf-8
+content-length: 20918
+vary: Accept-Encoding
+access-control-allow-origin: *
+access-control-expose-headers: x-last-signaleer-hub-interaction
+cache-control: public, max-age=300
+etag: W/"51b6-obdtCEfVvmHcDG/MXRvRINU20MY"
+expires: Mon, 02 Nov 2026 16:51:27 GMT
+x-last-signaleer-hub-interaction: 2026-11-02T16:41:32.223Z
+x-azure-ref: 20261102T164933Z-16d5b8ff4cbt2z6bhC1CO1cazs00000009qg00000000bg2u
+x-fd-int-roxy-purgeid: 0
+x-cache: TCP_HIT
+x-cache-info: L1_T2
+accept-ranges: bytes
+
+[{"id":"77519","created_at":"2026-11-01T19:28:21.000Z","created_by_id":589190746,"created_by_name":"Hege Mason","updated_at":"2026-11-01T19:37:40.000Z","updated_by_id":589190746,"updated_by_name":"Hege Mason","completed_at":"2026-11-01T19:37:40.000Z","completed_by_id":589190746,"completed_by_name":"Hege Mason","completed":true,"wh_exits_outward":false,"wh_type":"J377","max_ship_size":"medium","expires_at":"2026-11-02T20:28:21.000Z","remaining_hours":3,"signature_type":"wormhole","out_system_id":30002086,"out_system_name":"Turnur","out_signature":"JQY-130","in_system_id":31000537,"in_system_class":"c2","in_system_name":"J122124","in_region_id":11000005,"in_region_name":"B-R00005","in_signature":"GYX-220"},{"id":"77538","created_at":"2026-11-01T23:50:54.000Z","created_by_id":2120160008,"created_by_name":"Amaldar Taredi","updated_at":"2026-11-02T00:05:03.000Z","updated_by_id":2120160008,"updated_by_name":"Amaldar Taredi","completed_at":"2026-11-02T00:05:03.000Z","completed_by_id":2120160008,"completed_by_name":"Amaldar Taredi","completed":true,"wh_exits_outward":false,"wh_type":"J377","max_ship_size":"medium","expires_at":"2026-11-03T00:50:54.000Z","remaining_hours":8,"signature_type":"wormhole","out_system_id":30002086,"out_system_name":"Turnur","out_signature":"CKU-370","in_system_id":31000473,"in_system_class":"c2","in_system_name":"J143359","in_region_id":11000005,"in_region_name":"B-R00005","in_signature":"URR-046"},{"id":"77539","created_at":"2026-11-01T23:50:54.000Z","created_by_id":2120160008,"created_by_name":"Amaldar Taredi","updated_at":"2026-11-02T00:12:29.000Z","updated_by_id":2120160008,"updated_by_name":"Amaldar Taredi","completed_at":"2026-11-02T00:12:29.000Z","completed_by_id":2120160008,"completed_by_name":"Amaldar Taredi","completed":true,"wh_exits_outward":true,"wh_type":"N944","max_ship_size":"capital","expires_at":"2026-11-03T00:50:54.000Z","remaining_hours":8
+== https://api.eve-scout.com/v2/public/routes/signatures?from=Jita
+HTTP/2 400 
+date: Mon, 02 Nov 2026 16:49:33 GMT
+content-type: application/json; charset=utf-8
+content-length: 98
+access-control-allow-origin: *
+cache-control: public, max-age=300
+etag: W/"62-52P59p0a97dYxr3SrnUTJ1REsSY"
+expires: Mon, 02 Nov 2026 16:54:33 GMT
+x-azure-ref: 20261102T164933Z-1578c7cfc7cnwjxnhC1CO1r5pc0000000fqg00000000785s
+x-fd-int-roxy-purgeid: 0
+x-cache: TCP_MISS
+
+{"error":{"name":"ESAPI-0010-3","message":"system name must be 'thera' or 'turnur'","details":{}}}
