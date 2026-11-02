@@ -1,0 +1,16 @@
+name: dump
+on: {push: {branches: [ci-probe]}}
+permissions: {contents: write}
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: |
+          npm ci >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          mkdir -p dump
+          CI=1 npx playwright test --grep-invert LIVE: --reporter=line > dump/e2e.txt 2>&1 || true
+          git config user.name dump; git config user.email dump@example.com
+          git add -f dump && git commit -qm "[skip ci] dump" && git push -q origin HEAD:ci-probe
