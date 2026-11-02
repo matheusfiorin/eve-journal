@@ -53,6 +53,8 @@ export function queueState(queue, now = Date.now()) {
 }
 
 // Skill groups (ESI names) folded into the roles a pilot is known for.
+// Active level of one skill type in an ESI skills payload; 0 when the skill or the payload is unknown.
+export const levelOf = (skills, id) => skills?.skills?.find(s => s.skill_id === id)?.active_skill_level || 0;
 export const ROLES = {
   combat:{noun:'Warrior', label:'Combat', groups:['Gunnery','Missiles','Drones','Targeting','Shields','Armor']},
   industry:{noun:'Industrialist', label:'Industry', groups:['Production','Resource Processing','Science','Planet Management','Structure Management']},
