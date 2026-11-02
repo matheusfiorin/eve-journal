@@ -135,25 +135,30 @@ export function starters(blueprints, types, groups, categories, prices, {maxPric
   return out.sort((a, b) => b.score - a.score).slice(0, limit).map(({score, ...s}) => s);
 }
 // Known space only: gate graph with security, plus NPC stations that offer manufacturing (1) or research (2).
-export function universe({mapSolarSystems, mapStargates, npcStations, stationOperations, stationServices, mapAsteroidBelts = []}) {
-  const service = name => stationServices.find(s => sdeName(s.serviceName) === name)?._key;
-  const factory = service('Factory'), lab = service('Laboratory');
-  const systems = {};
-  for (const s of mapSolarSystems) if (s._key < 31000000) systems[s._key] = [sdeName(s.name), Math.round(s.securityStatus * 1000) / 1000, s.regionID, []];
+// Known space for the Map tab and routing: gates, security, belts, 3D position (light-years), CCP's schematic 2D layout,
+// constellation and region names, and every NPC station with its services as bit flags.
+export const STATION_SERVICES = {Factory:1, Laboratory:2, Market:4, 'Reprocessing Plant':8, Cloning:16};
+const LY = 9.4607e15;
+export function universe({mapSolarSystems, mapStargates, npcStations, stationOperations, stationServices, mapAsteroidBelts = [], mapRegions = [], mapConstellations = []}) {
+  const bit = new Map(stationServices.map(s => [s._key, STATION_SERVICES[sdeName(s.serviceName)] || 0]));
+  const systems = {}, round = (v, f) => Math.round(v * f) / f;
+  for (const s of mapSolarSystems) if (s._key < 31000000) {
+    const p = s.position || {}, q = s.position2D;
+    systems[s._key] = [sdeName(s.name), round(s.securityStatus, 1000), s.regionID, [], 0,
+      [round((p.x || 0) / LY, 100), round((p.y || 0) / LY, 100), round((p.z || 0) / LY, 100)], q ? [round(q.x / 1e15, 10), round(q.y / 1e15, 10)] : null, s.constellationID];
+  }
   for (const gate of mapStargates) {
     const from = systems[gate.solarSystemID], to = gate.destination?.solarSystemID;
     if (from && systems[to] && !from[3].includes(to)) from[3].push(to);
   }
   // Asteroid belt count per system; zero means nothing to mine outside anomalies.
-  for (const belt of mapAsteroidBelts) if (systems[belt.solarSystemID]) systems[belt.solarSystemID][4] = (systems[belt.solarSystemID][4] || 0) + 1;
-  const services = new Map(stationOperations.map(o => [o._key, new Set(o.services || [])]));
-  const stations = [];
-  for (const st of npcStations) {
-    const has = services.get(st.operationID) || new Set();
-    const flags = (has.has(factory) ? 1 : 0) | (has.has(lab) ? 2 : 0);
-    if (flags && systems[st.solarSystemID]) stations.push([st._key, st.solarSystemID, flags]);
-  }
-  return {systems, stations};
+  for (const belt of mapAsteroidBelts) if (systems[belt.solarSystemID]) systems[belt.solarSystemID][4]++;
+  const services = new Map(stationOperations.map(o => [o._key, (o.services || []).reduce((f, id) => f | (bit.get(id) || 0), 0)]));
+  const stations = npcStations.filter(st => systems[st.solarSystemID]).map(st => [st._key, st.solarSystemID, services.get(st.operationID) || 0]);
+  const used = new Set(Object.values(systems).map(s => s[2])), constellationsUsed = new Set(Object.values(systems).map(s => s[7]));
+  const regions = Object.fromEntries(mapRegions.filter(r => used.has(r._key)).map(r => [r._key, sdeName(r.name)]));
+  const constellations = Object.fromEntries(mapConstellations.filter(c => constellationsUsed.has(c._key)).map(c => [c._key, [sdeName(c.name), c.regionID]]));
+  return {systems, stations, regions, constellations};
 }
 async function sde(files) {
   const response = await fetch(SDE, {headers:HEADERS, signal:AbortSignal.timeout(300000)});
@@ -201,11 +206,11 @@ async function main() {
   meta.starters = [];
   let map = null;
   try {
-    const data = await sde(['blueprints', 'types', 'groups', 'categories', 'mapSolarSystems', 'mapStargates', 'npcStations', 'stationOperations', 'stationServices', 'mapAsteroidBelts', 'typeMaterials']);
+    const data = await sde(['blueprints', 'types', 'groups', 'categories', 'mapSolarSystems', 'mapStargates', 'npcStations', 'stationOperations', 'stationServices', 'mapAsteroidBelts', 'typeMaterials', 'mapRegions', 'mapConstellations']);
     try {
       map = universe(data);
       const linked = Object.values(map.systems).filter(s => s[3].length).length;
-      if (!linked || !map.stations.length) throw new Error(`parsed ${linked} linked systems and ${map.stations.length} stations; sample system keys: ${Object.keys(data.mapSolarSystems[0] || {}).join(',')}; sample station keys: ${Object.keys(data.npcStations[0] || {}).join(',')}`);
+      if (!linked || !map.stations.length || !Object.keys(map.regions).length) throw new Error(`parsed ${linked} linked systems and ${map.stations.length} stations; sample system keys: ${Object.keys(data.mapSolarSystems[0] || {}).join(',')}; sample station keys: ${Object.keys(data.npcStations[0] || {}).join(',')}`);
     } catch (error) { map = null; console.log(`::warning title=Universe map::${error.message}`); }
     meta.recipes = recipes(data.blueprints, wanted);
     const prices = new Map((await esi('/markets/prices/')).body.map(p => [p.type_id, {average:p.average_price || p.adjusted_price || 0, adjusted:p.adjusted_price}]));
@@ -311,7 +316,7 @@ async function main() {
     map.stations = map.stations.map(s => [...s, names.get(s[0]) || `Station ${s[0]}`]);
     const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:1, data:map})});
     if (!stored.ok) throw new Error(`Universe upload failed: HTTP ${stored.status} ${await stored.text()}`);
-    report.push(`map ${Object.keys(map.systems).length} systems/${map.stations.filter(s => s[2] & 1).length} factories/${map.stations.filter(s => s[2] & 2).length} labs`);
+    report.push(`map ${Object.keys(map.systems).length} systems/${Object.keys(map.regions).length} regions/${map.stations.length} stations (${map.stations.filter(s => s[2] & 1).length} factories, ${map.stations.filter(s => s[2] & 2).length} labs), ${(JSON.stringify(map).length / 1e6).toFixed(2)} MB`);
   }
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);

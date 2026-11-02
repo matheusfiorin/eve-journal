@@ -43,16 +43,21 @@ test('starters keep cheap published T1 blueprints whose materials cost less than
  assert.deepEqual(list[1],{type:2454,bp:2456,n:'Hobgoblin I',cat:'Drone',q:1,t:300,rank:1,limit:300,price:250000,m:[[34,1000]],sk:[[3436,1]]});
  assert.deepEqual(list[0].sk,[]);assert.equal(list[0].rank,20);assert.equal(list[0].cat,'Frigate');
 });
-test('universe keeps known-space gates, security and NPC factories and labs',()=>{
+test('universe keeps known-space gates, security, positions, layout, names and NPC stations with services',()=>{
+ const LY=9.4607e15;
  const map=universe({
-  mapSolarSystems:[{_key:30000142,name:{en:'Jita'},securityStatus:0.9459,regionID:10000002},{_key:30000144,name:{en:'Perimeter'},securityStatus:0.95,regionID:10000002},{_key:31000005,name:{en:'Thera'},securityStatus:-1,regionID:11000031}],
+  mapSolarSystems:[{_key:30000142,name:{en:'Jita'},securityStatus:0.9459,regionID:10000002,constellationID:20000020,position:{x:LY,y:-2*LY,z:0.5*LY},position2D:{x:4.1e15,y:-8.22e15}},{_key:30000144,name:{en:'Perimeter'},securityStatus:0.95,regionID:10000002,constellationID:20000020,position:{x:0,y:0,z:0}},{_key:31000005,name:{en:'Thera'},securityStatus:-1,regionID:11000031}],
   mapStargates:[{_key:1,solarSystemID:30000142,destination:{solarSystemID:30000144}},{_key:2,solarSystemID:30000144,destination:{solarSystemID:30000142}},{_key:3,solarSystemID:30000142,destination:{solarSystemID:30000144}}],
-  npcStations:[{_key:60003760,solarSystemID:30000142,operationID:10},{_key:60003761,solarSystemID:30000144,operationID:11},{_key:60003762,solarSystemID:30000144,operationID:12}],
-  stationOperations:[{_key:10,services:[5,6]},{_key:11,services:[6]},{_key:12,services:[7]}],
-  stationServices:[{_key:5,serviceName:{en:'Factory'}},{_key:6,serviceName:{en:'Laboratory'}},{_key:7,serviceName:{en:'Cloning'}}]
+  npcStations:[{_key:60003760,solarSystemID:30000142,operationID:10},{_key:60003761,solarSystemID:30000144,operationID:11},{_key:60003762,solarSystemID:30000144,operationID:12},{_key:60009999,solarSystemID:31000005,operationID:10}],
+  stationOperations:[{_key:10,services:[5,6,8]},{_key:11,services:[6]},{_key:12,services:[7]}],
+  stationServices:[{_key:5,serviceName:{en:'Factory'}},{_key:6,serviceName:{en:'Laboratory'}},{_key:7,serviceName:{en:'Cloning'}},{_key:8,serviceName:{en:'Market'}}],
+  mapRegions:[{_key:10000002,name:{en:'The Forge'}},{_key:11000031,name:{en:'G-R00031'}}],
+  mapConstellations:[{_key:20000020,name:{en:'Kimotoro'},regionID:10000002}]
  });
- assert.deepEqual(map.systems,{30000142:['Jita',0.946,10000002,[30000144]],30000144:['Perimeter',0.95,10000002,[30000142]]});
- assert.deepEqual(map.stations,[[60003760,30000142,3],[60003761,30000144,2]]);
+ assert.deepEqual(map.systems[30000142],['Jita',0.946,10000002,[30000144],0,[1,-2,0.5],[4.1,-8.2],20000020]);
+ assert.equal(map.systems[30000144][6],null,'no schematic position');assert.equal(map.systems[31000005],undefined,'wormholes are left out');
+ assert.deepEqual(map.stations,[[60003760,30000142,7],[60003761,30000144,2],[60003762,30000144,16]]);
+ assert.deepEqual(map.regions,{10000002:'The Forge'});assert.deepEqual(map.constellations,{20000020:['Kimotoro',10000002]});
 });
 test('npc sellers are 365-day sell orders in NPC stations, cheapest per station',()=>{
  const o=(location_id,price,duration,extra={})=>({location_id,system_id:30000142,price,duration,is_buy_order:false,...extra});

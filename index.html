@@ -19,7 +19,7 @@
  <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="hauling">Hauling</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="hauling">Hauling</button><button data-tab="map">Map</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -90,6 +90,25 @@
  </form>
  <div id="haul-content"></div>
 </section>
+<section id="map" class="tab" hidden>
+ <div class="card market-controls">
+  <div class="card-head"><div><h2>Map</h2><p id="map-status" class="hint">Loading the map…</p></div></div>
+  <div class="row">
+   <form id="map-find" class="find"><label>Find system<input id="map-search" list="haul-systems" placeholder="Jita, Amarr, Tama…" autocomplete="off"></label><button class="secondary">Go</button></form>
+   <label>Region<select id="map-region"></select></label>
+  </div>
+  <div class="row">
+   <label>View<select id="map-view"><option value="region">Region map</option><option value="region3d">Region in 3D</option><option value="universe">New Eden in 3D</option></select></label>
+   <label>Overlay<select id="map-overlay"><option value="security">Security</option><option value="shipKills">Ship kills (last hour)</option><option value="podKills">Pod kills (last hour)</option><option value="npcKills">NPC kills (last hour)</option><option value="jumps">Jumps (last hour)</option><option value="kills24">Ship kills (~24 h)</option><option value="sov">Sovereignty</option><option value="fw">Faction warfare</option><option value="incursion">Incursions</option><option value="industry">Manufacturing index</option><option value="belts">Asteroid belts</option><option value="stations">NPC stations</option></select></label>
+   <label>Jump range<select id="map-jump"><option value="">Off</option><option value="blops">Black Ops · 8 ly</option><option value="jf">Jump freighter · 10 ly</option><option value="capital">Carrier, Dread, FAX · 7 ly</option><option value="super">Super, Titan · 6 ly</option></select></label>
+  </div>
+  <div id="map-route" class="map-route" hidden></div>
+ </div>
+ <div class="map-layout">
+  <div id="map-stage" class="map-stage card"><div id="map-canvas-wrap" class="map-canvas-wrap"></div><div id="map-tip" class="map-tip" hidden></div><div id="map-legend" class="map-legend"></div></div>
+  <aside id="map-panel" class="card map-panel"></aside>
+ </div>
+</section>
 <section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
 <section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>
 <section id="wallet" class="tab" hidden><div id="wallet-content" class="grid"></div></section>
@@ -115,6 +134,8 @@
 </section>
 <footer><span>EVE Pilot Console · independent capsuleer project</span><span>Data from EVE ESI · not affiliated with CCP Games</span></footer>
 </main>
+<dialog id="map-modal" class="map-modal" aria-labelledby="map-modal-title"><div class="modal-head"><h3 id="map-modal-title">Map</h3><button type="button" id="map-modal-close" class="secondary small">Close</button></div><div id="map-modal-body"></div></dialog>
+<div id="route-pop" class="route-pop" role="tooltip" hidden></div>
 <noscript><p class="empty">Enable JavaScript to use the console.</p></noscript>
 <script type="module" src="app.js"></script>
 </body></html>

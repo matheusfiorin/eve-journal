@@ -4,7 +4,9 @@ import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
 import {skillLevels, isAlpha, slots, evaluate, rank, portfolio, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
 import {SHIPS, SKILL, yieldRate, holdOf, canFly, oreValue, sites, ledger} from './mining.js';
 import {HULLS, MODES, suggestHull, campIntel, plan} from './hauling.js';
-import {graph, leg, facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from './route.js';
+import {secColor, inRange, JUMP_SHIPS, strengths, lightYears} from './map.js';
+import {secLight, regionSvg, routeSketch, StarMap} from './mapview.js';
+import {graph, paths, leg, facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from './route.js';
 import {JournalStore} from './storage.js';
 
 const $ = selector => document.querySelector(selector);
@@ -13,7 +15,7 @@ const DRAFT = 'eve-flight-draft:v1';
 const GROUPS = 'eve-skill-groups:v1';
 const ME = 'eve-me:v1';
 const CATS = 'eve-asset-categories:v1';
-const TABS = ['overview','empire','market','industry','mining','hauling','training','skills','wallet','clones','notes'];
+const TABS = ['overview','empire','market','industry','mining','hauling','map','training','skills','wallet','clones','notes'];
 const HUB_SYSTEMS = [[30000142,'Jita'],[30002187,'Amarr'],[30002659,'Dodixie'],[30002510,'Rens'],[30002053,'Hek']];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const OLD_TABS = {journal:'notes', goals:'notes', operations:'wallet'};
@@ -508,11 +510,19 @@ async function renderMarket() {
     .filter(h => near(h.toA) && h.ab !== null).map(h => ({...h, perJump:h.profit / Math.max(1, h.toA + h.ab)})).sort((a, b) => b.perJump - a.perJump).slice(0, 12);
   const tradeRows = trades.map(t => ({...t, j:jumps(from, sys(t.loc))})).filter(t => near(t.j)).slice(0, 12);
   const buildRows = builds.map(b => ({...b, j:jumps(from, sys(b.loc))}));
+  // Local gate routes for hover previews (the jump counts above come from ESI's route API).
+  const g = universeGraph(), tripCache = new Map();
+  const tripAttrs = (stops, label) => {
+    if (!g || stops.some(id => !g.systems.has(id))) return '';
+    const ids = [stops[0]];
+    for (let i = 1; i < stops.length; i++) ids.push(...(leg(g, stops[i - 1], stops[i], tripCache)?.systems.slice(1).map(x => x.id) || []));
+    return ids.length > 1 ? routeAttrs(ids, label) : '';
+  };
   const jumpTag = j => `<em>${j === 0 ? 'here' : `${j} j`}</em>`;
   const empty = text => `<p class="hint">${text}</p>`;
   content.innerHTML = `
   <article class="card reveal" style="--i:1"><div class="card-head"><div><h3>Haul &amp; flip</h3><p class="hint">Buy from a sell order, fly, sell into a buy order. Ranked by profit per jump.</p></div></div>
-   ${haulRows.length ? `<ol class="opps">${haulRows.map((h, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(h.type))}</b><small>${h.units.toLocaleString()} units · ${Math.round(h.m3).toLocaleString()} m³ · invest ${format(h.invest, 'isk')}${h.invest >= budget * 0.95 ? ' (your whole budget)' : ''}</small></div><div class="opp-route"><span>Buy ${format(h.from.price, 'isk')} · ${esc(station(h.from.loc))} ${jumpTag(h.toA)}</span><span>Sell ${format(h.to.price, 'isk')} · ${esc(station(h.to.loc))} <em>+${h.ab} j</em></span></div><div class="opp-profit"><b class="pos">+${format(h.profit, 'isk')}</b><small>${format(h.perJump, 'isk')} / jump</small></div></li>`).join('')}</ol>` : empty(`No profitable hauls within ${maxJumps} jumps for this cargo size.`)}
+   ${haulRows.length ? `<ol class="opps">${haulRows.map((h, n) => `<li class="opp reveal" style="--i:${n}" ${tripAttrs([from, sys(h.from.loc), sys(h.to.loc)], `Haul ${item(h.type)}`)}><div class="opp-main"><b>${esc(item(h.type))}</b><small>${h.units.toLocaleString()} units · ${Math.round(h.m3).toLocaleString()} m³ · invest ${format(h.invest, 'isk')}${h.invest >= budget * 0.95 ? ' (your whole budget)' : ''}</small></div><div class="opp-route"><span>Buy ${format(h.from.price, 'isk')} · ${esc(station(h.from.loc))} ${jumpTag(h.toA)}</span><span>Sell ${format(h.to.price, 'isk')} · ${esc(station(h.to.loc))} <em>+${h.ab} j</em></span></div><div class="opp-profit"><b class="pos">+${format(h.profit, 'isk')}</b><small>${format(h.perJump, 'isk')} / jump</small></div></li>`).join('')}</ol>` : empty(`No profitable hauls within ${maxJumps} jumps for this cargo size.`)}
   </article>
   <article class="card reveal" style="--i:2"><div class="card-head"><div><h3>Station trading near you</h3><p class="hint">Place a buy order at the top bid and relist at the lowest ask. Estimate assumes you capture 5% of daily volume, with no more buy orders than your budget covers.</p></div></div>
    ${tradeRows.length ? `<ol class="opps">${tradeRows.map((t, n) => `<li class="opp reveal" style="--i:${n}"><div class="opp-main"><b>${esc(item(t.type))}</b><small>${esc(station(t.loc))} ${jumpTag(t.j)}</small></div><div class="opp-route"><span>Bid ${format(t.buy, 'isk')} → ask ${format(t.sell, 'isk')}</span><span>${Math.round(t.volume).toLocaleString()} traded per day · ${format(t.capital, 'isk')} in orders</span></div><div class="opp-profit"><b class="pos">${(t.margin * 100).toFixed(1)}%</b><small>~${format(t.daily, 'isk')} / day</small></div></li>`).join('')}</ol>` : empty(`No station spreads beat fees within ${maxJumps} jumps.`)}
@@ -528,11 +538,14 @@ const universeGraph = () => {
   if (graphCache?.src !== src) graphCache = {src, g:graph(src)};
   return graphCache.g;
 };
-const hop = s => `<li class="sec-${secClass(s.sec)}" title="${esc(s.name)} · security ${secShown(s.sec).toFixed(1)}"><span>${secShown(s.sec).toFixed(1)}</span>${esc(s.name)}</li>`;
+const hop = s => `<li class="sec-${secClass(s.sec)}" data-system="${s.id}" style="--c:${secColor(s.sec)}" title="${esc(s.name)} · security ${secShown(s.sec).toFixed(1)}"><span>${secShown(s.sec).toFixed(1)}</span>${esc(s.name)}</li>`;
+// Every route on the page can be previewed on hover and opened in the 3D map modal.
+const routeAttrs = (ids, label) => `data-route="${ids.join(',')}" data-label="${esc(label)}"`;
+const mapButton = (ids, label) => ids.length > 1 ? `<button type="button" class="map-btn secondary small" data-map-route="${ids.join(',')}" data-label="${esc(label)}">◎ 3D</button>` : '';
 function legHtml(title, place, route, extra = '') {
   if (!route) return `<div class="leg"><div class="leg-head"><b>${title}</b><span>${esc(place || '')}</span><small>No gate route found from here.</small></div></div>`;
-  const names = route.systems.map(s => s.name);
-  return `<div class="leg"><div class="leg-head"><b>${title}</b><span>${esc(place)}</span><small>${route.jumps ? `${route.jumps} ${route.jumps === 1 ? 'jump' : 'jumps'}` : 'same system'}${route.risky ? ` · <span class="neg">${route.risky} low-sec</span>` : ''}${extra}</small><a href="${route.jumps ? dotlanRoute(names) : dotlanSystem(names[0])}" target="_blank" rel="noopener noreferrer">Map ↗</a></div>${route.jumps ? `<ol class="hops">${route.systems.map(hop).join('')}</ol>` : ''}</div>`;
+  const names = route.systems.map(s => s.name), ids = route.systems.map(s => s.id), label = `${title ? `${title}: ` : ''}${route.systems[0].name} → ${place}`;
+  return `<div class="leg" ${routeAttrs(ids, label)}><div class="leg-head"><b>${title}</b><span>${esc(place)}</span><small>${route.jumps ? `${route.jumps} ${route.jumps === 1 ? 'jump' : 'jumps'}` : 'same system'}${route.risky ? ` · <span class="neg">${route.risky} low-sec</span>` : ''}${extra}</small>${mapButton(ids, label)}<a href="${route.jumps ? dotlanRoute(names) : dotlanSystem(names[0])}" target="_blank" rel="noopener noreferrer">Dotlan ↗</a></div>${route.jumps ? `<ol class="hops">${route.systems.map(hop).join('')}</ol>` : ''}</div>`;
 }
 async function renderIndustry() {
   const status = $('#industry-status'), content = $('#industry-content');
@@ -582,9 +595,11 @@ async function renderIndustry() {
     legs.push(legHtml('Buy materials', mats.name, leg(g, lab?.system.id ?? start, mats.system, cache), ` · whole bill in ${esc(pick.materialsRegion)}`));
     if (factory) legs.push(legHtml('Build', factory.station.name, leg(g, mats.system ?? start, factory.system.id, cache), ` · index ${pct(factory.index)}`));
     legs.push(legHtml('Sell', hub.name, leg(g, factory?.system.id ?? mats.system ?? start, hub.system, cache), ` · lowest ask ${format(pick.sell.price, 'isk')}`));
-    const stops = [system, seller?.place.system, lab?.system.id, mats.system, factory?.system.id, hub.system].filter(Boolean).filter((id, i, a) => id !== a[i - 1]).map(id => g.systems.get(id)?.name).filter(Boolean);
+    const stopIds = [system, seller?.place.system, lab?.system.id, mats.system, factory?.system.id, hub.system].filter(id => g.systems.has(id)).filter((id, i, a) => id !== a[i - 1]);
+    const stops = stopIds.map(id => g.systems.get(id).name), tripIds = [stopIds[0]];
+    for (let i = 1; i < stopIds.length; i++) tripIds.push(...(leg(g, stopIds[i - 1], stopIds[i], cache)?.systems.slice(1).map(x => x.id) || [stopIds[i]]));
     const bill = `<table class="bill"><caption>Materials for a ${pick.runs}-run batch at ME ${pick.me}, bought in ${esc(pick.materialsRegion)}</caption><thead><tr><th>Material</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>${pick.bill.map(b => `<tr><td>${esc(meta.types[b.type]?.n || name(b.type))}<small>${esc(at(b.loc).name)}</small></td><td>${b.qty.toLocaleString()}</td><td>${format(b.price, 'isk')}</td><td>${format(b.qty * b.price, 'isk')}</td></tr>`).join('')}</tbody></table>`;
-    return `${bill}<ol class="legs">${legs.map(l => `<li>${l}</li>`).join('')}</ol>${stops.length > 1 ? `<a class="trip-link" href="${dotlanRoute(stops)}" target="_blank" rel="noopener noreferrer">Open the whole trip on Dotlan ↗</a>` : ''}`;
+    return `${bill}<ol class="legs">${legs.map(l => `<li>${l}</li>`).join('')}</ol>${stops.length > 1 ? `<div class="actions" ${routeAttrs(tripIds, `${pick.n} trip`)}>${mapButton(tripIds, `${pick.n}: whole trip`)}<a class="trip-link" href="${dotlanRoute(stops)}" target="_blank" rel="noopener noreferrer">Open the whole trip on Dotlan ↗</a></div>` : ''}`;
   };
   const facilityList = (list, kind) => list.length ? `<ol class="facilities">${list.map((x, i) => `<li>${i ? '' : '<span class="tag">Best</span> '}<a href="${dotlanSystem(x.system.name)}" target="_blank" rel="noopener noreferrer">${esc(x.station.name)}</a><small><span class="sec sec-${secClass(x.system.sec)}">${secShown(x.system.sec).toFixed(1)}</span> ${esc(x.system.name)} · ${x.jumps ? `${x.jumps} ${x.jumps === 1 ? 'jump' : 'jumps'}` : 'here'} · ${kind} index ${pct(x.index)} · job tax ${pct(x.index + NPC_FACILITY_TAX + (kind === 'ME' ? SCC.research : SCC.manufacturing) + (alpha ? ALPHA_TAX : 0))}</small>${x.jumps ? `<details><summary>Route</summary>${legHtml('', x.station.name, leg(g, system, x.system.id, cache))}</details>` : ''}</li>`).join('')}</ol>` : '<p class="hint">No high-sec NPC station with this service within 10 jumps.</p>';
   const plan = stage(x.wallet), next = nextSkills(levels, alpha), known = Boolean(x.skills?.skills);
@@ -680,7 +695,7 @@ async function renderMining() {
   const hours = sec => sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(sec / 60))} min`;
   const chip = sys => `<span class="sec sec-${secClass(sys.sec)}">${secShown(sys.sec).toFixed(1)}</span>`;
   const site = (pl, s, n) => `<li class="opp reveal" style="--i:${n}">
-    <div class="opp-main"><b>${chip(s.system)} <a href="${dotlanSystem(s.system.name)}" target="_blank" rel="noopener noreferrer">${esc(s.system.name)}</a></b><small>${s.jumps ? `${s.jumps} ${s.jumps === 1 ? 'jump' : 'jumps'}` : 'you are here'} · ${s.system.belts} ${s.system.belts === 1 ? 'belt' : 'belts'}${s.lowsec ? ' · <span class="neg">route through low-sec</span>' : ''}</small>
+    <div class="opp-main"><b>${chip(s.system)} <a href="${dotlanSystem(s.system.name)}" data-system="${s.system.id}">${esc(s.system.name)}</a></b><small>${s.jumps ? `${s.jumps} ${s.jumps === 1 ? 'jump' : 'jumps'}` : 'you are here'} · ${s.system.belts} ${s.system.belts === 1 ? 'belt' : 'belts'}${s.lowsec ? ' · <span class="neg">route through low-sec</span>' : ''}</small>
       <small class="flags">${s.ores.map((o, i) => `<span class="tag ${i ? 'dim' : ''}" title="${esc(o.how)} · ${format(o.perM3, 'isk')}/m³">${esc(o.n)}</span>`).join('')}</small></div>
     <div class="opp-route"><span>Mine ${esc(s.ores[0].n)}: ${format(s.ores[0].perM3, 'isk')}/m³, best sold ${esc(s.ores[0].how)}${s.ores[0].at ? ` at ${esc(marketBook.stations.get(s.ores[0].at)?.name || 'a hub')}` : ' as minerals'}</span>
       <span class="${s.kills ? 'neg' : ''}">${s.kills ? `${s.kills} ${s.kills === 1 ? 'ship' : 'ships'} killed in the last hour` : 'No kills in the last hour'} · ${s.traffic.toLocaleString()} jumps/h${s.crowd < 1 ? ' · busy, belts may be stripped' : ''}${secClass(s.system.sec) !== 'hi' ? ' · <span class="neg">low-sec: no CONCORD</span>' : ''}</span></div>
@@ -805,7 +820,7 @@ async function renderHauling(live = true) {
       const [d24 = 0] = meta.risk?.s?.[st.system.id] || [];
       const ago = c?.last ? Math.max(1, Math.round((Date.now() - c.last) / 60000)) : null;
       return `<li class="hop-row ${level(st.p)} reveal" style="--i:${Math.min(i, 30)}">
-        <span class="sec sec-${secClass(st.system.sec)}">${secShown(st.system.sec).toFixed(1)}</span>
+        <button type="button" class="light-btn" data-system="${st.system.id}" aria-label="${esc(st.system.name)} on the map">${secLight(st.system.sec)}</button>
         <div><b><a href="https://zkillboard.com/system/${st.system.id}/" target="_blank" rel="noopener noreferrer">${esc(st.system.name)}</a></b>${st.stop ? ' <span class="tag">Stop</span>' : ''}
           <small>${c ? `<span class="gk gk-${gk ? (gk >= 3 ? 'hi' : 'lo') : 'none'}">${gk} on your gates</span> · ${c.kills} ${c.kills === 1 ? 'kill' : 'kills'} last hour${ago ? `, latest ${ago} min ago` : ''}` : 'No kills in the last hour'}${c?.sb ? ' · <span class="tag flag">Smartbombs</span>' : ''}${c?.dictor ? ` · <span class="tag flag">${secClass(st.system.sec) === 'hi' ? 'Interdictors' : 'Bubbles'}</span>` : ''}${c && shipNames(c) ? ` · ${shipNames(c)}` : ''}</small>
           <small>${Math.round(d24)} ship kills over ~24 h · ${(traffic[st.system.id] || 0).toLocaleString()} jumps/h</small></div>
@@ -819,9 +834,9 @@ async function renderHauling(live = true) {
     <article class="card reveal" style="--i:1"><div class="card-head"><div><h3>${MODES[haulMode].label} route · ${chosen.stops.map(id => esc(g.systems.get(id).name)).join(' → ')}</h3>
       <p class="hint">${esc(HULLS[hull].name)}${$('#haul-hull').value ? '' : ' (suggested)'}: ${esc(HULLS[hull].why)} ${volume > HULLS[hull].cargo ? `<span class="neg">${Math.round(volume).toLocaleString()} m³ won’t fit; split the load.</span>` : ''} Chance of arriving: <b>${pct(chosen.survival)}</b>.</p></div></div>
       ${worst.length ? `<p class="alert ${level(worst[0].p) === 'danger' ? 'danger' : 'warn'}">Watch ${worst.map(s => `${esc(s.system.name)} (${pct(s.p)})`).join(', ')}. ${worst.some(s => liveIntel.get(s.system.id)?.gateKills) ? 'Gate kills in the last hour: a camp may still be there. Scout with an alt or wait it out.' : ''}</p>` : '<p class="alert ok">No hotspots on this route right now.</p>'}
-      <div class="actions"><a class="button secondary" href="${dotlanRoute(chosen.stops.map(id => g.systems.get(id).name))}" target="_blank" rel="noopener noreferrer">Open on Dotlan ↗</a>${canSend ? `<button type="button" id="haul-send">Send to ${esc(pilot.name)}’s autopilot</button>` : ''}<span id="haul-sent" class="hint" role="status"></span></div>
+      <div class="actions">${mapButton(chosen.route, `${MODES[haulMode].label} route`)}<a class="button secondary" href="${dotlanRoute(chosen.stops.map(id => g.systems.get(id).name))}" target="_blank" rel="noopener noreferrer">Open on Dotlan ↗</a>${canSend ? `<button type="button" id="haul-send">Send to ${esc(pilot.name)}’s autopilot</button>` : ''}<span id="haul-sent" class="hint" role="status"></span></div>
       ${canSend && sendable.length < chosen.route.length - 1 ? '<p class="hint">Over 40 jumps: only your stops are sent, so the in-game autopilot picks the path between them.</p>' : ''}
-      <ol class="hop-list">${chosen.steps.map(step).join('')}</ol>
+      <ol class="hop-list" ${routeAttrs(chosen.route, `${MODES[haulMode].label} route`)}>${chosen.steps.map(step).join('')}</ol>
     </article>`;
     content.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { haulMode = b.dataset.mode; draw(); });
     const send = content.querySelector('#haul-send'), sent = content.querySelector('#haul-sent');
@@ -848,6 +863,201 @@ async function renderHauling(live = true) {
   haulPlans = planAll();
   draw();
 }
+// ── Map: Dotlan-style region maps, a 3D star map, live overlays, a system panel, a modal and route previews. ──
+const OVERLAYS = {
+  security:{label:'Security', color:'#4ecef8'}, shipKills:{label:'Ship kills (last hour)', color:'#f2877a'}, podKills:{label:'Pod kills (last hour)', color:'#f2877a'},
+  npcKills:{label:'NPC kills (last hour)', color:'#f2c46d'}, jumps:{label:'Jumps (last hour)', color:'#4ecef8'}, kills24:{label:'Ship kills (~24 h)', color:'#f2877a'},
+  sov:{label:'Sovereignty', color:'#b98df2'}, fw:{label:'Faction warfare', color:'#f2c46d'}, incursion:{label:'Incursions', color:'#bb1116'},
+  industry:{label:'Manufacturing index', color:'#b9ee8d'}, belts:{label:'Asteroid belts', color:'#c9a96e'}, stations:{label:'NPC stations', color:'#7fd8a6'}
+};
+const SERVICES = [[1, 'Factory'], [2, 'Lab'], [4, 'Market'], [8, 'Refinery'], [16, 'Clone bay']];
+let mapLiveData = null, mapState = {region:null, view:'region', overlay:'security', jump:'', selected:null, route:[], routeLabel:''}, starMap = null, modalMap = null;
+// Public ESI feeds for the overlays, cached for 10 minutes.
+async function mapLive() {
+  if (mapLiveData && Date.now() - mapLiveData.at < 600000) return mapLiveData;
+  const get = path => esi(path).catch(() => []);
+  const [kills, jumps, sov, fw, inc] = await Promise.all(['universe/system_kills/', 'universe/system_jumps/', 'sovereignty/map/', 'fw/systems/', 'incursions/'].map(get));
+  mapLiveData = {at:Date.now(), kills:Object.fromEntries(kills.map(k => [k.system_id, k])), jumps:Object.fromEntries(jumps.map(j => [j.system_id, j.ship_jumps])),
+    sov:Object.fromEntries(sov.filter(x => x.alliance_id || x.faction_id).map(x => [x.system_id, x])), fw:Object.fromEntries(fw.map(x => [x.solar_system_id, x])),
+    incursions:new Map(inc.flatMap(i => i.infested_solar_systems.map(id => [id, i])))};
+  return mapLiveData;
+}
+function overlayValues(g, overlay) {
+  const live = mapLiveData || {kills:{}, jumps:{}, sov:{}, fw:{}, incursions:new Map()}, meta = marketData?.meta?.data || {}, out = {};
+  for (const sys of g.systems.values()) {
+    const id = sys.id, k = live.kills[id];
+    out[id] = {shipKills:k?.ship_kills, podKills:k?.pod_kills, npcKills:k?.npc_kills, jumps:live.jumps[id], kills24:meta.risk?.s?.[id]?.[0], belts:sys.belts,
+      sov:live.sov[id] ? 1 : 0, fw:live.fw[id] ? (live.fw[id].contested === 'uncontested' ? 0.3 : 0.6 + 0.4 * (live.fw[id].victory_points / (live.fw[id].victory_points_threshold || 1))) : 0,
+      incursion:live.incursions.has(id) ? 1 : 0, industry:costIndices?.get(id)?.manufacturing, stations:0}[overlay];
+  }
+  if (overlay === 'stations') for (const st of g.stations.values()) out[st.system] = (out[st.system] || 0) + 1;
+  return out;
+}
+const mapGraph = () => universeGraph();
+const regionName = id => mapGraph()?.regions[id] || name(id);
+function mapColor(g, overlay) {
+  if (overlay === 'security') return id => secColor(g.systems.get(id).sec);
+  const k = strengths(overlayValues(g, overlay)), [r, gg, b] = OVERLAYS[overlay].color.match(/\w\w/g).map(h => parseInt(h, 16));
+  return id => { const v = k(id); return v ? `rgba(${r},${gg},${b},${(0.35 + 0.65 * v).toFixed(2)})` : 'rgba(139,155,176,0.35)'; };
+}
+function systemPanel(id, {compact = false} = {}) {
+  const g = mapGraph(), sys = g?.systems.get(id);
+  if (!sys) return '<p class="hint">Unknown system.</p>';
+  const live = mapLiveData, k = live?.kills[id], meta = marketData?.meta?.data || {};
+  const constellation = g.constellations[sys.constellation]?.[0];
+  const stations = [...g.stations.values()].filter(st => st.system === id);
+  const here = mine()?.ops?.location?.value?.solar_system_id, from = here && here !== id && g.systems.has(here) ? leg(g, here, id) : null;
+  const sov = live?.sov[id], fw = live?.fw[id], inc = live?.incursions.get(id), idx = costIndices?.get(id);
+  const pilot = mine(), canSend = pilot?.id && backend?.has(pilot.id);
+  return `<div class="sys-panel" data-panel="${id}">
+    <div class="sys-head"><div><h3>${esc(sys.name)}</h3><p class="hint">${esc(constellation || '')} · ${esc(regionName(sys.region))}</p></div><span class="sec-badge" style="--c:${secColor(sys.sec)}">${secLight(sys.sec)}</span></div>
+    <div class="actions">${from?.jumps ? `<button type="button" class="secondary small" data-map-route="${from.systems.map(x => x.id).join(',')}" data-label="${esc(`${from.systems[0].name} → ${sys.name}`)}">Route from ${esc(from.systems[0].name)} · ${from.jumps} j</button>` : ''}<button type="button" class="secondary small" data-haul-to="${id}">Haul here</button>${canSend ? `<button type="button" class="secondary small" data-destination="${id}">Set destination</button>` : ''}<a class="button secondary small" href="${dotlanSystem(sys.name)}" target="_blank" rel="noopener noreferrer">Dotlan ↗</a><a class="button secondary small" href="https://zkillboard.com/system/${id}/" target="_blank" rel="noopener noreferrer">zKillboard ↗</a></div>
+    <p class="hint" data-destination-status role="status"></p>
+    <dl class="facts">${fact('Ship kills', `${k?.ship_kills ?? 0}<small>last hour · ~${Math.round(meta.risk?.s?.[id]?.[0] || 0)} over 24 h</small>`)}${fact('Pods / NPCs', `${k?.pod_kills ?? 0} / ${k?.npc_kills ?? 0}<small>last hour</small>`)}${fact('Jumps', `${(live?.jumps[id] ?? 0).toLocaleString()}<small>last hour</small>`)}${fact('Belts', sys.belts)}${idx ? fact('Industry', `${(idx.manufacturing * 100).toFixed(2)}%<small>build · ME ${((idx.researching_material_efficiency || 0) * 100).toFixed(2)}%</small>`) : ''}</dl>
+    ${sov ? `<p class="tagline"><span class="tag">Sovereignty</span> ${esc(name(sov.alliance_id || sov.faction_id))}</p>` : ''}
+    ${fw ? `<p class="tagline"><span class="tag flag">Faction warfare</span> ${esc(name(fw.occupier_faction_id))}${fw.contested !== 'uncontested' ? ` · ${esc(fw.contested)} ${Math.round(100 * fw.victory_points / (fw.victory_points_threshold || 1))}%` : ''}</p>` : ''}
+    ${inc ? `<p class="tagline"><span class="tag flag">Incursion</span> ${esc(inc.state)} · influence ${Math.round((inc.influence || 0) * 100)}%</p>` : ''}
+    ${compact ? '' : `<h4>Gates</h4><ul class="neighbors">${sys.links.map(n => g.systems.get(n)).filter(Boolean).map(n => `<li><button type="button" class="link-btn" data-system="${n.id}">${secLight(n.sec)} ${esc(n.name)}${n.region !== sys.region ? ` <small>${esc(regionName(n.region))}</small>` : ''}</button></li>`).join('')}</ul>`}
+    <h4>NPC stations (${stations.length})</h4>${stations.length ? `<ul class="plain stations">${stations.slice(0, compact ? 4 : 30).map(st => `<li>${esc(st.name || `Station ${st.id}`)}<small>${SERVICES.filter(([bit]) => st.flags & bit).map(([, label]) => `<span class="tag dim">${label}</span>`).join(' ') || 'No industry or market services'}</small></li>`).join('')}</ul>` : '<p class="hint">No NPC stations.</p>'}
+  </div>`;
+}
+const regionIdsWithLayout = g => Object.keys(g.regions).map(Number).filter(r => [...g.systems.values()].some(s => s.region === r && s.p2)).sort((a, b) => regionName(a).localeCompare(regionName(b)));
+function fillSystemList(g) {
+  const list = $('#haul-systems');
+  if (!list.options.length) list.innerHTML = [...g.systems.values()].map(s => `<option value="${esc(s.name)}">`).join('');
+}
+async function renderMap() {
+  const status = $('#map-status'), stage = $('#map-stage');
+  if (!backend) { status.textContent = 'The map needs the backend.'; return; }
+  try { await loadMarket(); } catch (error) { status.textContent = `Map unavailable: ${error.message}`; return; }
+  const g = mapGraph();
+  if (!g || !Object.keys(g.regions).length) { status.textContent = 'The map appears after the next pipeline run.'; return; }
+  fillSystemList(g);
+  const regionSelect = $('#map-region');
+  if (!regionSelect.options.length) regionSelect.innerHTML = regionIdsWithLayout(g).map(r => `<option value="${r}">${esc(regionName(r))}</option>`).join('');
+  if (!mapState.region) {
+    const here = mine()?.ops?.location?.value?.solar_system_id;
+    mapState.selected ??= g.systems.has(here) ? here : 30000142;
+    mapState.region = g.systems.get(mapState.selected)?.region || 10000002;
+  }
+  regionSelect.value = mapState.region;
+  $('#map-view').value = mapState.view; $('#map-overlay').value = mapState.overlay; $('#map-jump').value = mapState.jump;
+  const routeBar = $('#map-route');
+  routeBar.hidden = !mapState.route.length;
+  routeBar.innerHTML = mapState.route.length ? `<span>${esc(mapState.routeLabel)} · ${mapState.route.length - 1} jumps</span><button type="button" class="secondary small" id="map-route-clear">Clear route</button>` : '';
+  status.textContent = 'Loading live kills, jumps, sovereignty and incursions…';
+  await mapLive();
+  const missing = [...new Set([...Object.values(mapLiveData.sov).map(x => x.alliance_id || x.faction_id), ...Object.values(mapLiveData.fw).map(x => x.occupier_faction_id)])].filter(Boolean);
+  await resolveNames(missing).catch(() => {});
+  const live = mapLiveData, kills = Object.values(live.kills).reduce((t, k) => t + k.ship_kills, 0);
+  status.textContent = `${g.systems.size.toLocaleString()} systems · ${Object.keys(g.regions).length} regions · ${kills.toLocaleString()} ship kills and ${Object.values(live.jumps).reduce((t, j) => t + j, 0).toLocaleString()} jumps in the last hour · ${(n => n ? `${n} ${n === 1 ? 'incursion' : 'incursions'}` : 'no incursions')(new Set([...live.incursions.values()]).size)}`;
+  const values = overlayValues(g, mapState.overlay), k = strengths(values);
+  const range = mapState.jump && mapState.selected ? inRange(g, mapState.selected, JUMP_SHIPS[mapState.jump].ly) : [];
+  const rangeIds = new Set(range.map(r => r.system.id));
+  const legend = $('#map-legend');
+  legend.innerHTML = mapState.overlay === 'security'
+    ? `<span>Security</span>${[1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, -0.5].map(v => `<i class="swatch" style="--c:${secColor(v)}" title="${v > 0 ? v.toFixed(1) : '0.0 and below'}"></i>`).join('')}<span>1.0 → null</span>`
+    : `<span>${esc(OVERLAYS[mapState.overlay].label)}</span><i class="swatch big" style="--c:${OVERLAYS[mapState.overlay].color}"></i><span>more</span>`;
+  if (mapState.jump && mapState.selected) legend.innerHTML += `<span class="range-note">${range.length ? `${range.length} ${range.length === 1 ? 'system' : 'systems'}` : 'No low-sec or null-sec systems'} within ${JUMP_SHIPS[mapState.jump].ly} ly (${esc(JUMP_SHIPS[mapState.jump].name)})</span>`;
+  const tip = $('#map-tip');
+  const showTip = (sys, x, y) => {
+    if (!sys) { tip.hidden = true; return; }
+    const v = values[sys.id];
+    tip.innerHTML = `<b>${esc(sys.name)}</b> ${secLight(sys.sec)}<small>${esc(regionName(sys.region))}${mapState.overlay !== 'security' ? ` · ${esc(OVERLAYS[mapState.overlay].label)}: ${v === undefined ? '—' : typeof v === 'number' && v < 1 && v > 0 ? `${(v * 100).toFixed(1)}%` : v}` : ''}${rangeIds.has(sys.id) ? ` · ${lightYears(g.systems.get(mapState.selected), sys).toFixed(1)} ly` : ''}</small>`;
+    tip.style.left = `${Math.min(x + 14, stage.clientWidth - 200)}px`; tip.style.top = `${y + 14}px`; tip.hidden = false;
+  };
+  const select = id => { mapState.selected = id; const r = g.systems.get(id)?.region; if (mapState.view === 'region' && r !== mapState.region && g.systems.get(id)?.p2) mapState.region = r; renderMap(); };
+  const wrap = $('#map-canvas-wrap');
+  if (mapState.view === 'region') {
+    starMap?.stop();
+    wrap.innerHTML = regionSvg(g, mapState.region, {strength:mapState.overlay === 'security' ? () => 0 : k, value:id => values[id] ?? '', route:mapState.route, selected:mapState.selected, range:rangeIds, overlayColor:OVERLAYS[mapState.overlay].color});
+    const svg = wrap.querySelector('svg');
+    if (svg) {
+      svg.addEventListener('mouseover', e => { const n = e.target.closest('.sys'); if (n) { const r = stage.getBoundingClientRect(); showTip(g.systems.get(Number(n.dataset.system)), e.clientX - r.left, e.clientY - r.top); } });
+      svg.addEventListener('mouseout', e => { if (e.target.closest('.sys') && !e.relatedTarget?.closest?.('.sys')) tip.hidden = true; });
+      svg.addEventListener('click', e => { const n = e.target.closest('[data-system]'); if (n) { e.stopPropagation(); select(Number(n.dataset.system)); } });
+      svg.addEventListener('keydown', e => { const n = e.target.closest('.sys'); if (n && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(Number(n.dataset.system)); } });
+      zoomable(svg);
+    }
+  } else {
+    if (!wrap.querySelector('canvas')) { wrap.innerHTML = '<canvas class="star-map" aria-label="3D star map"></canvas>'; starMap = new StarMap(wrap.querySelector('canvas'), {reduced, onHover:(sys, x, y) => showTip(sys, x, y), onSelect:sys => select(sys.id)}); }
+    const inRegion = [...g.systems.values()].filter(x => x.region === mapState.region);
+    const universeView = mapState.view === 'universe';
+    const focus = universeView ? null : new Set([...inRegion.map(x => x.id), ...mapState.route, ...rangeIds]);
+    const labels = universeView ? Object.keys(g.regions).map(Number).map(r => { const sysIn = [...g.systems.values()].filter(x => x.region === r && x.pos); const c = sysIn.reduce((t, x) => t.map((v, i) => v + x.pos[i] / sysIn.length), [0, 0, 0]); return {text:regionName(r), pos:c}; }) : [];
+    starMap.set({g, systems:[...g.systems.values()].filter(x => x.pos), color:mapColor(g, mapState.overlay), focus, route:mapState.route, selected:mapState.selected, labels});
+    const target = mapState.route.length ? mapState.route.map(id => g.systems.get(id)) : universeView ? [...g.systems.values()] : inRegion;
+    if (wrap.dataset.framed !== `${mapState.view}:${mapState.region}:${mapState.route.join()}`) { starMap.fly(target.filter(x => x?.pos), {snap:!wrap.dataset.framed}); wrap.dataset.framed = `${mapState.view}:${mapState.region}:${mapState.route.join()}`; }
+  }
+  const panel = $('#map-panel');
+  if (mapState.selected) panel.innerHTML = systemPanel(mapState.selected);
+  else panel.innerHTML = `<h3>${esc(regionName(mapState.region))}</h3><p class="hint">Select a system for details.</p>`;
+  if (range.length) panel.innerHTML += `<h4>In jump range (${range.length})</h4><ul class="plain">${range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
+}
+// Wheel to zoom and drag to pan an SVG map by moving its viewBox.
+function zoomable(svg) {
+  const vb = () => svg.viewBox.baseVal;
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const box = vb(), r = svg.getBoundingClientRect(), f = e.deltaY > 0 ? 1.15 : 0.87;
+    const mx = box.x + (e.clientX - r.left) / r.width * box.width, my = box.y + (e.clientY - r.top) / r.height * box.height;
+    const w = Math.max(150, Math.min(3000, box.width * f)), h = box.height * w / box.width;
+    svg.setAttribute('viewBox', `${mx - (mx - box.x) * w / box.width} ${my - (my - box.y) * h / box.height} ${w} ${h}`);
+  }, {passive:false});
+  let drag = null;
+  svg.addEventListener('pointerdown', e => { if (!e.target.closest('[data-system]')) drag = {x:e.clientX, y:e.clientY}; });
+  svg.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const box = vb(), r = svg.getBoundingClientRect();
+    svg.setAttribute('viewBox', `${box.x - (e.clientX - drag.x) * box.width / r.width} ${box.y - (e.clientY - drag.y) * box.height / r.height} ${box.width} ${box.height}`);
+    drag = {x:e.clientX, y:e.clientY};
+  });
+  svg.addEventListener('pointerup', () => { drag = null; });
+  svg.addEventListener('pointerleave', () => { drag = null; });
+}
+// The map modal: a route (3D view plus hop strip) or one system (panel plus its neighbourhood).
+async function openMap({route = [], system = null, label = ''} = {}) {
+  try { await loadMarket(); } catch { return; }
+  const g = mapGraph(), dialog = $('#map-modal');
+  if (!g) return;
+  mapLive().then(() => { if (dialog.open && system) $('#map-modal-body .sys-panel')?.replaceWith(Object.assign(document.createElement('div'), {innerHTML:systemPanel(system, {compact:true})}).firstElementChild); }).catch(() => {});
+  const ids = route.filter(id => g.systems.has(id)), sys = g.systems.get(system);
+  $('#map-modal-title').textContent = ids.length ? label || 'Route' : sys?.name || 'System';
+  const risky = ids.filter(id => g.systems.get(id).sec < 0.45).length;
+  $('#map-modal-body').innerHTML = `<div class="modal-grid"><canvas class="star-map modal-canvas" aria-label="3D view"></canvas><div>
+    ${ids.length ? `<p class="hint">${ids.length - 1} ${ids.length === 2 ? 'jump' : 'jumps'} · ${[...new Set(ids.map(id => g.systems.get(id).region))].map(regionName).map(esc).join(' → ')}${risky ? ` · <span class="neg">${risky} outside high-sec</span>` : ''}</p>
+      <ol class="hop-strip">${ids.map(id => { const x = g.systems.get(id); return `<li><button type="button" class="link-btn" data-system="${id}">${secLight(x.sec)} ${esc(x.name)}</button></li>`; }).join('')}</ol>` : systemPanel(system, {compact:true})}
+    <div class="actions"><button type="button" id="map-modal-open">Open in Map tab</button></div></div></div>`;
+  if (!dialog.open) dialog.showModal();
+  const canvas = dialog.querySelector('canvas');
+  modalMap?.stop();
+  modalMap = new StarMap(canvas, {reduced, onSelect:x => openMap({system:x.id})});
+  const near = sys ? [...g.systems.values()].filter(x => x.pos && lightYears(sys, x) < 12) : [];
+  modalMap.set({g, systems:[...g.systems.values()].filter(x => x.pos), color:id => secColor(g.systems.get(id).sec), focus:new Set(ids.length ? ids.flatMap(id => [id, ...g.systems.get(id).links]) : near.map(x => x.id)), route:ids, selected:sys?.id ?? ids.at(-1)});
+  modalMap.fly(ids.length ? ids.map(id => g.systems.get(id)) : near.length ? near : [sys], {snap:true});
+  dialog.querySelector('#map-modal-open').onclick = () => {
+    dialog.close();
+    Object.assign(mapState, ids.length ? {route:ids, routeLabel:label || 'Route', selected:ids.at(-1)} : {selected:system});
+    mapState.region = g.systems.get(mapState.selected)?.region;
+    selectTab('map');
+  };
+}
+// Hover previews: a sketch of any route under the pointer.
+function routePop(target, event) {
+  const pop = $('#route-pop'), g = mapGraph();
+  if (!target || !g) { pop.hidden = true; return; }
+  const ids = target.dataset.route.split(',').map(Number).filter(id => g.systems.has(id));
+  if (ids.length < 2) { pop.hidden = true; return; }
+  const key = `${target.dataset.route}|${target.dataset.label}`;
+  if (pop.dataset.key !== key) {
+    pop.dataset.key = key;
+    const low = ids.filter(id => g.systems.get(id).sec < 0.45).length;
+    pop.innerHTML = `<b>${esc(target.dataset.label || 'Route')}</b><small>${ids.length - 1} jumps${low ? ` · <span class="neg">${low} outside high-sec</span>` : ''}</small>${routeSketch(g, ids)}<small class="hint">Click ◎ 3D for the full view</small>`;
+  }
+  pop.hidden = false;
+  const x = Math.min(event.clientX + 16, innerWidth - 270), y = event.clientY + 16 + 200 > innerHeight ? event.clientY - 210 : event.clientY + 16;
+  pop.style.left = `${x}px`; pop.style.top = `${y}px`;
+}
 function renderAll() {
   renderStatus(); renderMe(); renderOverview(); renderEmpire(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions();
   if (!$('#hero').hidden) renderHero();
@@ -855,6 +1065,7 @@ function renderAll() {
   if (!$('#industry').hidden) renderIndustry();
   if (!$('#mining').hidden) renderMining();
   if (!$('#hauling').hidden) renderHauling(false);
+  if (!$('#map').hidden) renderMap();
   countUps();
 }
 
@@ -897,6 +1108,7 @@ function selectTab(id) {
   if (id === 'industry') renderIndustry();
   if (id === 'mining') renderMining();
   if (id === 'hauling') renderHauling();
+  if (id === 'map') renderMap();
 }
 // The wing summary also carries the pilot's own figures, so drop it with their session.
 function forgetWing(id) {
@@ -955,6 +1167,48 @@ $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket(
 $('#market-budget').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
 $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
 $('#industry-system').onchange = $('#industry-over').onchange = $('#industry-category').onchange = $('#industry-sort').onchange = () => renderIndustry();
+// Map integration across tabs: system links and 3D buttons open the modal; routes preview on hover.
+document.addEventListener('click', event => {
+  const routeBtn = event.target.closest('[data-map-route]');
+  if (routeBtn) { event.preventDefault(); openMap({route:routeBtn.dataset.mapRoute.split(',').map(Number), label:routeBtn.dataset.label}); return; }
+  const haulTo = event.target.closest('[data-haul-to]');
+  if (haulTo) {
+    const sys = mapGraph()?.systems.get(Number(haulTo.dataset.haulTo)), rows = $('#haul-stops');
+    if (sys) { $('#map-modal').close(); selectTab('hauling'); requestAnimationFrame(() => { rows.lastElementChild.querySelector('input').value = sys.name; renderHauling(); }); }
+    return;
+  }
+  const dest = event.target.closest('[data-destination]');
+  if (dest) {
+    const out = dest.closest('.sys-panel').querySelector('[data-destination-status]'), pilot = mine();
+    out.textContent = 'Sending…';
+    backend.waypoints(pilot.id, [Number(dest.dataset.destination)]).then(() => { out.textContent = `Destination set for ${pilot.name}.`; }, error => { out.textContent = error.message; });
+    return;
+  }
+  const sys = event.target.closest('[data-system]');
+  if (sys && !sys.closest('#map-canvas-wrap')) {
+    event.preventDefault();
+    if (sys.closest('#map-panel')) { mapState.selected = Number(sys.dataset.system); const r = mapGraph()?.systems.get(mapState.selected)?.region; if (mapState.view === 'region' && r) mapState.region = r; renderMap(); }
+    else openMap({system:Number(sys.dataset.system)});
+  }
+  if (event.target.id === 'map-route-clear') { mapState.route = []; mapState.routeLabel = ''; renderMap(); }
+});
+document.addEventListener('mouseover', event => { const t = event.target.closest?.('[data-route]'); if (t && matchMedia('(hover: hover)').matches) routePop(t, event); });
+document.addEventListener('mousemove', event => { const t = event.target.closest?.('[data-route]'); if (t && !$('#route-pop').hidden) routePop(t, event); });
+document.addEventListener('mouseout', event => { const t = event.target.closest?.('[data-route]'); if (t && !t.contains(event.relatedTarget)) routePop(null); });
+$('#map-modal-close').onclick = () => $('#map-modal').close();
+$('#map-modal').addEventListener('close', () => modalMap?.stop());
+$('#map-modal').addEventListener('click', event => { if (event.target === $('#map-modal')) $('#map-modal').close(); });
+$('#map-region').onchange = event => { mapState.region = Number(event.target.value); mapState.selected = null; renderMap(); };
+$('#map-view').onchange = event => { mapState.view = event.target.value; renderMap(); };
+$('#map-overlay').onchange = event => { mapState.overlay = event.target.value; renderMap(); };
+$('#map-jump').onchange = event => { mapState.jump = event.target.value; renderMap(); };
+$('#map-find').onsubmit = event => {
+  event.preventDefault();
+  const g = mapGraph(), q = $('#map-search').value.trim().toLowerCase();
+  const hit = g && [...g.systems.values()].find(x => x.name.toLowerCase() === q) || g && [...g.systems.values()].find(x => x.name.toLowerCase().startsWith(q));
+  if (!hit) { $('#map-status').textContent = `No system named “${$('#map-search').value}”.`; return; }
+  mapState.selected = hit.id; mapState.region = hit.region; renderMap();
+};
 $('#haul-add').onclick = () => { const rows = $('#haul-stops'); rows.insertBefore(haulRow(), rows.lastElementChild); haulNumber(); rows.children[rows.children.length - 2].querySelector('input').focus(); };
 $('#haul-stops').onclick = event => {
   const row = event.target.closest('.stop-row'), rows = $('#haul-stops');

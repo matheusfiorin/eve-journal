@@ -1,0 +1,82 @@
+// Map math for the Map tab and route previews: security colours, CCP's schematic region layout, 3D projection,
+// jump ranges and overlay scales. Pure functions; app.js draws.
+import {secShown} from './route.js';
+
+// EVE's own security palette, from 1.0 (blue) to 0.0 and below (purple).
+const SEC = ['#8d3264', '#722020', '#bb1116', '#ce440f', '#dc6d07', '#f3fd82', '#71e554', '#60dba3', '#4ecef8', '#399aeb', '#2c75e1'];
+export const secColor = sec => SEC[Math.max(0, Math.min(10, Math.round(secShown(sec) * 10)))];
+
+// A region drawn the way CCP lays it out in 2D, scaled into a width×height box, plus stubs for gates leaving the region.
+export function regionLayout(g, region, {width = 1000, height = 700, pad = 60, maxScale = 26} = {}) {
+  const inside = [...g.systems.values()].filter(s => s.region === region && s.p2);
+  if (!inside.length) return {nodes:[], edges:[], exits:[], width, height};
+  const xs = inside.map(s => s.p2[0]), ys = inside.map(s => s.p2[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  // Small regions stay readable instead of stretching two systems across the whole map.
+  const k = Math.min(maxScale, (width - 2 * pad) / Math.max(x1 - x0, 1e-9), (height - 2 * pad) / Math.max(y1 - y0, 1e-9));
+  const ox = (width - (x1 - x0) * k) / 2, oy = (height - (y1 - y0) * k) / 2;
+  // Schematic y grows downward on screen, like north-up on the in-game 2D map.
+  const at = s => [ox + (s.p2[0] - x0) * k, height - (oy + (s.p2[1] - y0) * k)];
+  const nodes = inside.map(s => ({system:s, xy:at(s)})), index = new Map(nodes.map(n => [n.system.id, n]));
+  const edges = [], exits = [];
+  for (const n of nodes) for (const to of n.system.links) {
+    const m = index.get(to);
+    if (m) { if (n.system.id < to) edges.push([n, m]); continue; }
+    const other = g.systems.get(to);
+    if (!other?.p2) continue;
+    // Point the stub toward the neighbour's schematic position, a fixed length away.
+    const dx = (other.p2[0] - n.system.p2[0]) * k, dy = -(other.p2[1] - n.system.p2[1]) * k, len = Math.hypot(dx, dy) || 1;
+    exits.push({from:n, to:other, xy:[n.xy[0] + dx / len * 46, n.xy[1] + dy / len * 46]});
+  }
+  return {nodes, edges, exits, width, height};
+}
+
+// Perspective projection of light-year positions around a centre, for the 3D views.
+export function projector({center = [0, 0, 0], yaw = 0, pitch = 0.5, distance = 120, width = 800, height = 600, fov = 700} = {}) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return ([x, y, z]) => {
+    const dx = x - center[0], dy = y - center[1], dz = z - center[2];
+    const rx = dx * cy - dz * sy, rz = dx * sy + dz * cy;
+    const ry = dy * cp - rz * sp, depth = dy * sp + rz * cp + distance;
+    if (depth <= 1) return null;
+    const scale = fov / depth;
+    return [width / 2 + rx * scale, height / 2 - ry * scale, depth, scale];
+  };
+}
+// Bounding sphere of some systems: where to point the camera and how far back to sit.
+export function frame(systems) {
+  const pts = systems.map(s => s.pos).filter(Boolean);
+  if (!pts.length) return {center:[0, 0, 0], radius:1};
+  const center = [0, 1, 2].map(i => pts.reduce((t, p) => t + p[i], 0) / pts.length);
+  return {center, radius:Math.max(1, ...pts.map(p => Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2])))};
+}
+
+export const lightYears = (a, b) => a?.pos && b?.pos ? Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1], a.pos[2] - b.pos[2]) : Infinity;
+// Capital jump ranges with Jump Drive Calibration V (light-years). Jump drives can't land in high-sec (0.45+).
+export const JUMP_SHIPS = {blops:{name:'Black Ops', ly:8}, jf:{name:'Jump freighter', ly:10}, capital:{name:'Carrier / Dreadnought / FAX', ly:7}, super:{name:'Supercarrier / Titan', ly:6}};
+export function inRange(g, from, ly) {
+  const origin = g.systems.get(from), out = [];
+  for (const s of g.systems.values()) {
+    if (s.id === from || s.sec >= 0.45) continue;
+    const d = lightYears(origin, s);
+    if (d <= ly) out.push({system:s, ly:d});
+  }
+  return out.sort((a, b) => a.ly - b.ly);
+}
+
+// Overlay values to a 0–1 strength: square root so one busy system doesn't wash out the rest.
+export function strengths(values) {
+  const max = Math.max(0, ...Object.values(values).filter(Number.isFinite));
+  return id => max > 0 && values[id] > 0 ? Math.sqrt(values[id] / max) : 0;
+}
+
+// A tiny top-down sketch of a route (x/z plane) for hover previews: points scaled into a box.
+export function sketch(systems, {width = 220, height = 120, pad = 14} = {}) {
+  const pts = systems.filter(s => s?.pos);
+  if (!pts.length) return [];
+  const xs = pts.map(s => s.pos[0]), zs = pts.map(s => s.pos[2]);
+  const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+  const k = Math.min((width - 2 * pad) / Math.max(x1 - x0, 1e-9), (height - 2 * pad) / Math.max(z1 - z0, 1e-9));
+  const ox = (width - (x1 - x0) * k) / 2, oy = (height - (z1 - z0) * k) / 2;
+  return pts.map(s => ({system:s, xy:[ox + (s.pos[0] - x0) * k, height - (oy + (s.pos[2] - z0) * k)]}));
+}

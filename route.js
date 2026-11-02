@@ -7,9 +7,9 @@ export const secClass = sec => secShown(sec) >= 0.5 ? 'hi' : secShown(sec) > 0 ?
 
 export function graph(universe) {
   const systems = new Map(), stations = new Map();
-  for (const [id, [name, sec, region, links, belts = 0]] of Object.entries(universe?.systems || {})) systems.set(Number(id), {id:Number(id), name, sec, region, links, belts});
+  for (const [id, [name, sec, region, links, belts = 0, pos = null, p2 = null, constellation = null]] of Object.entries(universe?.systems || {})) systems.set(Number(id), {id:Number(id), name, sec, region, links, belts, pos, p2, constellation});
   for (const [id, system, flags, name] of universe?.stations || []) stations.set(id, {id, system, flags, name});
-  return {systems, stations};
+  return {systems, stations, regions:universe?.regions || {}, constellations:universe?.constellations || {}};
 }
 // Single-source Dijkstra with a small binary heap; `path(to)` rebuilds the jump list.
 // `weight(id)` prices entering a system; by default a jump costs 1, or LOW_SEC_PENALTY into low/null-sec when safe.

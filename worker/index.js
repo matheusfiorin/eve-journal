@@ -222,7 +222,7 @@ async function route(request,env,ctx,fetchImpl){
  }
  if(url.pathname==='/api/market/ingest'&&request.method==='POST'){
   await requirePipeline(request,env);
-  const text=await request.text();if(text.length>1500000)throw new ServiceError('Market snapshot is too large.',413);
+  const text=await request.text();if(text.length>1900000)throw new ServiceError('Market snapshot is too large.',413); // D1 rows top out at 2 MB
   let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Market snapshot is not JSON.');}
   if(!Number.isSafeInteger(body?.region)||body.region<0||!body.data||typeof body.data!=='object')throw new ServiceError('Market snapshot needs a region and data.');
   await env.DB.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(region_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').bind(body.region,JSON.stringify(body.data),Date.now()).run();
