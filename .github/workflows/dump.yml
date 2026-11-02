@@ -8,6 +8,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           mkdir -p dump
-          python3 dump.py || echo FAILED >> dump/zkill.txt
+          curl -sSfL https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip -o sde.zip
+          python3 dump.py || echo FAILED >> dump/map.txt
+          rm sde.zip
           git config user.name dump; git config user.email dump@example.com
           git add dump && git commit -qm "[skip ci] dump" && git push -q
