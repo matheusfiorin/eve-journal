@@ -152,6 +152,10 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
     else {if(prior[key]!==undefined)snapshot[key]=prior[key];snapshot.errors[key]=error.message;}
    }
   }));
+  // A trail of systems the pilot was seen in (newest last, 7 days, at most 200): the Exploration tab skips them.
+  const here=snapshot.operations.location?.value?.solar_system_id,trail=(prior.operations?.trail?.value||[]).filter(([,at])=>Date.now()-at<604800000);
+  if(Number.isSafeInteger(here)&&trail.at(-1)?.[0]!==here)trail.push([here,Date.now()]);
+  if(snapshot.operations.location?.permission)snapshot.operations.trail={permission:true,value:trail.slice(-200)};
   if(!snapshot.skills&&!snapshot.queue&&Object.keys(snapshot.errors).length)throw new ServiceError('Training data could not be refreshed. Previous snapshot retained.',502);
   const errors=Object.values(snapshot.errors);
   await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,id,now+90000).run();
@@ -170,7 +174,7 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
   const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance, asset summary, ship, location and mining ledger with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance, asset summary, ship, location (with recently visited systems) and mining ledger with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
@@ -241,7 +245,7 @@ async function route(request,env,ctx,fetchImpl){
    const snap=parseSnapshot(row),ops=snap.operations||{};
    return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
     // Consent version 2 also covers ship, location and the mining ledger.
-    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null}:{})};
+    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null}:{})};
   })});
  }
  if(url.pathname==='/api/waypoints'&&request.method==='POST'){

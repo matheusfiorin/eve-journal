@@ -107,6 +107,14 @@ export function decayRisk(prev, kills, now) {
   for (const id of Object.keys(s)) { s[id] = s[id].map(x => Math.round(x * 100) / 100); if (s[id][1] < 0.05) delete s[id]; }
   return {at:now, since:prev?.since || now, s};
 }
+// Jumps per system as a ~24-hour decayed sum: how busy a system is over a day, not just this hour.
+export function decayTraffic(prev, jumps, now) {
+  const hours = prev?.at ? Math.max(0, (now - prev.at) / 3600000) : 1, weight = Math.min(hours, 6), s = {};
+  for (const [id, d] of Object.entries(prev?.s || {})) s[id] = d * Math.exp(-hours / 24);
+  for (const j of jumps) if (j.ship_jumps) s[j.system_id] = (s[j.system_id] || 0) + j.ship_jumps * weight;
+  for (const id of Object.keys(s)) { s[id] = Math.round(s[id]); if (s[id] < 1) delete s[id]; }
+  return {at:now, since:prev?.since || now, s};
+}
 // Weapon and hull types that mark a gate camp: smartbombs and interdiction ships.
 export function combatTypes(types, groups) {
   const ids = re => [...types.values()].filter(t => t.published && re.test(sdeName(groups.get(t.groupID)?.name) || '')).map(t => t._key);
@@ -269,12 +277,15 @@ async function main() {
     for (const j of jumps.body) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
     meta.activity = activity;
     let previous = null;
-    try { previous = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data?.risk; } catch { /* Start a new history. */ }
-    meta.risk = decayRisk(previous, kills.body, Date.now());
+    try { previous = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data; } catch { /* Start a new history. */ }
+    meta.risk = decayRisk(previous?.risk, kills.body, Date.now());
+    meta.traffic = decayTraffic(previous?.traffic, jumps.body, Date.now());
   } catch (error) { console.log(`::warning title=Activity::${error.message}`); }
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
-    advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research'};
+    advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research',
+    astrometrics:'Astrometrics', rangefinding:'Astrometric Rangefinding', pinpointing:'Astrometric Pinpointing', acquisition:'Astrometric Acquisition', hacking:'Hacking', archaeology:'Archaeology',
+    survey:'Survey', cpuManagement:'CPU Management', covertOps:'Covert Ops', cloaking:'Cloaking', amarrFrigate:'Amarr Frigate', caldariFrigate:'Caldari Frigate', gallenteFrigate:'Gallente Frigate', minmatarFrigate:'Minmatar Frigate'};
   const skillIds = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(Object.values(SKILLS))})).body.inventory_types || [];
   meta.skills = Object.fromEntries(Object.entries(SKILLS).map(([key, label]) => [key, skillIds.find(s => s.name === label)?.id]));
 
@@ -321,6 +332,6 @@ async function main() {
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, kill history for ${Object.keys(meta.risk?.s || {}).length} systems, ${meta.combat?.sb.length ?? 0} smartbombs/${meta.combat?.dictor.length ?? 0} interdictors, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, kill history for ${Object.keys(meta.risk?.s || {}).length} systems, traffic history for ${Object.keys(meta.traffic?.s || {}).length}, ${meta.combat?.sb.length ?? 0} smartbombs/${meta.combat?.dictor.length ?? 0} interdictors, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

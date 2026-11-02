@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes,decayTraffic} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -104,4 +104,10 @@ test('combat types are smartbombs, interdictors and HICs',()=>{
  const types=new Map([[1,{_key:1,published:true,groupID:72}],[2,{_key:2,published:true,groupID:541}],[3,{_key:3,published:true,groupID:894}],[4,{_key:4,published:true,groupID:25}],[5,{_key:5,published:false,groupID:72}]]);
  const groups=new Map([[72,{name:{en:'Smart Bomb'}}],[541,{name:{en:'Interdictor'}}],[894,{name:{en:'Heavy Interdiction Cruiser'}}],[25,{name:{en:'Frigate'}}]]);
  assert.deepEqual(combatTypes(types,groups),{sb:[1],dictor:[2,3]});
+});
+test('traffic history decays over a day',()=>{
+ const t0=Date.UTC(2026,10,1),first=decayTraffic(null,[{system_id:1,ship_jumps:100},{system_id:2,ship_jumps:0}],t0);
+ assert.deepEqual(first,{at:t0,since:t0,s:{1:100}});
+ assert.equal(decayTraffic(first,[{system_id:1,ship_jumps:50}],t0+3600000).s[1],Math.round(100*Math.exp(-1/24)+50));
+ assert.equal(decayTraffic(first,[],t0+3600000*24*7).s[1],undefined,'a week later it has faded');
 });

@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+import {mockApp,openApp,tab} from './fixtures.js';
+test('exploration ranks quiet systems, plans a loop, tracks visits and shows wormhole shortcuts',async({page},testInfo)=>{
+ const ctx=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'exploration');const ex=page.locator('#exploration');
+ await expect(page.locator('#explore-system')).toContainText('Jita · Fiofka’s location');
+ await expect(page.locator('#explore-status')).toContainText('within 10 jumps of Jita');await expect(page.locator('#explore-status')).toContainText('2 recently visited systems');
+ const rows=ex.locator('.opps .explore');await expect(rows).toHaveCount(4,'high-sec only: Tama is low-sec');
+ await expect(rows.first()).toContainText('Niarja');await expect(rows.first()).toContainText('300 jumps a day');await expect(rows.first()).toContainText('Sansha / Blood Raiders');
+ const perimeter=rows.filter({hasText:'Perimeter'});await expect(perimeter).toContainText('Visited 2 h ago');
+ await expect(ex.locator('.loop li')).toHaveCount(3);await expect(ex).toContainText('Arrive safely');
+ await expect(ex).toContainText('Heron');await expect(ex).toContainText('Astrometrics I');
+ const scout=ex.locator('#explore-scout');await expect(scout).toContainText('Niarja');await expect(scout).toContainText('Thera');await expect(scout).toContainText('large ships · 14 h left');await expect(scout.locator('li')).toHaveCount(1,'the Turnur hole leads into wormhole space');
+ await page.screenshot({path:testInfo.outputPath('exploration.png'),fullPage:true});
+ await rows.first().getByRole('button',{name:'Mark scanned'}).click();await expect(rows.first()).not.toContainText('Niarja');await expect(rows.filter({hasText:'Niarja'})).toContainText('Visited under an hour ago');
+ await ex.locator('[data-band="low"]').check();await expect(rows.filter({hasText:'Tama'})).toHaveCount(1);
+ await ex.getByRole('button',{name:'Send to Fiofka’s autopilot'}).click();await expect(page.locator('#explore-sent')).toContainText('Autopilot set');
+ expect(ctx.state.waypoints.at(-1)).toBe(30000142,'the loop returns to the start');
+ await ex.locator('.loop').getByRole('button',{name:/Niarja/}).click();await expect(page.locator('#map-modal')).toBeVisible();await expect(page.locator('#map-modal-title')).toHaveText('Niarja');
+ expect(ctx.errors).toEqual([]);
+});

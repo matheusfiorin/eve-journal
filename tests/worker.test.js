@@ -174,3 +174,11 @@ test('autopilot waypoints replace the in-game route in order, only with the perm
  const offline=setup({gameOffline:true});const s3=await connect(offline);
  assert.equal((await offline.request('/api/waypoints',{method:'POST',headers:{Authorization:`Bearer ${s3.bearer}`},body:JSON.stringify({systems:[30000142]})})).status,502);
 });
+test('sync keeps a trail of visited systems without repeating the current one',async()=>{
+ const app=setup();await connect(app);
+ const trail=()=>JSON.parse(app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get().snapshot).operations.trail.value;
+ assert.deepEqual(trail().map(([id])=>id),[30000142]);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(trail().length,1,'still in Jita');
+ const limited=setup({scopes:SCOPES});await connect(limited);
+ assert.equal(JSON.parse(limited.env.DB.raw.prepare('SELECT snapshot FROM pilots').get().snapshot).operations.trail,undefined,'no location permission, no trail');
+});

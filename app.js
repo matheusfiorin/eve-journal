@@ -4,6 +4,7 @@ import {fees, book, hauls, stationTrades, manufacturing} from './market.js';
 import {skillLevels, isAlpha, slots, evaluate, rank, portfolio, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from './industry.js';
 import {SHIPS, SKILL, yieldRate, holdOf, canFly, oreValue, sites, ledger} from './mining.js';
 import {HULLS, MODES, suggestHull, campIntel, plan} from './hauling.js';
+import {BANDS, rankSystems, visitedMap, nextSkills as exploreSkills, explorerFor, shortcuts} from './exploration.js';
 import {secColor, inRange, JUMP_SHIPS, strengths, lightYears} from './map.js';
 import {secLight, regionSvg, routeSketch, StarMap} from './mapview.js';
 import {graph, paths, leg, facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from './route.js';
@@ -15,7 +16,7 @@ const DRAFT = 'eve-flight-draft:v1';
 const GROUPS = 'eve-skill-groups:v1';
 const ME = 'eve-me:v1';
 const CATS = 'eve-asset-categories:v1';
-const TABS = ['overview','empire','market','industry','mining','hauling','map','training','skills','wallet','clones','notes'];
+const TABS = ['overview','empire','market','industry','mining','exploration','hauling','map','training','skills','wallet','clones','notes'];
 const HUB_SYSTEMS = [[30000142,'Jita'],[30002187,'Amarr'],[30002659,'Dodixie'],[30002510,'Rens'],[30002053,'Hek']];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const OLD_TABS = {journal:'notes', goals:'notes', operations:'wallet'};
@@ -27,7 +28,7 @@ let config = {pilots:[]};
 let data = emptyData(), pilots = [], store, backend = null, universeStatus = null;
 let generation = 0, editingEntry = null, editingGoal = null, draftTimer;
 const names = new Map(), corporations = new Map(), typeGroup = new Map();
-let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, industryRun = 0, miningRun = 0, haulRun = 0, starsFrame = 0, warp = false;
+let me = null, wing = new Map(), prices = null, adjusted = new Map(), marketData = null, marketBook = null, costIndices = null, marketRun = 0, industryRun = 0, miningRun = 0, haulRun = 0, exploreRun = 0, starsFrame = 0, warp = false;
 const assetCats = new Map(), routes = new Map(), counters = new Map(), cargo = new Map();
 try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => assetCats.set(id, cat)); } catch { /* Categories are refetched. */ }
 
@@ -1081,6 +1082,89 @@ function routePop(target, event) {
   const x = Math.min(event.clientX + 16, innerWidth - 270), y = event.clientY + 16 + 200 > innerHeight ? event.clientY - 210 : event.clientY + 16;
   pop.style.left = `${x}px`; pop.style.top = `${y}px`;
 }
+// Exploration: the quietest systems within reach, a scanning loop through them, and how to get better at it.
+const EXPLORED_KEY = 'eve-explored:v1';
+let scoutData = null;
+function explored() { try { return JSON.parse(localStorage.getItem(EXPLORED_KEY)) || {}; } catch { return {}; } }
+function markExplored(id) { const m = explored(); m[id] = Date.now(); try { localStorage.setItem(EXPLORED_KEY, JSON.stringify(m)); } catch { /* Not remembered in this browser. */ } }
+async function eveScout() {
+  if (scoutData && Date.now() - scoutData.at < 300000) return scoutData.list;
+  const list = await json('https://api.eve-scout.com/v2/public/signatures', {headers:{Accept:'application/json'}});
+  scoutData = {at:Date.now(), list:Array.isArray(list) ? list : []};
+  return scoutData.list;
+}
+async function renderExploration(live = true) {
+  const status = $('#explore-status'), content = $('#explore-content');
+  if (!backend) { status.textContent = 'Exploration needs the backend.'; return; }
+  const run = ++exploreRun;
+  try { if (!marketData) content.innerHTML = '<div class="card shimmer">Reading traffic across New Eden…</div>'; await loadMarket(); }
+  catch (error) { status.textContent = `Map unavailable: ${error.message}`; content.innerHTML = ''; return; }
+  if (run !== exploreRun) return;
+  const g = mapGraph(), meta = marketData.meta?.data || {};
+  if (!g?.systems.size) { status.textContent = 'The map appears after the next pipeline run.'; return; }
+  systemOptions($('#explore-system'));
+  const from = Number($('#explore-system').value), maxJumps = Number($('#explore-jumps').value), tolerance = $('#explore-tolerance').value, loopSize = Number($('#explore-loop').value);
+  const bands = new Set([...document.querySelectorAll('[data-band]')].filter(b => b.checked).map(b => b.dataset.band));
+  if (!bands.size) { status.textContent = 'Pick at least one security band.'; content.innerHTML = ''; return; }
+  const p = mine(), o = wingmate(), x = summary(p);
+  const level = key => key === 'frigate' ? Math.max(...['amarrFrigate', 'caldariFrigate', 'gallenteFrigate', 'minmatarFrigate'].map(k => level(k))) : x.skills?.skills?.find(k => k.skill_id === meta.skills?.[key])?.active_skill_level || 0;
+  const trail = pl => (pl?.private ? pl.ops?.trail?.value : wing.get(pl?.id)?.trail) || [];
+  const visited = visitedMap(trail(p), trail(o), Object.entries(explored()).map(([id, at]) => [Number(id), at]));
+  const traffic = meta.traffic?.s || {}, kills = Object.fromEntries(Object.entries(meta.risk?.s || {}).map(([id, v]) => [id, v[0]]));
+  const hour = {jumps:Object.fromEntries(Object.entries(meta.activity || {}).map(([id, a]) => [id, a[2]])), kills:Object.fromEntries(Object.entries(meta.activity || {}).map(([id, a]) => [id, a[0]]))};
+  const list = rankSystems(g, from, {traffic, kills, hour, bands, maxJumps, visited, tolerance, limit:20});
+  const start = g.systems.get(from), hours = meta.traffic?.since ? (Date.now() - meta.traffic.since) / 3600000 : 0;
+  status.textContent = `${list.length} systems ranked within ${maxJumps} jumps of ${start?.name || 'you'} · traffic from ${hours >= 24 ? 'the last day' : hours >= 1 ? `${Math.round(hours)} hours of history` : 'the last hour (history is still building)'} · ${visited.size} recently visited ${visited.size === 1 ? 'system' : 'systems'} pushed down`;
+  // A loop through the best picks, back to the start, in the safest order.
+  const picks = list.filter(r => r.system.id !== from).slice(0, loopSize).map(r => r.system.id);
+  const loop = picks.length ? plan(g, [from, ...picks], {history:meta.risk?.s || {}, traffic:hour.jumps, value:0, hull:'t1'}, {mode:'safest', optimize:true, end:'return', lowsec:bands.has('low') || bands.has('null')}) : null;
+  const pilot = mine(), canSend = pilot?.id && backend.has(pilot.id);
+  const sendable = loop && !loop.unreachable ? (loop.route.length - 1 <= 40 ? loop.route.slice(1) : loop.stops.slice(1)) : [];
+  const maxDay = Math.max(1, ...list.map(r => r.traffic)), best = Math.max(1e-9, ...list.map(r => r.score));
+  const ago = at => { const h = (Date.now() - at) / 3600000; return h < 1 ? 'under an hour ago' : h < 48 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} days ago`; };
+  const row = (r, n) => `<li class="opp explore reveal" style="--i:${n}" ${r.jumps ? routeAttrs((leg(g, from, r.system.id)?.systems || []).map(s => s.id), `${start?.name} → ${r.system.name}`) : ''}>
+    <div class="opp-main"><b><button type="button" class="light-btn" data-system="${r.system.id}" aria-label="${esc(r.system.name)} on the map">${secLight(r.system.sec)}</button> <a href="${dotlanSystem(r.system.name)}" data-system="${r.system.id}">${esc(r.system.name)}</a></b>
+      <small>${esc(regionName(r.system.region))} · ${r.jumps ? `${r.jumps} ${r.jumps === 1 ? 'jump' : 'jumps'}` : 'you are here'}${r.deadEnd ? ' · <span class="tag">Dead end</span>' : ''}</small>
+      <small class="flags"><span class="tag dim">${esc(r.pirates)}</span>${r.visited ? `<span class="tag flag">Visited ${ago(r.visited)}</span>` : ''}</small></div>
+    <div class="opp-route"><span class="meter" title="Jumps over about a day"><i style="width:${Math.max(2, 100 * r.traffic / maxDay).toFixed(0)}%"></i></span><span>${Math.round(r.traffic).toLocaleString()} jumps a day · ${r.kills ? `<span class="${r.kills >= 3 ? 'neg' : 'warn-text'}">${Math.round(r.kills)} ship ${Math.round(r.kills) === 1 ? 'kill' : 'kills'}</span>` : 'no kills'} over ~24 h</span></div>
+    <div class="opp-profit"><b class="${r.score >= best * 0.5 ? 'pos' : ''}" title="Score relative to the best pick">${Math.max(1, Math.round(100 * r.score / best))}</b><small>quiet ${Math.round(r.quiet * 100)}% · safe ${Math.round(r.safe * 100)}%</small><button type="button" class="secondary small" data-mark="${r.system.id}">${r.visited ? 'Scanned again' : 'Mark scanned'}</button></div></li>`;
+  const explorer = explorerFor(level), next = exploreSkills(level);
+  const known = Boolean(x.skills?.skills);
+  const label = k => ({frigate:`${explorer.race} Frigate`, astrometrics:'Astrometrics', hacking:'Hacking', archaeology:'Archaeology', cpuManagement:'CPU Management', rangefinding:'Astrometric Rangefinding', survey:'Survey', pinpointing:'Astrometric Pinpointing', acquisition:'Astrometric Acquisition', cloaking:'Cloaking', covertOps:'Covert Ops'})[k];
+  content.innerHTML = `
+  <article class="card reveal" style="--i:1"><div class="card-head"><div><h3>Where to scan · ${esc(p?.name || 'you')}</h3><p class="hint">EVE doesn’t publish signature counts, so “least explored” means least travelled: fewer ships through a system means fewer explorers clearing its sites. Ranked by quiet (jumps over ~24 h), safety (ship kills, weighted by your risk setting), distance and dead ends, and systems you or ${esc(o?.name || 'your wingmate')} visited lately sink.</p></div></div>
+    ${list.length ? `<ol class="opps">${list.map(row).join('')}</ol>` : `<p class="hint">No ${[...bands].map(b => BANDS[b]).join(' or ').toLowerCase()} systems within ${maxJumps} jumps.</p>`}
+  </article>
+  <div class="grid">
+    <article class="card reveal" style="--i:2"><h3>Tonight’s loop</h3>
+      ${loop && !loop.unreachable ? `<p class="hint">The ${loop.stops.length - 2} best systems, in the order with the fewest jumps, back to ${esc(start.name)}.</p>
+        <ol class="plain loop" ${routeAttrs(loop.route, 'Exploration loop')}>${loop.stops.slice(1, -1).map(id => { const s = g.systems.get(id); return `<li><button type="button" class="link-btn" data-system="${id}">${secLight(s.sec)} ${esc(s.name)}</button><small>${esc(regionName(s.region))}</small></li>`; }).join('')}</ol>
+        <dl class="facts">${fact('Jumps', loop.jumps)}${fact('Time', `~${Math.round(loop.jumps * 1 + (loop.stops.length - 2) * 12)} min<small>1 min a jump, ~12 min scanning a system</small>`)}${fact('Arrive safely', `${Math.round(loop.survival * 1000) / 10}%`)}</dl>
+        <div class="actions">${mapButton(loop.route, 'Exploration loop')}<a class="button secondary" href="${dotlanRoute(loop.stops.map(id => g.systems.get(id).name))}" target="_blank" rel="noopener noreferrer">Dotlan ↗</a>${canSend ? `<button type="button" id="explore-send">Send to ${esc(pilot.name)}’s autopilot</button>` : ''}<span id="explore-sent" class="hint" role="status"></span></div>` : '<p class="hint">Nothing to loop through with these settings.</p>'}
+    </article>
+    <article class="card reveal" style="--i:3"><h3>Your explorer</h3>
+      <p><b>${esc(explorer.ship)}</b> <span class="hint">${known ? explorer.level ? `${esc(explorer.race)} Frigate ${ROMAN[explorer.level]}` : `train ${esc(explorer.race)} Frigate I to fly it` : 'connect to match your skills'}</span></p>
+      <ul class="plain"><li>Core Probe Launcher, Relic Analyzer and Data Analyzer<small>The three modules every relic and data site needs; add a Scan Rangefinding Array if CPU allows.</small></li><li>Read the can before hacking<small>Relic sites drop blueprints and salvage; data sites drop datacores, decryptors and skill books. Leave the last can if a site keeps failing.</small></li><li>Watch local<small>In high-sec, the risk is mostly a gank at gates or someone cargo-scanning your loot. Dock up the haul now and then.</small></li></ul>
+      ${next.length ? `<h3>Train next</h3><ul class="plain">${next.map(k => `<li><b>${esc(label(k.key))} ${ROMAN[k.level]}</b><small>${k.from ? `from ${ROMAN[k.from]} · ` : ''}${esc(k.why)}</small></li>`).join('')}</ul>` : ''}
+    </article>
+  </div>
+  <article class="card reveal" style="--i:4" id="explore-scout"><h3>Wormhole shortcuts · for later</h3><p class="hint">Live Thera and Turnur connections from EVE-Scout. Wormhole space and null-sec hold the richest relic and data sites once you fly a covert-ops ship.</p><div class="shimmer">Asking EVE-Scout…</div></article>`;
+  content.querySelectorAll('[data-mark]').forEach(b => b.onclick = () => { markExplored(Number(b.dataset.mark)); renderExploration(false); });
+  const send = content.querySelector('#explore-send');
+  if (send) send.onclick = async () => {
+    const out = content.querySelector('#explore-sent'); send.disabled = true; out.textContent = 'Sending…';
+    try { const r = await backend.waypoints(pilot.id, sendable); out.textContent = `Autopilot set: ${r.waypoints} ${r.waypoints === 1 ? 'waypoint' : 'waypoints'}.`; } catch (error) { out.textContent = error.message; }
+    send.disabled = false;
+  };
+  const scoutCard = content.querySelector('#explore-scout');
+  const drawScout = sigs => {
+    if (run !== exploreRun) return;
+    const near = shortcuts(g, from, sigs, {maxJumps:15});
+    scoutCard.querySelector('.shimmer')?.remove();
+    scoutCard.insertAdjacentHTML('beforeend', near.length ? `<ol class="plain">${near.map(c => `<li ${routeAttrs((leg(g, from, c.system.id)?.systems || []).map(s => s.id), `${start.name} → ${c.system.name}`)}><button type="button" class="link-btn" data-system="${c.system.id}">${secLight(c.system.sec)} ${esc(c.system.name)}</button> → <b>${esc(c.hub)}</b><small>${c.jumps} ${c.jumps === 1 ? 'jump' : 'jumps'}${c.lowsec ? ' · <span class="neg">through low-sec</span>' : ''} · ${esc(c.size || '?')} ships · ${c.hours ?? '?'} h left${c.signature ? ` · signature ${esc(c.signature)}` : ''}</small></li>`).join('')}</ol>` : '<p class="hint">No Thera or Turnur connection within 15 jumps right now.</p>');
+  };
+  if (live || scoutData) eveScout().then(drawScout, error => { scoutCard.querySelector('.shimmer')?.remove(); scoutCard.insertAdjacentHTML('beforeend', `<p class="hint">EVE-Scout unavailable: ${esc(error.message)}</p>`); });
+}
 function renderAll() {
   renderStatus(); renderMe(); renderOverview(); renderEmpire(); renderTraining(); renderSkills(); renderWallet(); renderClones(); pilotOptions();
   if (!$('#hero').hidden) renderHero();
@@ -1089,6 +1173,7 @@ function renderAll() {
   if (!$('#mining').hidden) renderMining();
   if (!$('#hauling').hidden) renderHauling(false);
   if (!$('#map').hidden) renderMap();
+  if (!$('#exploration').hidden) renderExploration(false);
   countUps();
 }
 
@@ -1132,6 +1217,7 @@ function selectTab(id) {
   if (id === 'mining') renderMining();
   if (id === 'hauling') renderHauling();
   if (id === 'map') renderMap();
+  if (id === 'exploration') renderExploration();
 }
 // The wing summary also carries the pilot's own figures, so drop it with their session.
 function forgetWing(id) {
@@ -1222,6 +1308,8 @@ $('#map-modal-close').onclick = () => $('#map-modal').close();
 $('#map-modal').addEventListener('close', () => modalMap?.stop());
 $('#map-modal').addEventListener('click', event => { if (event.target === $('#map-modal')) $('#map-modal').close(); });
 document.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => mapZoom(Number(b.dataset.zoom)));
+['explore-system', 'explore-jumps', 'explore-tolerance', 'explore-loop'].forEach(id => { $(`#${id}`).onchange = () => renderExploration(); });
+document.querySelectorAll('[data-band]').forEach(b => b.onchange = () => renderExploration());
 $('#map-region').onchange = event => { mapState.region = Number(event.target.value); mapState.selected = null; renderMap(); };
 $('#map-view').onchange = event => { mapState.view = event.target.value; renderMap(); };
 $('#map-overlay').onchange = event => { mapState.overlay = event.target.value; renderMap(); };

@@ -19,7 +19,7 @@
  <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
 </header>
 <nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="hauling">Hauling</button><button data-tab="map">Map</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+ <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="exploration">Exploration</button><button data-tab="hauling">Hauling</button><button data-tab="map">Map</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
 </nav>
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -66,6 +66,19 @@
   </div>
  </div>
  <div id="mining-content"></div>
+</section>
+<section id="exploration" class="tab" hidden>
+ <div class="card market-controls">
+  <div class="card-head"><div><h2>Exploration</h2><p id="explore-status" class="hint">Loading traffic…</p></div></div>
+  <div class="row">
+   <label>Start from<select id="explore-system"></select></label>
+   <label>Max jumps<select id="explore-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="15">15 jumps</option><option value="20">20 jumps</option></select></label>
+   <label>Risk<select id="explore-tolerance"><option value="careful">Careful: avoid any kills</option><option value="normal" selected>Normal</option><option value="bold">Bold: kills barely matter</option></select></label>
+   <label>Loop size<select id="explore-loop"><option value="4">4 systems</option><option value="6" selected>6 systems</option><option value="8">8 systems</option><option value="10">10 systems</option></select></label>
+  </div>
+  <div class="row bands"><span class="hint">Security</span><label class="check"><input type="checkbox" data-band="hi" checked> High-sec</label><label class="check"><input type="checkbox" data-band="low"> Low-sec</label><label class="check"><input type="checkbox" data-band="null"> Null-sec</label></div>
+ </div>
+ <div id="explore-content"></div>
 </section>
 <section id="hauling" class="tab" hidden>
  <form id="haul-form" class="card market-controls">
