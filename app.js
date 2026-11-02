@@ -996,7 +996,7 @@ async function renderMap() {
       const at = node ? node.getAttribute('transform').match(/[\d.]+/g).map(Number) : [full.width / 2, full.height / 2];
       let box = mapState.viewBox?.region === mapState.region ? mapState.viewBox.box : null;
       if (box && node && (at[0] < box[0] || at[0] > box[0] + box[2] || at[1] < box[1] || at[1] > box[1] + box[3])) box = null;
-      if (!box && full.width > px * 1.4) { const w = px * 1.1, h = w * ph / px; box = [at[0] - w / 2, at[1] - h / 2, w, h]; }
+      if (!box && (full.width > px * 1.05 || full.height > ph * 1.05)) { const w = px * 1.1, h = w * ph / px; box = [at[0] - w / 2, at[1] - h / 2, w, h]; }
       if (box) svg.setAttribute('viewBox', box.join(' '));
       svg.dataset.full = `${full.width} ${full.height}`;
     }
