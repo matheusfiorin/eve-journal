@@ -11,6 +11,6 @@ jobs:
       - run: |
           mkdir -p dump
           npm i --no-save playwright@1.49.1 >/dev/null && npx playwright install --with-deps chromium >/dev/null
-          node check.mjs || echo FAILED >> dump/live.txt
+          node check.mjs 2> dump/err.txt || (echo FAILED >> dump/live.txt; tail -c 2000 dump/err.txt >> dump/live.txt)
           git config user.name dump; git config user.email dump@example.com
           git add dump && git commit -qm "[skip ci] dump" && git push -q
