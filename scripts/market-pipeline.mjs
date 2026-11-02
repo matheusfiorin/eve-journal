@@ -115,6 +115,10 @@ export function decayTraffic(prev, jumps, now) {
   for (const id of Object.keys(s)) { s[id] = Math.round(s[id]); if (s[id] < 1) delete s[id]; }
   return {at:now, since:prev?.since || now, s};
 }
+// This run's kill and traffic sums. Missing ESI data (null) carries the previous sums forward unchanged.
+export function history(previous, kills, jumps, now) {
+  return {risk:kills ? decayRisk(previous?.risk, kills, now) : previous?.risk, traffic:jumps ? decayTraffic(previous?.traffic, jumps, now) : previous?.traffic};
+}
 // Weapon and hull types that mark a gate camp: smartbombs and interdiction ships.
 export function combatTypes(types, groups) {
   const ids = re => [...types.values()].filter(t => t.published && re.test(sdeName(groups.get(t.groupID)?.name) || '')).map(t => t._key);
@@ -270,17 +274,22 @@ async function main() {
   const scan = [...new Set([...wanted, ...(meta.ores || []).flatMap(o => [o.ore, o.comp].filter(Boolean)), ...(meta.ores || []).flatMap(o => o.m.map(([id]) => id)), ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
 
   // Last hour's kills and jumps per known-space system: danger and crowding for the Mining tab.
+  // Read last run's meta first: the kill and traffic sums build on it, so a failed read must not restart them.
+  let previous;
   try {
-    const [kills, jumps] = await Promise.all([esi('/universe/system_kills/'), esi('/universe/system_jumps/')]);
+    const r = await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    previous = (await r.json()).meta?.data || null;
+  } catch (error) { console.log(`::warning title=Previous meta::${error.message}; metadata upload skipped to keep the kill history.`); }
+  let kills = null, jumps = null;
+  try {
+    [kills, jumps] = (await Promise.all([esi('/universe/system_kills/'), esi('/universe/system_jumps/')])).map(r => r.body);
     const activity = {};
-    for (const k of kills.body) if (!map || map.systems[k.system_id]?.[1] > 0) activity[k.system_id] = [k.ship_kills + k.pod_kills, k.npc_kills, 0];
-    for (const j of jumps.body) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
+    for (const k of kills) if (!map || map.systems[k.system_id]?.[1] > 0) activity[k.system_id] = [k.ship_kills + k.pod_kills, k.npc_kills, 0];
+    for (const j of jumps) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
     meta.activity = activity;
-    let previous = null;
-    try { previous = (await (await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)})).json()).meta?.data; } catch { /* Start a new history. */ }
-    meta.risk = decayRisk(previous?.risk, kills.body, Date.now());
-    meta.traffic = decayTraffic(previous?.traffic, jumps.body, Date.now());
-  } catch (error) { console.log(`::warning title=Activity::${error.message}`); }
+  } catch (error) { kills = jumps = null; console.log(`::warning title=Activity::${error.message}; kill and traffic history carried forward.`); }
+  Object.assign(meta, history(previous, kills, jumps, Date.now()));
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
     advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research',
@@ -329,6 +338,8 @@ async function main() {
     if (!stored.ok) throw new Error(`Universe upload failed: HTTP ${stored.status} ${await stored.text()}`);
     report.push(`map ${Object.keys(map.systems).length} systems/${Object.keys(map.regions).length} regions/${map.stations.length} stations (${map.stations.filter(s => s[2] & 1).length} factories, ${map.stations.filter(s => s[2] & 2).length} labs), ${(JSON.stringify(map).length / 1e6).toFixed(2)} MB`);
   }
+  // shortcut: a read that keeps failing freezes meta at the last good run; shrink /api/market if that happens.
+  if (previous === undefined) throw new Error('Metadata not uploaded: the previous snapshot could not be read.');
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.

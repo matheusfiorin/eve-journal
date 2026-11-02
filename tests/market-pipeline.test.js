@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes,decayTraffic} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes,decayTraffic,history} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
@@ -110,4 +110,11 @@ test('traffic history decays over a day',()=>{
  assert.deepEqual(first,{at:t0,since:t0,s:{1:100}});
  assert.equal(decayTraffic(first,[{system_id:1,ship_jumps:50}],t0+3600000).s[1],Math.round(100*Math.exp(-1/24)+50));
  assert.equal(decayTraffic(first,[],t0+3600000*24*7).s[1],undefined,'a week later it has faded');
+});
+test('missing ESI activity carries the previous kill and traffic sums forward',()=>{
+ const t0=Date.UTC(2026,10,1),previous={risk:{at:t0,since:t0-86400000,s:{1:[4,4]}},traffic:{at:t0,since:t0-86400000,s:{1:100}}};
+ assert.deepEqual(history(previous,null,null,t0+3600000),{risk:previous.risk,traffic:previous.traffic});
+ const next=history(previous,[{system_id:1,ship_kills:1}],[{system_id:1,ship_jumps:10}],t0+3600000);
+ assert.equal(next.risk.since,t0-86400000);assert.equal(next.traffic.since,t0-86400000);
+ assert.deepEqual(history(null,[],[],t0),{risk:{at:t0,since:t0,s:{}},traffic:{at:t0,since:t0,s:{}}},'no meta yet starts fresh');
 });
