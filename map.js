@@ -6,17 +6,18 @@ import {secShown} from './route.js';
 const SEC = ['#8d3264', '#722020', '#bb1116', '#ce440f', '#dc6d07', '#f3fd82', '#71e554', '#60dba3', '#4ecef8', '#399aeb', '#2c75e1'];
 export const secColor = sec => SEC[Math.max(0, Math.min(10, Math.round(secShown(sec) * 10)))];
 
-// A region drawn the way CCP lays it out in 2D, scaled into a width×height box, plus stubs for gates leaving the region.
-export function regionLayout(g, region, {width = 1000, height = 700, pad = 60, maxScale = 26} = {}) {
+// A region drawn the way CCP lays it out in 2D. Their schematic sits on a 2.05-unit grid, and systems on one row are
+// at least 3 cells apart, so a 28 px cell fits 76 px boxes with no overlaps. Big regions get a big canvas to pan.
+export const GRID = 2.05;
+export function regionLayout(g, region, {cell = 28, pad = 70} = {}) {
   const inside = [...g.systems.values()].filter(s => s.region === region && s.p2);
-  if (!inside.length) return {nodes:[], edges:[], exits:[], width, height};
+  if (!inside.length) return {nodes:[], edges:[], exits:[], width:0, height:0};
   const xs = inside.map(s => s.p2[0]), ys = inside.map(s => s.p2[1]);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  // Small regions stay readable instead of stretching two systems across the whole map.
-  const k = Math.min(maxScale, (width - 2 * pad) / Math.max(x1 - x0, 1e-9), (height - 2 * pad) / Math.max(y1 - y0, 1e-9));
-  const ox = (width - (x1 - x0) * k) / 2, oy = (height - (y1 - y0) * k) / 2;
-  // Schematic y grows downward on screen, like north-up on the in-game 2D map.
-  const at = s => [ox + (s.p2[0] - x0) * k, height - (oy + (s.p2[1] - y0) * k)];
+  const k = cell / GRID;
+  // North is up: schematic y grows upward, screen y downward.
+  const at = s => [pad + Math.round((s.p2[0] - x0) / GRID) * cell, pad + Math.round((y1 - s.p2[1]) / GRID) * cell];
+  const width = 2 * pad + Math.round((x1 - x0) / GRID) * cell, height = 2 * pad + Math.round((y1 - y0) / GRID) * cell;
   const nodes = inside.map(s => ({system:s, xy:at(s)})), index = new Map(nodes.map(n => [n.system.id, n]));
   const edges = [], exits = [];
   for (const n of nodes) for (const to of n.system.links) {
@@ -26,8 +27,16 @@ export function regionLayout(g, region, {width = 1000, height = 700, pad = 60, m
     if (!other?.p2) continue;
     // Point the stub toward the neighbour's schematic position, a fixed length away.
     const dx = (other.p2[0] - n.system.p2[0]) * k, dy = -(other.p2[1] - n.system.p2[1]) * k, len = Math.hypot(dx, dy) || 1;
-    exits.push({from:n, to:other, xy:[n.xy[0] + dx / len * 46, n.xy[1] + dy / len * 46]});
+    exits.push({from:n, to:other, xy:[n.xy[0] + dx / len * 52, n.xy[1] + dy / len * 52]});
   }
+  // One label per outside system: several gates to it share a point at the average of their stubs.
+  const byTarget = new Map();
+  for (const e of exits) byTarget.set(e.to.id, [...(byTarget.get(e.to.id) || []), e]);
+  for (const list of byTarget.values()) if (list.length > 1) {
+    const xy = [0, 1].map(i => list.reduce((t, e) => t + e.xy[i], 0) / list.length);
+    list.forEach((e, i) => { e.xy = xy; e.label = i === 0; });
+  }
+  for (const e of exits) e.label ??= true;
   return {nodes, edges, exits, width, height};
 }
 

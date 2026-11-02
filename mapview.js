@@ -18,7 +18,7 @@ export function regionSvg(g, region, {strength = () => 0, value = () => '', rout
   const regionOf = id => g.regions[id] || '';
   return `<svg class="region-map" viewBox="0 0 ${layout.width} ${layout.height}" role="img" aria-label="${esc(regionOf(region))} region map" data-region="${region}">
     <g class="edges">${layout.edges.map(([a, b]) => line([a.xy, b.xy], a.system.region === b.system.region && g.systems.get(a.system.id).constellation !== g.systems.get(b.system.id).constellation ? 'edge cross' : 'edge')).join('')}</g>
-    <g class="exits">${layout.exits.map(e => `${line([e.from.xy, e.xy], 'edge exit')}<g class="exit" data-system="${e.to.id}" transform="translate(${e.xy[0].toFixed(1)},${e.xy[1].toFixed(1)})"><text>${esc(e.to.name)}</text><text class="exit-region" y="11">${esc(regionOf(e.to.region))}</text></g>`).join('')}</g>
+    <g class="exits">${layout.exits.map(e => `${line([e.from.xy, e.xy], 'edge exit')}${e.label ? `<g class="exit" data-system="${e.to.id}" transform="translate(${e.xy[0].toFixed(1)},${e.xy[1].toFixed(1)})"><text>${esc(e.to.name)}</text><text class="exit-region" y="11">${esc(regionOf(e.to.region))}</text></g>` : ''}`).join('')}</g>
     <g class="route">${segments.map(s => line(s, 'route-line')).join('')}</g>
     <g class="systems">${layout.nodes.map(({system:s, xy}) => {
       const k = strength(s.id);
@@ -107,7 +107,7 @@ export class StarMap {
     this.projected = [];
     for (const s of this.systems) {
       const p = P(s); if (!p || p[0] < -20 || p[1] < -20 || p[0] > w + 20 || p[1] > h + 20) continue;
-      const dim = this.focus && !this.focus.has(s.id), r = Math.max(1.2, Math.min(4, p[3] * 0.9));
+      const dim = this.focus && !this.focus.has(s.id), r = Math.max(0.9, Math.min(3.2, p[3] * 0.45));
       ctx.globalAlpha = dim ? 0.18 : 1;
       ctx.fillStyle = this.color(s.id);
       ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
@@ -124,7 +124,15 @@ export class StarMap {
       ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 3.5, 0, Math.PI * 2); ctx.fill();
       for (const [k, s] of [[0, this.routeSystems[0]], [rp.length - 1, this.routeSystems.at(-1)]]) this.label(s.name, rp[k], '#b9ee8d');
     }
-    for (const l of this.labels) { const s = this.g.systems.get(l.id) || l; const p = l.pos ? project(l.pos) : P(s); if (p) this.label(l.text, p, 'rgba(232,238,244,0.55)', 11); }
+    // Region names, biggest first, skipping any that would overlap one already drawn.
+    const taken = [];
+    ctx.font = '600 11px system-ui, sans-serif';
+    for (const l of this.labels) {
+      const p = project(l.pos); if (!p) continue;
+      const w = ctx.measureText(l.text).width, box = [p[0] + 8, p[1] - 20, w, 14];
+      if (taken.some(t => box[0] < t[0] + t[2] + 6 && t[0] < box[0] + box[2] + 6 && box[1] < t[1] + t[3] + 2 && t[1] < box[1] + box[3] + 2)) continue;
+      taken.push(box); this.label(l.text, p, 'rgba(232,238,244,0.6)', 11);
+    }
     const sel = this.selected && this.g.systems.get(this.selected), sp = sel && P(sel);
     if (sp) {
       ctx.strokeStyle = secColor(sel.sec); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sp[0], sp[1], 9 + Math.sin(time / 300) * (this.reduced ? 0 : 2), 0, Math.PI * 2); ctx.stroke();

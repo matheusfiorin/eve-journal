@@ -921,6 +921,15 @@ function systemPanel(id, {compact = false} = {}) {
     <h4>NPC stations (${stations.length})</h4>${stations.length ? `<ul class="plain stations">${stations.slice(0, compact ? 4 : 30).map(st => `<li>${esc(st.name || `Station ${st.id}`)}<small>${SERVICES.filter(([bit]) => st.flags & bit).map(([, label]) => `<span class="tag dim">${label}</span>`).join(' ') || 'No industry or market services'}</small></li>`).join('')}</ul>` : '<p class="hint">No NPC stations.</p>'}
   </div>`;
 }
+function mapZoom(f) {
+  const svg = $('#map-canvas-wrap svg.region-map');
+  if (svg) {
+    const b = svg.viewBox.baseVal, [fw, fh] = (svg.dataset.full || `${b.width} ${b.height}`).split(' ').map(Number);
+    const box = f ? [b.x + b.width * (1 - f) / 2, b.y + b.height * (1 - f) / 2, b.width * f, b.height * f] : [0, 0, fw, fh];
+    svg.setAttribute('viewBox', box.join(' ')); mapState.viewBox = {region:mapState.region, box};
+  } else if (starMap && f) starMap.target.distance = Math.max(8, starMap.target.distance * f);
+  else { delete $('#map-canvas-wrap').dataset.framed; renderMap(); }
+}
 const regionIdsWithLayout = g => Object.keys(g.regions).map(Number).filter(r => [...g.systems.values()].some(s => s.region === r && s.p2)).sort((a, b) => regionName(a).localeCompare(regionName(b)));
 function fillSystemList(g) {
   const list = $('#haul-systems');
@@ -980,14 +989,23 @@ async function renderMap() {
       svg.addEventListener('mouseout', e => { if (e.target.closest('.sys') && !e.relatedTarget?.closest?.('.sys')) tip.hidden = true; });
       svg.addEventListener('click', e => { const n = e.target.closest('[data-system]'); if (n) { e.stopPropagation(); select(Number(n.dataset.system)); } });
       svg.addEventListener('keydown', e => { const n = e.target.closest('.sys'); if (n && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(Number(n.dataset.system)); } });
-      zoomable(svg);
+      zoomable(svg, box => { mapState.viewBox = {region:mapState.region, box}; });
+      // Keep the reader's zoom across overlay changes; a big region opens at reading size around the selected system.
+      const full = svg.viewBox.baseVal, px = wrap.clientWidth || 900, ph = wrap.clientHeight || 600;
+      const node = svg.querySelector(`.sys[data-system="${mapState.selected}"]`);
+      const at = node ? node.getAttribute('transform').match(/[\d.]+/g).map(Number) : [full.width / 2, full.height / 2];
+      let box = mapState.viewBox?.region === mapState.region ? mapState.viewBox.box : null;
+      if (box && node && (at[0] < box[0] || at[0] > box[0] + box[2] || at[1] < box[1] || at[1] > box[1] + box[3])) box = null;
+      if (!box && full.width > px * 1.4) { const w = px * 1.1, h = w * ph / px; box = [at[0] - w / 2, at[1] - h / 2, w, h]; }
+      if (box) svg.setAttribute('viewBox', box.join(' '));
+      svg.dataset.full = `${full.width} ${full.height}`;
     }
   } else {
     if (!wrap.querySelector('canvas')) { wrap.innerHTML = '<canvas class="star-map" aria-label="3D star map"></canvas>'; starMap = new StarMap(wrap.querySelector('canvas'), {reduced, onHover:(sys, x, y) => showTip(sys, x, y), onSelect:sys => select(sys.id)}); }
     const inRegion = [...g.systems.values()].filter(x => x.region === mapState.region);
     const universeView = mapState.view === 'universe';
     const focus = universeView ? null : new Set([...inRegion.map(x => x.id), ...mapState.route, ...rangeIds]);
-    const labels = universeView ? Object.keys(g.regions).map(Number).map(r => { const sysIn = [...g.systems.values()].filter(x => x.region === r && x.pos); const c = sysIn.reduce((t, x) => t.map((v, i) => v + x.pos[i] / sysIn.length), [0, 0, 0]); return {text:regionName(r), pos:c}; }) : [];
+    const labels = universeView ? Object.keys(g.regions).map(Number).map(r => { const sysIn = [...g.systems.values()].filter(x => x.region === r && x.pos); const c = sysIn.reduce((t, x) => t.map((v, i) => v + x.pos[i] / sysIn.length), [0, 0, 0]); return {text:regionName(r), pos:c, n:sysIn.length}; }).sort((a, b) => b.n - a.n) : [];
     starMap.set({g, systems:[...g.systems.values()].filter(x => x.pos), color:mapColor(g, mapState.overlay), focus, route:mapState.route, selected:mapState.selected, labels});
     const target = mapState.route.length ? mapState.route.map(id => g.systems.get(id)) : universeView ? [...g.systems.values()] : inRegion;
     if (wrap.dataset.framed !== `${mapState.view}:${mapState.region}:${mapState.route.join()}`) { starMap.fly(target.filter(x => x?.pos), {snap:!wrap.dataset.framed}); wrap.dataset.framed = `${mapState.view}:${mapState.region}:${mapState.route.join()}`; }
@@ -998,7 +1016,7 @@ async function renderMap() {
   if (range.length) panel.innerHTML += `<h4>In jump range (${range.length})</h4><ul class="plain">${range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
 }
 // Wheel to zoom and drag to pan an SVG map by moving its viewBox.
-function zoomable(svg) {
+function zoomable(svg, onChange = () => {}) {
   const vb = () => svg.viewBox.baseVal;
   svg.addEventListener('wheel', e => {
     e.preventDefault();
@@ -1006,6 +1024,7 @@ function zoomable(svg) {
     const mx = box.x + (e.clientX - r.left) / r.width * box.width, my = box.y + (e.clientY - r.top) / r.height * box.height;
     const w = Math.max(150, Math.min(3000, box.width * f)), h = box.height * w / box.width;
     svg.setAttribute('viewBox', `${mx - (mx - box.x) * w / box.width} ${my - (my - box.y) * h / box.height} ${w} ${h}`);
+    onChange([...svg.getAttribute('viewBox').split(' ').map(Number)]);
   }, {passive:false});
   let drag = null;
   svg.addEventListener('pointerdown', e => { if (!e.target.closest('[data-system]')) drag = {x:e.clientX, y:e.clientY}; });
@@ -1014,6 +1033,7 @@ function zoomable(svg) {
     const box = vb(), r = svg.getBoundingClientRect();
     svg.setAttribute('viewBox', `${box.x - (e.clientX - drag.x) * box.width / r.width} ${box.y - (e.clientY - drag.y) * box.height / r.height} ${box.width} ${box.height}`);
     drag = {x:e.clientX, y:e.clientY};
+    onChange([...svg.getAttribute('viewBox').split(' ').map(Number)]);
   });
   svg.addEventListener('pointerup', () => { drag = null; });
   svg.addEventListener('pointerleave', () => { drag = null; });
@@ -1201,6 +1221,7 @@ document.addEventListener('mouseout', event => { const t = event.target.closest?
 $('#map-modal-close').onclick = () => $('#map-modal').close();
 $('#map-modal').addEventListener('close', () => modalMap?.stop());
 $('#map-modal').addEventListener('click', event => { if (event.target === $('#map-modal')) $('#map-modal').close(); });
+document.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => mapZoom(Number(b.dataset.zoom)));
 $('#map-region').onchange = event => { mapState.region = Number(event.target.value); mapState.selected = null; renderMap(); };
 $('#map-view').onchange = event => { mapState.view = event.target.value; renderMap(); };
 $('#map-overlay').onchange = event => { mapState.overlay = event.target.value; renderMap(); };

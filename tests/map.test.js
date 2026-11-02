@@ -12,14 +12,19 @@ const g=graph(universe);
 test('security colours follow the in-game palette',()=>{
  assert.equal(secColor(1),'#2c75e1');assert.equal(secColor(0.46),'#f3fd82');assert.equal(secColor(0.04),'#722020','0.04 shows as 0.1');assert.equal(secColor(-0.4),'#8d3264');
 });
-test('the region layout scales CCP’s schematic into the box and stubs gates that leave the region',()=>{
- const r=regionLayout(g,10,{width:200,height:100,pad:10,maxScale:1e9});
- const capped=regionLayout(g,10,{width:2000,height:2000,pad:10,maxScale:20});assert.ok(Math.abs(capped.nodes[1].xy[0]-capped.nodes[0].xy[0])<=80+1e-9,'4 grid units at most 20 px each');
+test('the region layout snaps CCP’s schematic to a grid with no overlapping boxes, and stubs gates that leave the region',()=>{
+ const r=regionLayout(g,10,{cell:28,pad:10});
  assert.equal(r.nodes.length,3);assert.equal(r.edges.length,2);assert.equal(r.exits.length,1);assert.equal(r.exits[0].to.name,'Tama');
- for(const n of r.nodes){assert.ok(n.xy[0]>=10-1e-9&&n.xy[0]<=190+1e-9);assert.ok(n.xy[1]>=10-1e-9&&n.xy[1]<=90+1e-9);}
- const jita=r.nodes.find(n=>n.system.name==='Jita').xy,niarja=r.nodes.find(n=>n.system.name==='Niarja').xy;assert.ok(niarja[1]<jita[1],'north is up');
- assert.ok(r.exits[0].xy[0]<jita[0],'Tama lies west of Jita');
+ const xy=name=>r.nodes.find(n=>n.system.name===name).xy;
+ assert.deepEqual(xy('Jita'),[10,10+Math.round(4/2.05)*28]);assert.deepEqual(xy('Niarja'),[10+Math.round(4/2.05)*28,10]);
+ assert.ok(xy('Niarja')[1]<xy('Jita')[1],'north is up');assert.equal(r.width,20+2*28);assert.equal(r.height,20+2*28);
+ assert.ok(r.exits[0].xy[0]<xy('Jita')[0],'Tama lies west of Jita');
  assert.deepEqual(regionLayout(g,99).nodes,[]);
+});
+test('systems three grid cells apart on one row never overlap',()=>{
+ const row={systems:{1:['A',1,7,[],0,null,[0,0]],2:['B',1,7,[],0,null,[6.15,0]],3:['C',1,7,[],0,null,[2.05,2.05]]},regions:{7:'R'}};
+ const r=regionLayout(graph(row),7);const [a,b,c]=r.nodes.map(n=>n.xy);
+ assert.ok(b[0]-a[0]>=80,'boxes on one row clear each other');assert.ok(Math.abs(c[1]-a[1])>=28,'next row clears the box height');
 });
 test('projection puts the centre mid-screen and shrinks with distance',()=>{
  const p=projector({center:[0,0,0],yaw:0,pitch:0,distance:100,width:800,height:600,fov:700});
@@ -37,4 +42,8 @@ test('overlay strengths use a square-root scale; sketches fit the route in a box
  assert.equal(strengths({})(1),0);
  const pts=sketch([g.systems.get(1),g.systems.get(2),g.systems.get(3)],{width:100,height:100,pad:10});
  assert.equal(pts.length,3);assert.ok(pts.every(p=>p.xy.every(v=>v>=10-1e-9&&v<=90+1e-9)));
+});
+test('two gates to the same outside system share one label',()=>{
+ const u={systems:{1:['A',1,7,[3],0,null,[0,0]],2:['B',1,7,[3],0,null,[6.15,0]],3:['X',1,8,[1,2],0,null,[3.075,4.1]]},regions:{7:'R',8:'S'}};
+ const r=regionLayout(graph(u),7);assert.equal(r.exits.length,2);assert.deepEqual(r.exits.map(e=>e.label),[true,false]);assert.deepEqual(r.exits[0].xy,r.exits[1].xy);
 });
