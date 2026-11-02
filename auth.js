@@ -24,13 +24,6 @@ function decode(value) {
 export async function challenge(verifier) {
   return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
 }
-export function validateState(pending, state, now = Date.now()) {
-  if (!pending || !state || pending.state !== state || !Number.isFinite(pending.created) ||
-      now - pending.created > 300000 || pending.created > now ||
-      !Number.isSafeInteger(pending.expectedId) || !pending.clientId || !pending.verifier) {
-    throw new Error('EVE login expired or did not match this browser. Connect again.');
-  }
-}
 // Trust only keys from the fixed CCP HTTPS endpoint, never a URL from the token.
 export async function validateToken(token, clientId, expectedId, keys, now = Date.now()) {
   const parts = token.split('.');
