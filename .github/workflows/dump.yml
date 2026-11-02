@@ -6,10 +6,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
       - run: |
           mkdir -p dump
-          curl -sSfL https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip -o sde.zip
-          python3 dump.py || echo FAILED >> dump/map.txt
-          rm sde.zip
+          npm i --no-save playwright@1.49.1 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          node check.mjs || echo FAILED >> dump/live.txt
           git config user.name dump; git config user.email dump@example.com
           git add dump && git commit -qm "[skip ci] dump" && git push -q
