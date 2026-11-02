@@ -1,0 +1,98 @@
+/* Base: the plotting-table ground, type, form controls, focus, keyframes and reduced motion. */
+*{box-sizing:border-box}
+html{font:400 var(--fs-md)/1.45 var(--ff-ui);-webkit-text-size-adjust:100%}
+body{
+  margin:0;color:var(--text);
+  background:
+    linear-gradient(var(--bg-grid) 1px,transparent 1px) 0 0/48px 48px,
+    linear-gradient(90deg,var(--bg-grid) 1px,transparent 1px) 0 0/48px 48px,
+    linear-gradient(var(--bg-grid-fine) 1px,transparent 1px) 0 0/12px 12px,
+    linear-gradient(90deg,var(--bg-grid-fine) 1px,transparent 1px) 0 0/12px 12px,
+    var(--bg);
+  background-attachment:fixed;
+}
+[hidden]{display:none!important}
+a{color:var(--accent-strong);text-underline-offset:2px}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:0}
+h2{font-size:var(--fs-lg);line-height:1.2}
+h3{font-size:var(--fs-md);color:var(--text);margin:20px 0 8px}
+h4{font-size:var(--fs-sm);color:var(--text-muted);font-weight:500;margin:10px 0 6px}
+.card>h3:first-child,.card-head h3{margin-top:0}
+.screen-title{font:400 var(--fs-2xl)/1.15 var(--ff-display);letter-spacing:.02em;margin:0}
+.num{font-family:var(--ff-num);font-variation-settings:'wdth' 87.5;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.pos,.num--pos{color:var(--ok)} .neg,.num--neg{color:var(--danger)} .warn-text{color:var(--warn)}
+.hint{font-size:var(--fs-xs);color:var(--text-muted);margin:6px 0}
+.error{color:var(--danger);font-size:var(--fs-sm)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+::selection{background:var(--accent-soft)}
+
+/* Buttons: plain <button> is primary; .secondary and .small stay as aliases of .btn--secondary and .btn--sm. */
+button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border-radius:var(--r-ctl);
+  font:600 var(--fs-sm)/1 var(--ff-ui);letter-spacing:.01em;cursor:pointer;border:1px solid transparent;
+  background:var(--accent);color:var(--text-on-accent);transition:background var(--dur-1),border-color var(--dur-1),color var(--dur-1),transform var(--dur-1)}
+button:hover{background:var(--accent-strong)}
+button:active{transform:translateY(1px)}
+button:disabled,button[aria-busy=true]{opacity:.55;cursor:progress}
+.secondary,button.secondary{background:var(--surface-2);color:var(--text);border-color:var(--line-strong)}
+.secondary:hover{background:var(--surface-3);border-color:var(--accent-line)}
+.small,button.small{min-height:28px;padding:0 10px;font-size:var(--fs-xs)}
+a.button{display:inline-flex;align-items:center;min-height:36px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--r-ctl);
+  background:var(--surface-2);color:var(--text);font:600 var(--fs-sm)/1 var(--ff-ui);text-decoration:none}
+a.button.small{min-height:28px;padding:0 10px;font-size:var(--fs-xs)}
+a.button:hover{border-color:var(--accent-line);background:var(--surface-3)}
+.icon-btn{width:36px;padding:0;background:none;color:var(--text-muted);border-color:transparent}
+.icon-btn:hover{background:var(--surface-2);color:var(--text)}
+.link-btn{min-height:0;background:none;border:0;padding:2px 0;color:var(--text);font-weight:500;text-align:left}
+.link-btn:hover{background:none;color:var(--accent-strong)}
+.ico{width:20px;height:20px;flex:none}
+
+/* Fields: sentence-case labels, sunk inputs, a violet focus ring. */
+label{display:block;flex:1;min-width:0;font:500 var(--fs-xs)/1.3 var(--ff-ui);color:var(--text-muted)}
+input,select,textarea{display:block;width:100%;margin:6px 0 12px;padding:8px 10px;background:var(--surface-sunk);border:1px solid var(--line-strong);
+  border-radius:var(--r-ctl);color:var(--text);font:400 var(--fs-md)/1.3 var(--ff-ui);transition:border-color var(--dur-1),box-shadow var(--dur-1)}
+input[type=number]{font-family:var(--ff-num);font-variation-settings:'wdth' 87.5;font-size:var(--fs-sm)}
+input:hover,select:hover,textarea:hover{border-color:var(--tick)}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg,transparent 50%,var(--text-muted) 50%),linear-gradient(135deg,var(--text-muted) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%;background-size:5px 5px;background-repeat:no-repeat}
+input::placeholder,textarea::placeholder{color:var(--text-faint)}
+textarea{resize:vertical}
+input[type=checkbox]{width:16px;height:16px;margin:0;padding:0;accent-color:var(--accent)}
+label.check{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--text);padding-bottom:10px;flex:none}
+kbd{display:inline-block;min-width:18px;padding:2px 5px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:3px;
+  font:500 10px/1.2 var(--ff-num);color:var(--text-muted);text-align:center;background:var(--surface-2)}
+progress{width:100%;height:6px;appearance:none;border:0;border-radius:3px;background:var(--surface-3)}
+progress::-webkit-progress-bar{background:var(--surface-3);border-radius:3px}
+progress::-webkit-progress-value{background:var(--accent);border-radius:3px;box-shadow:var(--glow-accent)}
+progress::-moz-progress-bar{background:var(--accent)}
+details{margin:12px 0}
+summary{cursor:pointer;color:var(--text-muted);font-size:var(--fs-sm)}
+summary:hover{color:var(--text)}
+
+/* Motion: one orchestrated boot; everything else answers an action. */
+@keyframes view-in{from{opacity:0;transform:translateY(4px)}}
+@keyframes drawer-in{from{transform:translateX(24px);opacity:0}}
+@keyframes sheet-in{from{transform:translateY(40px);opacity:0}}
+@keyframes pop-in{from{opacity:0;transform:scale(.97)}}
+@keyframes toast-in{from{opacity:0;transform:translateY(10px) scale(.98)}}
+@keyframes toast-out{to{opacity:0;transform:translateX(16px)}}
+@keyframes fade{from{opacity:0}}
+@keyframes fade-out{to{opacity:0;visibility:hidden}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes skel{to{background-position:-300% 0}}
+@keyframes row-in{from{opacity:0;transform:translateX(-6px)}}
+@keyframes lock{0%{opacity:0;transform:scale(.6)}60%{opacity:1;transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes ruler-draw{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+@keyframes rail-in{from{opacity:0;transform:translateX(-12px)}}
+@keyframes beacon{0%,100%{box-shadow:0 0 0 0 rgb(98 217 155 / .55)}50%{box-shadow:0 0 0 5px rgb(98 217 155 / 0)}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes warp-out{to{opacity:0;transform:scale(1.6);filter:blur(6px)}}
+@keyframes march{to{stroke-dashoffset:-18}}
+.view--enter{animation:view-in var(--dur-2) var(--ease-out)}
+.rows--reveal .rows__row{animation:row-in var(--dur-3) var(--ease-out) both;animation-delay:calc(min(var(--i,0),8) * 28ms)}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:1ms!important;animation-iteration-count:1!important;animation-delay:0ms!important;transition-duration:1ms!important;scroll-behavior:auto!important}
+  .skel-rows i,.skel{background:var(--surface-2)!important}
+}

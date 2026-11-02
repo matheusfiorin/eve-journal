@@ -1,154 +1,105 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0a1019"><meta name="referrer" content="no-referrer"><meta name="description" content="Fiofka and Decxus: a two-pilot EVE Online training, wallet and clone dashboard."><title>EVE Pilot Console</title><link rel="stylesheet" href="styles.css"></head>
-<body>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0C1424"><meta name="referrer" content="no-referrer">
+<meta name="description" content="Echelon, the EVE Pilot Console for Fiofka and Decxus: a two-pilot EVE Online wing console for training, earning, routes and the logbook.">
+<title>Echelon · Fiofka &amp; Decxus</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230C1424'/%3E%3Cpath d='M27 9.5A12.5 12.5 0 1 0 22 27' fill='none' stroke='%233A4D6E' stroke-width='1.6' stroke-linecap='round'/%3E%3Cpath d='M7 15 13 7l6 8-6-2.5Z' fill='%23F0BB5C'/%3E%3Cpath d='M14 23l6-8 6 8-6-2.5Z' fill='%235CD3DE'/%3E%3Ccircle cx='27' cy='9.5' r='1.8' fill='%23A99BFF'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Martian+Mono:wdth,wght@87.5,400;87.5,600&family=Michroma&display=swap">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/components.css">
+<link rel="stylesheet" href="styles/shell.css">
+<link rel="stylesheet" href="styles/bridge.css">
+<link rel="stylesheet" href="styles/wing.css">
+<link rel="stylesheet" href="styles/pilot.css">
+<link rel="stylesheet" href="styles/earn.css">
+<link rel="stylesheet" href="styles/navigate.css">
+<link rel="stylesheet" href="styles/ledger.css">
+</head>
+<body class="shell">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <defs>
+  <symbol id="i-bridge" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="5.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3"/></symbol>
+  <symbol id="i-wing" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M2.5 10 7 3.5l4.5 6.5L7 8.2Z"/><path d="M8.5 16.5 13 10l4.5 6.5L13 14.7Z"/></symbol>
+  <symbol id="i-pilot" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="2.5" width="10" height="15" rx="5"/><path d="M7.5 8.5h5M10 17.5v-3"/></symbol>
+  <symbol id="i-earn" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M10 2.5 16 8l-6 5.5L4 8Z"/><path d="m4 12 6 5.5 6-5.5"/></symbol>
+  <symbol id="i-navigate" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="4.5" cy="15" r="2"/><circle cx="10" cy="6" r="2"/><circle cx="15.5" cy="13" r="2"/><path d="m5.6 13.3 3.3-5.6M11.3 7.5l3 3.9"/></symbol>
+  <symbol id="i-ledger" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3.5" y="2.5" width="13" height="15" rx="1.5"/><path d="M7 2.5v15M9.5 7h4.5M9.5 10h4.5M9.5 13h3"/></symbol>
+  <symbol id="i-logbook" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5 2.5h10v15l-5-3.5-5 3.5Z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 20 20" fill="currentColor"><circle cx="4.5" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="15.5" cy="10" r="1.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="5"/><path d="m12.5 12.5 4.5 4.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16.5 3v3.5H13"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h11l-3-3M16 13H5l3 3"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5v13M12 6l-4 4 4 4M8 10h8.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m5 5 10 10M15 5 5 15"/></symbol>
+  <symbol id="i-emblem" viewBox="0 0 32 32"><path d="M27 9.5A12.5 12.5 0 1 0 22 27" fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-linecap="round"/><path d="M7 15 13 7l6 8-6-2.5Z" fill="var(--fiofka)"/><path d="M14 23l6-8 6 8-6-2.5Z" fill="var(--decxus)"/><circle cx="27" cy="9.5" r="1.4" fill="var(--accent)"/></symbol>
+ </defs>
+</svg>
 <div id="hero" class="hero" role="dialog" aria-modal="true" aria-labelledby="hero-title" hidden>
  <canvas id="stars" aria-hidden="true"></canvas>
  <div class="hero-content">
-  <p class="label">EVE Pilot Console</p>
+  <p class="hero-brand"><svg class="emblem" width="36" height="36" aria-hidden="true"><use href="#i-emblem"/></svg><span>Echelon</span></p>
   <h1 id="hero-title">Who’s flying today?</h1>
-  <p class="hero-sub">Pick your pilot. Everything else follows them, measured against your wingmate.</p>
+  <p class="hero-sub">Pick your pilot. Your wingmate’s plans stay right alongside yours.</p>
   <div id="hero-pilots" class="hero-pilots"></div>
-  <p class="hint">This browser remembers your choice. Switch any time from the header.</p>
+  <p class="hint">This browser remembers your pick. Switch any time from the top bar.</p>
  </div>
 </div>
-<header>
- <a class="brand" href="./"><span class="emblem" aria-hidden="true">✦</span>Pilot Console</a>
- <div id="server-status" class="server-status" role="status">Connecting to Tranquility…</div>
- <button id="switch-pilot" class="me-button secondary" aria-label="Switch pilot">Choose pilot</button>
- <button id="refresh" class="secondary" aria-label="Refresh">↻<span class="wide-only"> Refresh</span></button>
-</header>
-<nav aria-label="Console sections">
- <button data-tab="overview" aria-current="page">Overview</button><button data-tab="empire">Empire</button><button data-tab="market">Market</button><button data-tab="industry">Industry</button><button data-tab="mining">Mining</button><button data-tab="exploration">Exploration</button><button data-tab="hauling">Hauling</button><button data-tab="map">Map</button><button data-tab="training">Training</button><button data-tab="skills">Skills</button><button data-tab="wallet">Wallet</button><button data-tab="clones">Clones</button><button data-tab="notes">Notes</button>
+
+<nav class="rail" id="rail" aria-label="Console">
+ <a class="rail__brand" href="./"><svg class="emblem" width="28" height="28" aria-hidden="true"><use href="#i-emblem"/></svg><span class="rail__word">Echelon</span><span class="rail__sub">wing console</span></a>
+ <ul id="rail-list" class="rail__list" role="list"></ul>
+ <button id="rail-toggle" class="rail__collapse" aria-expanded="true" aria-controls="rail" aria-label="Collapse navigation" aria-keyshortcuts="["><svg class="ico" aria-hidden="true"><use href="#i-collapse"/></svg></button>
 </nav>
-<main>
-<div id="notice" role="status" aria-live="polite" hidden></div>
-<p id="sync-status" class="hint" role="status">Loading pilots…</p>
 
-<section id="overview" class="tab"><div id="pilots"></div></section>
-<section id="empire" class="tab" hidden><div id="empire-content"></div></section>
-<section id="market" class="tab" hidden>
- <div class="card market-controls">
-  <div class="card-head"><div><h2>Market analysis</h2><p id="market-status" class="hint">Loading market data…</p></div></div>
-  <div class="row">
-   <label>Start from<select id="market-origin"></select></label>
-   <label>Max jumps to buy<select id="market-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="20">20 jumps</option><option value="99">Any distance</option></select></label>
-   <label>Cargo (m³)<input id="market-cargo" type="number" min="1" step="100" value="5000"></label>
-   <label>Budget (ISK)<input id="market-budget" type="number" min="0" step="1000000" placeholder="Your wallet"></label>
-  </div>
-  <p id="market-fees" class="hint"></p>
- </div>
- <div id="market-content"></div>
-</section>
-<section id="industry" class="tab" hidden>
- <div class="card market-controls">
-  <div class="card-head"><div><h2>Start industry</h2><p id="industry-status" class="hint">Loading blueprint prices…</p></div></div>
-  <div class="row">
-   <label>Start from<select id="industry-system"></select></label>
-   <label>Budget (ISK)<input id="industry-budget" type="number" min="0" step="1000000" placeholder="Your wallet"></label>
-  </div>
-  <div class="row">
-   <label>Category<select id="industry-category"><option value="">All categories</option></select></label>
-   <label>Sort by<select id="industry-sort"><option value="">Best overall</option><option value="profit">Profit per day</option><option value="payback">Fastest payback</option><option value="margin">Highest margin</option><option value="cheap">Cheapest blueprint</option><option value="near">Closest seller</option></select></label>
-  </div>
-  <label class="check"><input id="industry-over" type="checkbox"> Show picks over budget</label>
- </div>
- <div id="industry-content"></div>
-</section>
-<section id="mining" class="tab" hidden>
- <div class="card market-controls">
-  <div class="card-head"><div><h2>Mining</h2><p id="mining-status" class="hint">Loading ore prices…</p></div></div>
-  <div class="row">
-   <label>Start from<select id="mining-system"></select></label>
-   <label>Ship<select id="mining-ship"><option value="">Current or best I can fly</option><option value="32880">Venture</option><option value="17480">Procurer</option><option value="17478">Retriever</option><option value="17476">Covetor</option></select></label>
-   <label>Max jumps<select id="mining-jumps"><option value="3">3 jumps</option><option value="6" selected>6 jumps</option><option value="10">10 jumps</option></select></label>
-   <label class="check"><input id="mining-lowsec" type="checkbox"> Include low-sec</label>
-  </div>
- </div>
- <div id="mining-content"></div>
-</section>
-<section id="exploration" class="tab" hidden>
- <div class="card market-controls">
-  <div class="card-head"><div><h2>Exploration</h2><p id="explore-status" class="hint">Loading traffic…</p></div></div>
-  <div class="row">
-   <label>Start from<select id="explore-system"></select></label>
-   <label>Max jumps<select id="explore-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="15">15 jumps</option><option value="20">20 jumps</option></select></label>
-   <label>Risk<select id="explore-tolerance"><option value="careful">Careful: avoid any kills</option><option value="normal" selected>Normal</option><option value="bold">Bold: kills barely matter</option></select></label>
-   <label>Loop size<select id="explore-loop"><option value="4">4 systems</option><option value="6" selected>6 systems</option><option value="8">8 systems</option><option value="10">10 systems</option></select></label>
-  </div>
-  <div class="row bands"><span class="hint">Security</span><label class="check"><input type="checkbox" data-band="hi" checked> High-sec</label><label class="check"><input type="checkbox" data-band="low"> Low-sec</label><label class="check"><input type="checkbox" data-band="null"> Null-sec</label></div>
- </div>
- <div id="explore-content"></div>
-</section>
-<section id="hauling" class="tab" hidden>
- <form id="haul-form" class="card market-controls">
-  <div class="card-head"><div><h2>Hauling</h2><p id="haul-status" class="hint">Plan a route to see its risk.</p></div></div>
-  <div id="haul-stops" class="stops"></div>
-  <div class="actions"><button type="button" id="haul-add" class="secondary small">+ Add stop</button></div>
-  <datalist id="haul-systems"></datalist>
-  <div class="row">
-   <label>Cargo value (ISK)<input id="haul-value" type="number" min="0" step="1000000" value="100000000"></label>
-   <label>Cargo volume (m³)<input id="haul-volume" type="number" min="0" step="100" value="5000"></label>
-   <label>Ship<select id="haul-hull"><option value="">Suggest from cargo</option><option value="br">Blockade runner</option><option value="t1">T1 industrial</option><option value="dst">Deep space transport</option><option value="freighter">Freighter</option></select></label>
-  </div>
-  <div class="row">
-   <label>Avoid systems<input id="haul-avoid" placeholder="Uedama, Sivala"></label>
-   <label>Stop order<select id="haul-end"><option value="fixed">Keep the last stop last</option><option value="free">Any order</option><option value="return">Return to start</option></select></label>
-  </div>
-  <div class="row">
-   <label class="check"><input id="haul-optimize" type="checkbox"> Find the best stop order</label>
-   <label class="check"><input id="haul-lowsec" type="checkbox"> Allow low-sec</label>
-   <button id="haul-plan">Plan route</button>
-  </div>
- </form>
- <div id="haul-content"></div>
-</section>
-<section id="map" class="tab" hidden>
- <div class="card market-controls">
-  <div class="card-head"><div><h2>Map</h2><p id="map-status" class="hint">Loading the map…</p></div></div>
-  <div class="row">
-   <form id="map-find" class="find"><label>Find system<input id="map-search" list="haul-systems" placeholder="Jita, Amarr, Tama…" autocomplete="off"></label><button class="secondary">Go</button></form>
-   <label>Region<select id="map-region"></select></label>
-  </div>
-  <div class="row">
-   <label>View<select id="map-view"><option value="region">Region map</option><option value="region3d">Region in 3D</option><option value="universe">New Eden in 3D</option></select></label>
-   <label>Overlay<select id="map-overlay"><option value="security">Security</option><option value="shipKills">Ship kills (last hour)</option><option value="podKills">Pod kills (last hour)</option><option value="npcKills">NPC kills (last hour)</option><option value="jumps">Jumps (last hour)</option><option value="kills24">Ship kills (~24 h)</option><option value="sov">Sovereignty</option><option value="fw">Faction warfare</option><option value="incursion">Incursions</option><option value="industry">Manufacturing index</option><option value="belts">Asteroid belts</option><option value="stations">NPC stations</option></select></label>
-   <label>Jump range<select id="map-jump"><option value="">Off</option><option value="blops">Black Ops · 8 ly</option><option value="jf">Jump freighter · 10 ly</option><option value="capital">Carrier, Dread, FAX · 7 ly</option><option value="super">Super, Titan · 6 ly</option></select></label>
-  </div>
-  <div id="map-route" class="map-route" hidden></div>
- </div>
- <div class="map-layout">
-  <div id="map-stage" class="map-stage card"><div id="map-canvas-wrap" class="map-canvas-wrap"></div><div class="map-zoom"><button type="button" class="secondary small" data-zoom="0.75" aria-label="Zoom in">+</button><button type="button" class="secondary small" data-zoom="1.33" aria-label="Zoom out">−</button><button type="button" class="secondary small" data-zoom="0" aria-label="Fit the whole region">Fit</button></div><div id="map-tip" class="map-tip" hidden></div><div id="map-legend" class="map-legend"></div></div>
-  <aside id="map-panel" class="card map-panel"></aside>
- </div>
-</section>
-<section id="training" class="tab" hidden><div id="training-content" class="grid"></div></section>
-<section id="skills" class="tab" hidden><div id="skills-content" class="grid"></div></section>
-<section id="wallet" class="tab" hidden><div id="wallet-content" class="grid"></div></section>
-<section id="clones" class="tab" hidden><div id="clones-content" class="grid"></div></section>
+<div class="shell__main">
+ <header class="strip">
+  <a class="strip__brand" href="./" aria-label="Echelon"><svg class="emblem" width="26" height="26" aria-hidden="true"><use href="#i-emblem"/></svg></a>
+  <div id="server-status" class="strip__cell" role="status">Connecting to Tranquility…</div>
+  <div id="sync-status" class="strip__cell strip__sync" role="status">Loading pilots…</div>
+  <div id="strip-wallet" class="strip__cell strip__wallet" hidden></div>
+  <button id="palette-open" class="strip__search" aria-keyshortcuts="Control+K Meta+K" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><span>Search or jump</span><kbd>Ctrl K</kbd></button>
+  <button id="refresh" class="icon-btn" aria-label="Refresh" aria-keyshortcuts="R"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+  <button id="switch-pilot" class="pilot-switch" aria-label="Choose pilot">Choose pilot</button>
+ </header>
+ <div id="viewbar" class="viewbar" hidden></div>
+ <main id="views">
+  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <section id="bridge" class="view" aria-label="Bridge"></section>
+  <section id="strengths" class="view" aria-label="Crew map" hidden></section>
+  <section id="goals" class="view" aria-label="Goals" hidden></section>
+  <section id="training" class="view" aria-label="Training" hidden></section>
+  <section id="skills" class="view" aria-label="Skills" hidden></section>
+  <section id="clones" class="view" aria-label="Clones" hidden></section>
+  <section id="industry" class="view" aria-label="Build" hidden></section>
+  <section id="mining" class="view" aria-label="Mine" hidden></section>
+  <section id="exploration" class="view" aria-label="Explore" hidden></section>
+  <section id="market" class="view" aria-label="Trade" hidden></section>
+  <section id="map" class="view" aria-label="Star map" hidden></section>
+  <section id="hauling" class="view" aria-label="Haul plan" hidden></section>
+  <section id="ledger" class="view" aria-label="Ledger" hidden></section>
+  <section id="logbook" class="view" aria-label="Logbook" hidden></section>
+  <footer class="foot"><span>Echelon · the EVE Pilot Console for Fiofka and Decxus</span><span>Data from EVE ESI · not affiliated with CCP Games</span></footer>
+ </main>
+</div>
+<nav id="tabbar" class="tabbar" aria-label="Console"><button class="tabbar__item" id="tabbar-more" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg><span>More</span></button></nav>
 
-<section id="notes" class="tab" hidden>
- <p class="hint">Goals and journal entries are stored only in this browser. Export a backup to keep them.</p>
- <div class="grid">
- <div id="goals" class="card">
-  <h2>Goals</h2>
-  <form id="goal-form"><label>Next milestone<input name="title" required maxlength="160" placeholder="Fly our first exploration fleet"></label><div class="row"><label>Pilot<select name="pilot" class="pilot-select"></select></label><label>Focus<select name="category"><option>Exploration</option><option>Training</option><option>Ships</option><option>Industry</option><option>Combat</option><option>Other</option></select></label><label>Target date<input name="due" type="date"></label></div><div class="actions"><button id="goal-submit">Add goal</button><button type="button" id="cancel-goal-edit" class="secondary" hidden>Cancel edit</button></div></form>
-  <div class="row toolbar"><label>Show<select id="goal-filter"><option value="open">In progress</option><option value="all">All goals</option><option value="done">Completed</option></select></label><span id="goal-count" class="hint"></span></div>
-  <div id="goal-list"></div>
- </div>
- <div id="journal" class="card">
-  <div class="card-head"><h2>Journal</h2><button id="export" class="secondary small">Export backup</button></div>
-  <form id="journal-form"><label>Entry title<input name="title" maxlength="160" required placeholder="Our first trip into low-sec"></label><div class="row"><label>Pilot<select name="pilot" class="pilot-select"></select></label><label>Date<input name="date" type="date" required></label><label>Focus<select name="category"><option>Adventure</option><option>Milestone</option><option>Lesson learned</option><option>Fleet</option><option>Industry</option></select></label></div><label>Private notes<textarea name="body" required maxlength="20000" rows="4" placeholder="What happened? What did you learn?"></textarea></label><div class="actions"><button id="entry-submit">Save entry locally</button><button id="cancel-entry-edit" type="button" class="secondary" hidden>Cancel edit</button><button id="discard-draft" type="button" class="secondary">Discard draft</button></div><p id="draft-status" class="hint" role="status">Private draft · saved in this tab</p></form>
-  <div class="row toolbar"><label>Search<input id="journal-search" type="search" placeholder="Titles and notes"></label><label>Pilot<select id="journal-pilot"><option value="">All pilots</option></select></label><label>Focus<select id="journal-category"><option value="">All entries</option><option>Adventure</option><option>Milestone</option><option>Lesson learned</option><option>Fleet</option><option>Industry</option></select></label></div>
-  <p id="entry-count" class="hint"></p><div id="entries"></div>
-  <div class="backup"><p id="backup-status" class="hint">Restore or merge a backup file.</p><label class="import">Backup file<input id="import" type="file" accept="application/json,.json"></label><button id="recover" class="secondary" hidden>Download raw recovery file</button></div>
- </div>
- </div>
-</section>
-<footer><span>EVE Pilot Console · independent capsuleer project</span><span>Data from EVE ESI · not affiliated with CCP Games</span></footer>
-</main>
+<dialog id="palette" class="palette" aria-label="Search or jump">
+ <div class="palette__field"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><input id="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" aria-activedescendant="" placeholder="Jump to a screen, system or action…" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>
+ <ul id="palette-list" class="palette__list" role="listbox" aria-label="Results"></ul>
+ <p class="palette__foot"><kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>
+</dialog>
+<dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+ <header class="drawer__head"><h2 id="drawer-title"></h2><button class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+ <div id="drawer-body" class="drawer__body"></div>
+ <footer id="drawer-foot" class="drawer__foot" hidden></footer>
+</dialog>
 <dialog id="map-modal" class="map-modal" aria-labelledby="map-modal-title"><div class="modal-head"><h3 id="map-modal-title">Map</h3><button type="button" id="map-modal-close" class="secondary small">Close</button></div><div id="map-modal-body"></div></dialog>
 <div id="route-pop" class="route-pop" role="tooltip" hidden></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<datalist id="systems"></datalist>
 <noscript><p class="empty">Enable JavaScript to use the console.</p></noscript>
 <script type="module" src="app.js"></script>
 </body></html>

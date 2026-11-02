@@ -1,0 +1,8 @@
+/* Ledger (wallet history) and Logbook (journal entries and backups). */
+.big{font-size:26px;font-weight:600;margin:0;text-align:left}
+.entry{border-top:1px solid var(--line);padding:12px 0}
+.entry h3{font-size:var(--fs-lg);margin:4px 0}
+.entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-muted);margin:8px 0 0;max-width:72ch;line-height:1.55}
+.entry small{color:var(--text-muted);font-size:var(--fs-xs)}
+.entry .actions{margin:0;flex-shrink:0}
+.backup{border-top:1px solid var(--line);margin-top:16px;padding-top:8px}

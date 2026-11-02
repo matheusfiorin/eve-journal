@@ -8,7 +8,7 @@ export const secLight = sec => `<i class="light" style="--c:${secColor(sec)}" ar
 // A Dotlan-style region map: one box per system with a security light, gates between them, stubs to other regions,
 // an overlay halo, jump-range rings and the current route drawn on top.
 export function regionSvg(g, region, {strength = () => 0, value = () => '', route = [], selected = null, range = new Set(), overlayColor = '#f2877a'} = {}) {
-  const layout = regionLayout(g, region, {width:1000, height:680});
+  const layout = regionLayout(g, region);
   if (!layout.nodes.length) return '<p class="hint">No map layout for this region.</p>';
   const at = new Map(layout.nodes.map(n => [n.system.id, n.xy]));
   const onRoute = new Set(route);
@@ -117,12 +117,12 @@ export class StarMap {
     // The route: a glowing line with a pulse running from start to end.
     const rp = this.routeSystems.map(P);
     if (rp.length > 1 && rp.every(Boolean)) {
-      ctx.save(); ctx.strokeStyle = '#b9ee8d'; ctx.lineWidth = 2.4; ctx.shadowColor = '#b9ee8d'; ctx.shadowBlur = 10;
+      ctx.save(); ctx.strokeStyle = '#A99BFF'; ctx.lineWidth = 2.4; ctx.shadowColor = '#A99BFF'; ctx.shadowBlur = 10;
       ctx.beginPath(); rp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); ctx.restore();
       this.pulse = this.reduced ? 0 : (this.pulse + 0.012) % 1;
       const at = this.pulse * (rp.length - 1), i = Math.floor(at), f = at - i, a = rp[i], b = rp[Math.min(i + 1, rp.length - 1)];
       ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 3.5, 0, Math.PI * 2); ctx.fill();
-      for (const [k, s] of [[0, this.routeSystems[0]], [rp.length - 1, this.routeSystems.at(-1)]]) this.label(s.name, rp[k], '#b9ee8d');
+      for (const [k, s] of [[0, this.routeSystems[0]], [rp.length - 1, this.routeSystems.at(-1)]]) this.label(s.name, rp[k], '#C3B9FF');
     }
     // Region names, biggest first, skipping any that would overlap one already drawn.
     const taken = [];

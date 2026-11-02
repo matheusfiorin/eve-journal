@@ -1,0 +1,22 @@
+/* Pilot: training queue, skill sheet, clones and attributes. */
+.active{background:var(--surface-sunk);border:1px solid var(--line);border-radius:var(--r-ctl);padding:14px;margin-top:14px}
+.label{font-size:var(--fs-xs);color:var(--accent-strong)}
+.active h3{font-size:var(--fs-lg);margin:4px 0 10px}
+.timeline{list-style:none;padding:0;margin:8px 0 0}
+.timeline li{display:grid;grid-template-columns:minmax(0,1.4fr) 1fr auto;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
+.timeline small{color:var(--text-muted);text-align:right;white-space:nowrap}
+.bar{position:relative;height:6px;background:var(--surface-3);border-radius:3px}.bar i{position:absolute;top:0;bottom:0;background:var(--accent);border-radius:3px;opacity:.8}
+.skill-group{border-top:1px solid var(--line);margin:0;padding:10px 0}
+.skill-group summary{display:flex;justify-content:space-between;gap:12px;color:var(--text)}.skill-group summary .hint{margin:0}
+.skill-group summary b::before{content:"▸ ";color:var(--text-faint)}.skill-group[open] summary b::before{content:"▾ "}
+.skill{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:6px 0 6px 12px;font-size:var(--fs-sm)}
+.skill small{grid-column:1/-1;color:var(--text-muted);font-size:11px}
+.pips{display:flex;gap:3px;align-items:center}.pips i{width:10px;height:10px;border:1px solid var(--line-strong);border-radius:var(--r-chip)}
+.pips i.on{background:var(--accent);border-color:var(--accent)}.pips i.idle{background:var(--accent-soft);border-color:var(--accent-line)}
+.attributes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:0}
+.attributes div{background:var(--surface-sunk);border:1px solid var(--line);border-radius:var(--r-ctl);padding:8px;text-align:center}
+.attributes dd{font-family:var(--ff-num)}
+@media (max-width:720px){
+  .attributes{grid-template-columns:repeat(3,1fr)}
+  .timeline li{grid-template-columns:minmax(0,1fr) auto}.timeline .bar{grid-column:1/-1;order:3}
+}

@@ -1,0 +1,17 @@
+/* Earn: Build, Mine, Explore and Trade. */
+.market-controls h2{font-size:var(--fs-lg)}
+.steps{margin:12px 0 0;padding-left:20px;font-size:var(--fs-sm)}.steps li{margin:6px 0}
+.bpos .opp{grid-template-columns:minmax(0,1fr) minmax(0,1.8fr) auto}
+.traps li b{font-size:var(--fs-sm)}
+.facilities{list-style:none;padding:0;margin:0}.facilities li{padding:8px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
+.facilities small{display:block;color:var(--text-muted);font-size:11px;margin-top:2px}
+.facilities details{margin:4px 0 0}.facilities summary{font-size:11px}
+.plan{background:var(--surface-sunk);border:1px solid var(--line);border-left:2px solid var(--pilot);border-radius:var(--r-ctl);padding:12px 14px;min-width:0}
+.plan h4{margin:0 0 6px;color:var(--pilot)}
+.plan .facts{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.plan .facts div{background:var(--surface-sunk)}
+.meter{display:block;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden;margin-bottom:4px;max-width:220px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),var(--warn),var(--danger))}
+.explore .opp-profit button{margin-top:6px}
+.bands{align-items:center;gap:16px}.bands .hint{margin:0 4px 10px 0}
+.loop{counter-reset:stop}.loop li{counter-increment:stop}.loop li::before{content:counter(stop);display:inline-block;width:20px;color:var(--text-faint);font:500 11px var(--ff-num)}
+@media (max-width:720px){ .bpos .opp{grid-template-columns:1fr auto} }

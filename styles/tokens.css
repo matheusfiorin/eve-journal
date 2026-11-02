@@ -1,0 +1,50 @@
+/* Echelon design tokens: "astrogation plotter". Dark-first; every colour, radius, size and motion value lives here. */
+:root{
+  color-scheme:dark;
+  /* ground & surfaces */
+  --bg:#0C1424; --bg-grid:rgb(148 170 220 / .05); --bg-grid-fine:rgb(148 170 220 / .025);
+  --surface-1:#121C2E; --surface-2:#18243A; --surface-3:#1F2E48; --surface-sunk:#0A1120; --scrim:rgb(6 10 20 / .72);
+  /* lines */
+  --line:#24324B; --line-strong:#3A4D6E; --tick:#4A5F84;
+  /* text */
+  --text:#E7EDF7; --text-muted:#9AAAC4; --text-faint:#7486A3; --text-on-accent:#140F2E;
+  /* UI accent: plotter violet (neither pilot's colour) */
+  --accent:#A99BFF; --accent-strong:#C3B9FF; --accent-soft:rgb(169 155 255 / .14); --accent-line:rgb(169 155 255 / .45);
+  /* pilots: identity only, never good or bad */
+  --fiofka:#F0BB5C; --fiofka-soft:rgb(240 187 92 / .14);
+  --decxus:#5CD3DE; --decxus-soft:rgb(92 211 222 / .14);
+  --pilot:var(--accent); --pilot-soft:var(--accent-soft);
+  /* semantic */
+  --ok:#62D99B; --ok-soft:rgb(98 217 155 / .13);
+  --warn:#F4C55A; --warn-soft:rgb(244 197 90 / .13);
+  --danger:#FF7E70; --danger-soft:rgb(255 126 112 / .13);
+  --info:#7FB2FF;
+  /* activities (crew map branches) */
+  --act-mining:#E8956A; --act-industry:#8FB2FF; --act-exploration:#6FE3C1; --act-hauling:#F2D16B;
+  --act-combat:#FF8A8A; --act-trade:#C3CEDF; --act-wormholes:#D08CFF; --act-pvp:#FF6FAE;
+  /* glow: live things only */
+  --glow-accent:0 0 0 1px var(--accent-line), 0 0 18px rgb(169 155 255 / .28);
+  --glow-ok:0 0 10px rgb(98 217 155 / .65);
+  --glow-danger:0 0 12px rgb(255 126 112 / .55);
+  --shadow-pop:0 18px 48px rgb(3 6 14 / .55), 0 2px 6px rgb(3 6 14 / .4);
+  /* shape: three radii by hierarchy */
+  --r-chip:2px; --r-ctl:4px; --r-panel:6px; --r-pop:8px;
+  /* layout */
+  --rail-w:232px; --rail-w-collapsed:64px; --strip-h:52px; --viewbar-h:58px; --toolbar-h:52px;
+  --gutter:16px; --content-max:1320px;
+  /* type */
+  --ff-display:'Michroma', 'Barlow Semi Condensed', system-ui, sans-serif;
+  --ff-ui:'Barlow Semi Condensed', 'Arial Narrow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ff-num:'Martian Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --fs-xs:12px; --fs-sm:13px; --fs-md:15px; --fs-lg:18px; --fs-xl:22px; --fs-2xl:28px; --fs-3xl:clamp(34px,5vw,56px);
+  /* motion */
+  --dur-1:120ms; --dur-2:200ms; --dur-3:320ms; --dur-4:560ms; --dur-boot:1100ms;
+  --ease-out:cubic-bezier(.2,.8,.2,1); --ease-in:cubic-bezier(.6,0,.8,.2); --ease-inout:cubic-bezier(.6,0,.2,1);
+  --ease-lock:cubic-bezier(.2,1.25,.4,1);
+}
+[data-pilot=fiofka]{--pilot:var(--fiofka);--pilot-soft:var(--fiofka-soft)}
+[data-pilot=decxus]{--pilot:var(--decxus);--pilot-soft:var(--decxus-soft)}
+[data-act=mining]{--act:var(--act-mining)} [data-act=industry]{--act:var(--act-industry)}
+[data-act=exploration]{--act:var(--act-exploration)} [data-act=hauling]{--act:var(--act-hauling)}
+[data-act=combat]{--act:var(--act-combat)} [data-act=trade]{--act:var(--act-trade)}
+[data-act=wormholes]{--act:var(--act-wormholes)} [data-act=pvp]{--act:var(--act-pvp)}

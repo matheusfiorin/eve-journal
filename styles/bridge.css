@@ -1,0 +1,17 @@
+/* Bridge: the pilot banner and the "Your wing" card. */
+#pilots{display:grid;gap:16px}
+.me-banner{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:center;padding:28px 24px 24px;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-panel)}
+.me-banner .screen-title{margin:10px 0 2px}
+.portrait.xl{width:112px;height:112px}
+.me-stats{align-self:start}
+.wing-card .pilot-head{margin-top:6px}
+.wing-card .readout{margin-top:16px}
+.career{list-style:none;padding:0;margin:10px 0}
+.career li{border-left:1px solid var(--accent-line);padding:0 0 10px 12px;display:grid}
+.career span{font-size:var(--fs-xs);color:var(--text-muted)}
+@media (max-width:720px){
+  .me-banner{grid-template-columns:auto 1fr;padding:22px 16px 16px;gap:14px}
+  .me-stats{grid-column:1/-1}
+  .portrait.xl{width:72px;height:72px}
+  .me-banner .screen-title{font-size:22px}
+}
