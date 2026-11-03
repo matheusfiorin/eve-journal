@@ -24,7 +24,7 @@ function setup(options={}){
  const calls=[];const fetchImpl=async(url,init={})=>{
   calls.push({url:String(url),init});const path=new URL(url).pathname;
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
-  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
+  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
   if(path.endsWith('/oauth/jwks'))return json({keys:[jwk]});
   if(path.endsWith('/oauth/revoke'))return new Response(null,{status:200});
   assert.match(init.headers.Authorization,/^Bearer /);
@@ -102,6 +102,11 @@ test('training-only consent does not fetch optional private endpoints',async()=>
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
  const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);assert.equal((await decrypt(synced.credentials,app.env.TOKEN_ENCRYPTION_KEY)).refreshToken,'private-rotating-refresh-token');assert.ok(app.calls.some(call=>call.url.includes('/oauth/token')&&String(call.init.body).includes('grant_type=refresh_token')));
+});
+test('a revoked refresh token asks the pilot to reconnect instead of blaming EVE',async()=>{
+ const app=setup({revoked:true});const {bearer}=await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
+ const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(synced.last_error,/authorization expired or was revoked.*Reconnect/);
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.match(payload.lastError,/Reconnect/);
 });
 test('disconnect removes enrollment, all sessions and public snapshot and requests EVE revocation',async()=>{
  const app=setup();const {bearer}=await connect(app);const disconnected=await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}});assert.equal(disconnected.status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,0);assert.ok(app.calls.some(call=>call.url.endsWith('/oauth/revoke')));assert.deepEqual((await(await app.request('/api/public/pilots')).json()).pilots,[]);

@@ -58,6 +58,8 @@ export async function decrypt(value,secret){
 }
 async function fetchOk(url,options,fetchImpl){
  const r=await fetchImpl(url,{...options,signal:AbortSignal.timeout(20000)});
+ // The token endpoint answers a revoked or expired refresh token (or a reused code) with 400 invalid_grant: only reconnecting helps.
+ if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError('EVE authorization expired or was revoked. Reconnect the pilot.',502);
  if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':r.status===429||r.status===420?'EVE rate limit reached. Try again later.':'EVE service is temporarily unavailable.',502);
  return r;
 }
