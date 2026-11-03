@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {mockApp,openApp,tab,addEntry,data,KEY} from './fixtures.js';
 test('public profiles, navigation and overview are usable without login',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);
- await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#bridge .wing-card')).toContainText('Wing skill points');
+ await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#bridge .wing-card')).toContainText('Skill points');
  await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.locator('#bridge')).toContainText('Security status');
  for(const name of ['empire','market','training','skills','wallet','clones','goals','overview'])await tab(page,name);
  await tab(page,'journal');await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);

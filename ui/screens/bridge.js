@@ -8,12 +8,10 @@ export const markup = {bridge:'<div id="pilots"></div>'};
 function wingCard(p, s, o) {
   if (!o) return '<article class="card"><h3>Your wing</h3><p class="hint">No wingmate configured.</p></article>';
   const t = summary(o), sharing = o.private || S.wing.get(o.id)?.sharing;
-  const worth = [s.worth, t.worth].filter(Number.isFinite), sp = [s.sp, t.sp].filter(Number.isFinite);
-  const total = list => list.length ? list.reduce((a, b) => a + b, 0) : undefined;
   return `<article class="card wing-card"><h3>Your wing</h3>
     <div class="pilot-head" data-pilot="${esc(o.name.toLowerCase())}">${portrait(o, 40, 'portrait--sm')}<div><h2>${esc(o.name)}</h2><p class="hint">${corpLine(o)}</p></div>${t.title ? `<span class="role-badge">${esc(t.title)}</span>` : ''}</div>
     ${trainingAlert(o)}
-    <dl class="readout">${fact('Wing net worth', count('wing-worth', total(worth), 'isk'))}${fact('Wing skill points', count('wing-sp', total(sp)))}</dl>
+    <dl class="readout">${fact('Net worth', count('wing-worth', t.worth, 'isk'))}${fact('Skill points', count('wing-sp', t.sp))}</dl>
     ${sharing ? '' : `<p class="hint">${esc(o.name)} hasn’t shared their sheet yet. Once they reconnect and tick “share with my wingmate”, their plans show up here.</p>`}
   </article>`;
 }
