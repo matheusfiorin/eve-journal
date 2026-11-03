@@ -26,3 +26,17 @@ test('Pages artifact includes every browser module and stylesheet and excludes j
   assert.ok(!copyLine.includes('*.json'),'only explicit public configuration is packaged');
   assert.ok(copyLine.includes('config.json'));
 });
+test('the Content-Security-Policy allows every host the app fetches and runs no inline script',async()=>{
+  const files=['app.js','backend.js',...await uiFiles()];
+  const [html,...sources]=await Promise.all(['index.html',...files].map(read));
+  const csp=html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/)?.[1];
+  assert.ok(csp,'index.html declares a CSP');
+  const directive=name=>csp.split(';').map(d=>d.trim().split(/\s+/)).find(([n])=>n===name)?.slice(1)||[];
+  assert.deepEqual(directive('script-src'),["'self'"]);
+  const hosts=new Set(sources.flatMap(s=>[...s.matchAll(/json\([`'](https:\/\/[^/`'$]+)/g)].map(m=>m[1])));
+  assert.ok(hosts.size>=3,'found the fetched hosts');
+  for(const host of hosts)assert.ok(directive('connect-src').includes(host),`connect-src misses ${host}`);
+  assert.ok(directive('connect-src').includes('https://*.workers.dev'),'the deployed Worker backend');
+  assert.doesNotMatch(html,/<script(?![^>]*\bsrc=)[^>]*>/,'no inline scripts');
+  for(const s of [html,...sources])assert.doesNotMatch(s,/\son[a-z]+="/,'no inline event handlers');
+});
