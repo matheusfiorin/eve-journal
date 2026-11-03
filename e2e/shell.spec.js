@@ -13,6 +13,26 @@ test('the rail moves between destinations and remembers each one’s last view',
  await page.locator('#rail-toggle').click();await expect(page.locator('body')).toHaveAttribute('data-rail','collapsed');await expect(rail.locator('[data-dest="earn"]')).toHaveAttribute('aria-label','Earn');
  expect(errors).toEqual([]);
 });
+test('moving to another view puts focus on its title and announces it; the view tabs keep focus',async({page})=>{
+ test.skip(isMobile(page),'the rail is a desktop control');
+ const {errors}=await mockApp(page,{connected:'first'});await openApp(page);
+ await page.locator('.rail [data-dest="earn"]').click();await expect(page.locator('#viewbar .screen-title')).toBeFocused();
+ await expect(page.locator('#announcer')).toHaveText('Build · Earn');
+ await page.locator('#viewbar').getByRole('tab',{name:'Mine'}).focus();await page.keyboard.press('ArrowRight');
+ await expect(page.locator('#exploration')).toBeVisible();await expect(page.locator('#viewbar').getByRole('tab',{name:'Explore'})).toBeFocused();
+ await page.locator('#viewbar').getByRole('tab',{name:'Trade'}).click();await expect(page.locator('#viewbar').getByRole('tab',{name:'Trade'})).toBeFocused();
+ await expect(page.locator('#announcer')).toHaveText('Trade · Earn');
+ await page.locator('.rail [data-dest="bridge"]').click();await expect(page.locator('#bridge .screen-title')).toBeFocused();
+ expect(errors).toEqual([]);
+});
+test('the pilot picker keeps focus inside itself until a pilot is chosen',async({page})=>{
+ await mockApp(page);await openApp(page);
+ await page.locator('#switch-pilot').click();const hero=page.locator('#hero');await expect(hero).toBeVisible();
+ for(const sel of ['#rail','.shell__main','#tabbar'])expect(await page.locator(sel).evaluate(el=>el.inert)).toBe(true);
+ for(let i=0;i<4;i++){await page.keyboard.press('Tab');expect(await page.evaluate(()=>document.activeElement.closest('#hero')!==null||document.activeElement===document.body)).toBe(true);}
+ await hero.getByRole('button',{name:/Decxus/}).click();await expect(hero).toBeHidden();
+ expect(await page.locator('.shell__main').evaluate(el=>el.inert)).toBe(false);await expect(page.locator('#bridge .screen-title')).toBeFocused();
+});
 test('the command palette opens with Control+K and jumps to screens and systems',async({page})=>{
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);
  await page.keyboard.press('Control+K');const palette=page.locator('#palette');await expect(palette).toBeVisible();await expect(page.locator('#palette-input')).toBeFocused();

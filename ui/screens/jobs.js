@@ -12,27 +12,52 @@ const jobsOf = p => p.private ? p.ops?.jobs : S.wing.get(p.id)?.jobs ? {permissi
 const when = ms => new Date(ms).toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'});
 let current = [], timer = 0;
 
-export function render() {
+const board = () => {
   const pilots = ordered().map(p => {
     const f = jobsOf(p), skills = p.private ? p.skills : S.wing.get(p.id)?.skills;
     return {name:p.name, p, f, jobs:f?.permission ? f.value || [] : [], levels:skills?.skills ? skillLevels(skills, SLOT_SKILLS) : null};
   });
-  const w = wingJobs(pilots);
+  return {pilots, w:wingJobs(pilots)};
+};
+// A row's identity and state; while these stay the same, the countdowns update in place.
+const keyOf = x => `${x.pilot}:${x.job.job_id}:${x.ready}:${x.paused}`;
+const next = w => w.next ? `${w.next.activity} · ${duration(w.next.remaining / 1000)}` : '—';
+const eta = x => x.ready ? '<b class="pos">Ready to deliver</b>' : x.paused ? '<b class="warn-text">Paused</b>' : `<b class="num">${esc(duration(x.remaining / 1000))}</b><small>${esc(when(Date.parse(x.job.end_date)))}</small>`;
+export function render() {
+  const {pilots, w} = board();
+  const focused = document.activeElement?.closest?.('#jobs-content [data-job]')?.dataset.key;
   current = w.list;
   const why = pilots.filter(x => !x.f?.permission).map(x => `${esc(x.name)}: ${!x.p.private && !S.wing.get(x.p.id) ? 'not connected or not shared' : x.f ? 'permission not granted (Reconnect)' : 'not synced yet'}`);
-  $('#jobs-summary').innerHTML = `<dl class="readout"><div><dt>Running</dt><dd class="num">${w.running}</dd></div><div><dt>Ready to deliver</dt><dd class="num ${w.ready ? 'pos' : ''}">${w.ready}</dd></div><div><dt>Next to finish</dt><dd>${w.next ? `${esc(w.next.activity)} · ${esc(duration(w.next.remaining / 1000))}` : '—'}</dd></div></dl>
+  $('#jobs-summary').innerHTML = `<dl class="readout"><div><dt>Running</dt><dd class="num">${w.running}</dd></div><div><dt>Ready to deliver</dt><dd class="num ${w.ready ? 'pos' : ''}">${w.ready}</dd></div><div><dt>Next to finish</dt><dd data-next>${esc(next(w))}</dd></div></dl>
     <div class="slot-row">${w.usage.map(u => `<span class="slot-chip" data-pilot="${esc(u.pilot.toLowerCase())}"><b>${esc(u.pilot)}</b>${u.total ? `build ${u.build}/${u.total.build} · science ${u.science}/${u.total.science}${u.build < u.total.build ? ` · <button type="button" class="link-btn" data-go="earn/build">${plural(u.total.build - u.build, 'idle build slot')}</button>` : ''}` : `${u.build} build · ${u.science} science`}</span>`).join('')}</div>
     ${why.length ? `<p class="hint">${why.join(' · ')}</p>` : ''}`;
-  const row = (x, i) => `<li class="job ${x.ready ? 'is-ready' : x.paused ? 'is-paused' : ''}" data-pilot="${esc(x.pilot.toLowerCase())}" data-row data-job="${i}" tabindex="0" role="button" aria-label="${esc(`${x.activity}: ${name(x.job.product_type_id || x.job.blueprint_type_id)}`)}">
+  const row = (x, i) => `<li class="job ${x.ready ? 'is-ready' : x.paused ? 'is-paused' : ''}" data-pilot="${esc(x.pilot.toLowerCase())}" data-row data-job="${i}" data-key="${esc(keyOf(x))}" tabindex="0" role="button" aria-label="${esc(`${x.activity}: ${name(x.job.product_type_id || x.job.blueprint_type_id)}`)}">
     <span class="job__who">${esc(x.pilot)}</span>
     <div class="job__main"><b>${esc(name(x.job.product_type_id || x.job.blueprint_type_id))}</b><small><span class="tag ${x.kind === 'science' ? 'dim' : ''}">${esc(x.activity)}</span> ${x.job.activity_id === 5 ? `${plural(x.job.runs, 'copy', 'copies')} × ${plural(x.job.licensed_runs || 1, 'run')}` : plural(x.job.runs, 'run')} · ${esc(place(x.job.station_id || x.job.facility_id))}</small></div>
     <div class="job__bar" role="progressbar" aria-valuenow="${Math.round(x.progress * 100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${(x.progress * 100).toFixed(1)}%"></i></div>
-    <div class="job__eta">${x.ready ? '<b class="pos">Ready to deliver</b>' : x.paused ? '<b class="warn-text">Paused</b>' : `<b class="num">${esc(duration(x.remaining / 1000))}</b><small>${esc(when(Date.parse(x.job.end_date)))}</small>`}</div></li>`;
+    <div class="job__eta">${eta(x)}</div></li>`;
   $('#jobs-content').innerHTML = w.list.length ? `<ol class="jobs">${w.list.map(row).join('')}</ol>`
     : `<div class="empty">No jobs running. <button type="button" class="link-btn" data-go="earn/build">Find something to build</button></div>`;
+  // A redraw keeps keyboard focus on the job it was on.
+  if (focused) [...document.querySelectorAll('#jobs-content [data-job]')].find(el => el.dataset.key === focused)?.focus();
   clearInterval(timer);
   // Countdowns tick while the view is on screen.
-  if (w.running) timer = setInterval(() => { if ($('#jobs').hidden) clearInterval(timer); else render(); }, 60000);
+  if (w.running) timer = setInterval(tick, 60000);
+}
+// Update progress and time left in place, so focus and a screen reader's place survive; redraw only when a job
+// finishes, pauses or disappears.
+function tick() {
+  if ($('#jobs').hidden) { clearInterval(timer); return; }
+  const {w} = board();
+  if (w.list.map(keyOf).join() !== current.map(keyOf).join()) { render(); return; }
+  current = w.list;
+  const rows = document.querySelectorAll('#jobs-content [data-job]');
+  w.list.forEach((x, i) => {
+    const row = rows[i], bar = row?.querySelector('[role=progressbar]'); if (!row) return;
+    bar.setAttribute('aria-valuenow', Math.round(x.progress * 100)); bar.firstElementChild.style.width = `${(x.progress * 100).toFixed(1)}%`;
+    row.querySelector('.job__eta').innerHTML = eta(x);
+  });
+  const dd = $('#jobs-summary [data-next]'); if (dd) dd.textContent = next(w);
 }
 export function wire() {
   const open = el => {

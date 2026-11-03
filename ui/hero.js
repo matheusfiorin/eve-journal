@@ -40,8 +40,11 @@ function startStars() {
   };
   draw();
 }
+// While the picker is up, everything behind it is inert: no focus, clicks or screen-reader browsing escape the dialog.
+const behind = () => document.querySelectorAll('#rail, .shell__main, #tabbar');
 export function openHero() {
   warp = false; $('#hero').classList.remove('warp'); $('#hero').hidden = false;
+  behind().forEach(el => { el.inert = true; });
   document.body.classList.add('picking'); renderHero(); startStars();
   $('#hero-pilots button')?.focus();
 }
@@ -49,6 +52,7 @@ function choosePilot(pilot) {
   S.me = pilot;
   try { localStorage.setItem(ME, pilot); } catch { /* Choice lasts for this visit. */ }
   warp = true; $('#hero').classList.add('warp');
+  behind().forEach(el => { el.inert = false; });
   setTimeout(() => { $('#hero').hidden = true; document.body.classList.remove('picking'); cancelAnimationFrame(starsFrame); }, reduced ? 0 : 900);
   counters.clear(); onChoose();
 }

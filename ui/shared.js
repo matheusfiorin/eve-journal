@@ -120,3 +120,12 @@ export function openDrawer({title, body, foot = ''}) {
   return d;
 }
 export const closeDrawer = () => { if ($('#drawer').open) $('#drawer').close(); };
+// After a person moves to another view: keep focus on the sub-view tabs if they were using them, otherwise move it to
+// the screen's title, and announce where they landed.
+export function landOn(id, viaTabs) {
+  const view = document.getElementById(id), bar = $('#viewbar');
+  const target = (viaTabs && bar.querySelector('[role=tab][aria-selected="true"]')) || view.querySelector('.screen-title') || (!bar.hidden && bar.querySelector('.screen-title')) || view;
+  if (!target.matches('[role=tab]')) target.tabIndex = -1;
+  target.focus({preventScroll:true});
+  $('#announcer').textContent = document.title.replace(/ · Echelon$/, '');
+}
