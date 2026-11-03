@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY} from '../worker/index.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
 const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
@@ -143,6 +143,17 @@ test('wing summaries need a session and include only pilots who opted in',async(
 });
 test('consent records the wingmate choice',async()=>{
  const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,2);
+});
+test('each scheduled run syncs one pilot, taking turns, to stay within the per-invocation subrequest limit',async()=>{
+ const app=setup();await connect(app);const other=2124815118;
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, snapshot, share_training) SELECT ?, 'Decxus', credentials, snapshot, 1 FROM pilots WHERE character_id = ?").run(other,id);
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0, last_error = ?').run('still failing');
+ let before;const synced=()=>[...new Set(app.calls.slice(before).map(c=>Number(c.url.match(/characters\/(\d+)\//)?.[1])).filter(Boolean))];
+ const tick=n=>n*SYNC_EVERY;
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(100));assert.deepEqual(synced(),[id]);
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(101));assert.deepEqual(synced(),[other],'the next run takes the other pilot');
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0').run();
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(102));assert.deepEqual(synced(),[id]);
 });
 test('market pipeline must authenticate, stores snapshots per region and the public read returns them',async()=>{
  const app=setup();await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);

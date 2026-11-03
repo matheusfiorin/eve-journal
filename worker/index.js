@@ -297,9 +297,14 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))headers.set(key,value);
  return new Response(result.body,{status:result.status,headers});
 }
-export async function scheduledSync(env,fetchImpl=fetch){
+// One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,
+// and the free plan allows 50 subrequests per invocation. The cron runs every 15 minutes (scripts/deploy-backend.mjs),
+// so with two pilots each one still refreshes every 30 minutes. Turns follow the clock rather than the last sync, so a
+// pilot whose sync keeps failing cannot starve the other.
+export const SYNC_EVERY=15*60000;
+export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now())]);
- const rows=await env.DB.prepare('SELECT character_id FROM pilots').all();
- for(const row of rows.results)if(ALLOWED.has(row.character_id))await syncPilot(row.character_id,env,fetchImpl);
+ const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
+ if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
 }
-export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env));}};
+export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env,fetch,event.scheduledTime));}};
