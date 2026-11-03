@@ -14,14 +14,19 @@ test('every explicit app control exists exactly once in the document',async()=>{
   for(const [i,source] of sources.entries())for(const m of source.matchAll(/\$\('#([\w-]+)'\)/g))assert.ok(ids.includes(m[1]),`missing control in ${files[i]}: ${m[1]}`);
 });
 test('Pages artifact includes every browser module and stylesheet and excludes journal data',async()=>{
-  const files=['app.js','storage.js',...await uiFiles()];
-  const [workflow,html,...sources]=await Promise.all(['.github/workflows/pages.yml','index.html',...files].map(read));
+  const [workflow,html]=await Promise.all(['.github/workflows/pages.yml','index.html'].map(read));
   const copyLine=workflow.split('\n').find(l=>l.includes('cp index.html'));
   assert.match(copyLine,/cp -r ui styles _site\//,'ui/ and styles/ are copied whole');
-  for(const [i,source] of sources.entries())for(const m of source.matchAll(/from '(\.[^']+)'/g)){
-    const path=posix.normalize(posix.join(posix.dirname(files[i]),m[1]));
-    assert.ok(path.startsWith('ui/')?files.includes(path):copyLine.includes(` ${path}`),`module omitted from Pages: ${path}`);
+  // Walk the whole import graph from the page's entry scripts: root modules' imports too, static and dynamic.
+  const seen=new Set(),queue=[...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map(m=>posix.normalize(m[1]));
+  assert.ok(queue.includes('app.js'));
+  while(queue.length){
+    const path=queue.shift();if(seen.has(path))continue;seen.add(path);
+    assert.ok(path.startsWith('ui/')||copyLine.includes(` ${path}`),`module omitted from Pages: ${path}`);
+    const source=await read(path);
+    for(const m of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.{1,2}\/[^'"]+)['"]/g))queue.push(posix.normalize(posix.join(posix.dirname(path),m[1])));
   }
+  for(const f of ['storage.js','backend.js','model.js','route.js'])assert.ok(seen.has(f),`the walk reaches ${f}`);
   for(const m of html.matchAll(/href="(styles\/[\w.-]+)"/g))await read(m[1]);
   assert.ok(!copyLine.includes('*.json'),'only explicit public configuration is packaged');
   assert.ok(copyLine.includes('config.json'));

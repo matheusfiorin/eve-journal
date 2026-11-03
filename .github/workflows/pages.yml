@@ -8,7 +8,8 @@ permissions:
   contents: read
 concurrency:
   group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR runs can go; a deploy from main always finishes (a cancelled one can leave the backend and site out of step).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   verify:
     name: Check application and data protection
