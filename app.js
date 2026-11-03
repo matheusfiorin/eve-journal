@@ -67,7 +67,7 @@ document.addEventListener('click', async event => {
     if (b.dataset.connect !== undefined) {
       const p = S.pilots[Number(b.dataset.connect)];
       if (!S.backend || !p?.id) throw new Error('Wait for the pilot lookup before connecting.');
-      location.assign(S.backend.authURL(p.id));
+      location.assign(S.backend.connect(p.id));
     }
     if (b.dataset.disconnect) {
       const id = Number(b.dataset.disconnect);
@@ -101,7 +101,7 @@ async function init() {
     try {
       S.backend = new BackendClient(S.config.backendUrl);
       if (S.backend.acceptRedirect(location.hash)) { history.replaceState(null, '', home); notice('Pilot connected. Training is shared and private data is now available.'); }
-    } catch (error) { notice(error.message); }
+    } catch (error) { if (location.hash.includes('backend_session')) history.replaceState(null, '', home); notice(error.message); }
   }
   for (const module of [routes, mapmodal, shell, ...SCREENS]) module.wire?.();
   hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); });

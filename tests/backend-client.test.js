@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BackendClient} from '../backend.js';
-function storage(){const values=new Map();return{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};}
+function storage(){const values=new Map();return{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};}
 const id=2124810474;
 function client(fetchImpl=async()=>new Response('{}',{headers:{'Content-Type':'application/json'}})){
  return new BackendClient('https://api.example',storage(),fetchImpl);
@@ -52,4 +52,16 @@ test('an HTML or empty error page reports the HTTP status, not a JSON parse erro
  await assert.rejects(json.publicPilots(),{message:'Pilot is syncing.'});
  const garbled=client(async()=>new Response('<html>',{status:200,headers:{'Content-Type':'text/html'}}));
  await assert.rejects(garbled.publicPilots(),{message:'Backend returned an unreadable response.'});
+});
+test('a connection link this tab did not start cannot replace a pilot’s valid session',()=>{
+ globalThis.sessionStorage=storage();
+ try{
+  const c=client();auth(c);
+  const link=token=>`#backend_session=${token.repeat(43)}&pilot=${id}&expires=${Date.now()+3600000}`;
+  assert.throws(()=>c.acceptRedirect(link('z')),/already connected/);assert.equal(c.sessions.get(id).token,'a'.repeat(43));
+  assert.equal(c.connect(id),`https://api.example/auth/start?pilot=${id}`,'Reconnect marks this tab as expecting the redirect');
+  assert.equal(new BackendClient('https://api.example',c.storage).acceptRedirect(link('z')),true,'the redirect lands on a fresh page load');
+  const after=new BackendClient('https://api.example',c.storage);assert.equal(after.sessions.get(id).token,'z'.repeat(43));
+  assert.throws(()=>after.acceptRedirect(link('y')),/already connected/,'the mark is used once');
+ }finally{delete globalThis.sessionStorage;}
 });

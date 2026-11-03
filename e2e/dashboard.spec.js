@@ -40,6 +40,13 @@ test('an expired backend session falls back to the shared snapshot',async({page}
 test('the callback fragment is consumed, scrubbed and followed by a private session',async({page})=>{
  await mockApp(page);await page.goto(`/#backend_session=${opaque.slice(0,42)}0&pilot=${IDS[0]}&expires=${Date.now()+3600000}`);await expect(page.locator('#sync-status')).toContainText('Synced');expect(page.url()).not.toContain('backend_session');await expect(page.locator('#bridge')).toContainText('12,500,000.25 ISK');
 });
+test('a connection link the browser did not start cannot replace a connected pilot’s session',async({page})=>{
+ const {calls}=await mockApp(page,{connected:'first'});
+ await page.goto(`/#backend_session=${'x'.repeat(43)}&pilot=${IDS[0]}&expires=${Date.now()+3600000}`);await expect(page.locator('#sync-status')).toContainText('Synced');
+ expect(page.url()).not.toContain('backend_session');await expect(page.locator('#notice')).toContainText('already connected');
+ await expect(page.locator('#bridge')).toContainText('12,500,000.25 ISK');
+ expect(calls.filter(c=>c.authorization).every(c=>c.authorization===`Bearer ${opaque.slice(0,42)}0`)).toBe(true);
+});
 test('disconnect removes private data from the page',async({page})=>{
  const {calls}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');page.once('dialog',d=>d.accept());await page.locator('.me-banner').getByRole('button',{name:'Disconnect'}).click();await expect(overview).not.toContainText('12,500,000.25');expect(calls.some(c=>c.path==='/api/disconnect')).toBe(true);
  await tab(page,'wallet');await expect(page.locator('#ledger-content .card').first()).toContainText('Connect this pilot');
