@@ -94,8 +94,8 @@ export function neighbourByAngle(from, candidates, key) {
   return best;
 }
 
-// Text level of detail from screen pixels per map unit: below 0.8 security values go, below 0.5 names too.
-export const lod = scale => scale < 0.5 ? 'min' : scale < 0.8 ? 'low' : 'full';
+// Text level of detail from screen pixels per map unit: below 0.8 security values go, below 0.6 names too.
+export const lod = scale => scale < 0.6 ? 'min' : scale < 0.8 ? 'low' : 'full';
 
 // Sort rows of the List view: by a key, numbers descending first (most kills on top), text ascending.
 export function sortRows(rows, key, dir = 0) {
