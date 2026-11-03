@@ -13,15 +13,16 @@ import * as bridge from './ui/screens/bridge.js';
 import * as wing from './ui/screens/wing.js';
 import * as pilot from './ui/screens/pilot.js';
 import * as earn from './ui/screens/earn.js';
+import * as jobs from './ui/screens/jobs.js';
 import * as navigate from './ui/screens/navigate.js';
 import * as ledger from './ui/screens/ledger.js';
 import * as logbook from './ui/screens/logbook.js';
 
-const SCREENS = [bridge, wing, pilot, earn, navigate, ledger, logbook];
+const SCREENS = [bridge, wing, pilot, earn, jobs, navigate, ledger, logbook];
 const RENDER = {
   bridge:bridge.render, strengths:wing.renderCrew, goals:wing.renderGoals,
   training:pilot.renderTraining, skills:pilot.renderSkills, clones:pilot.renderClones,
-  industry:earn.renderIndustry, mining:earn.renderMining, exploration:earn.renderExploration, market:earn.renderMarket,
+  industry:earn.renderIndustry, mining:earn.renderMining, exploration:earn.renderExploration, market:earn.renderMarket, jobs:jobs.render,
   map:navigate.renderMap, hauling:navigate.renderHauling, ledger:ledger.render, logbook:logbook.render
 };
 // Views that load market data draw only while they're on screen.
