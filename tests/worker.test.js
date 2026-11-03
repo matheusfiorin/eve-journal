@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS} from '../worker/index.js';
+import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
 const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -156,6 +157,19 @@ test('market pipeline must authenticate, stores snapshots per region and the pub
  assert.equal((await app.request('/api/market/regions')).status,401);
  const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);
 });
+test('the public market read serves only trade hubs; a signed-in session also sees the pilots\' regions',async()=>{
+ const app=setup();const {bearer}=await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const ingest=body=>app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+ for(const body of [{region:0,data:{types:{}}},{region:1,data:{systems:{}}},{region:2,data:{done:{10000002:1}}},{region:10000002,data:{name:'The Forge',types:{34:{d:5,s:[[60003760,5.5,1000]]}}}},{region:10000020,data:{name:'Tash-Murkon',types:{}}}])assert.equal((await ingest(body)).status,200);
+ const anonymous=await app.request('/api/market');const open=await anonymous.json();
+ assert.deepEqual(open.regions.map(r=>r.region),[10000002],'a pilot region is not public');assert.match(anonymous.headers.get('Cache-Control'),/^public/);assert.equal(anonymous.headers.get('Vary'),'Authorization');
+ assert.deepEqual(open.regions[0].data,{name:'The Forge',types:{34:{d:5,s:[[60003760,5.5,1000]]}}});assert.deepEqual(open.universe,{systems:{}});assert.equal(open.meta.region,0);assert.ok(Number.isFinite(open.meta.updatedAt));
+ assert.ok(!JSON.stringify(open).includes('done'),'the blueprint survey is never served');
+ const forged=await(await app.request('/api/market',{headers:{Authorization:`Bearer ${'x'.repeat(43)}`}})).json();assert.deepEqual(forged.regions.map(r=>r.region),[10000002],'an invalid session gets the public view');
+ const signed=await app.request('/api/market',{headers:{Authorization:`Bearer ${bearer}`}});
+ assert.deepEqual((await signed.json()).regions.map(r=>r.region).sort(),[10000002,10000020]);assert.match(signed.headers.get('Cache-Control'),/^private/);
+});
+test('the Worker and the pipeline agree on the trade hubs',()=>{assert.deepEqual([...HUB_REGIONS].sort(),[...HUBS].sort());});
 test('active sessions slide forward at most once a day and expire after 30 idle days',async()=>{
  const app=setup();const {bearer}=await connect(app);const read=()=>app.env.DB.raw.prepare('SELECT expires_at FROM sessions').get().expires_at;
  const first=read();assert.ok(first>Date.now()+29*86400000);

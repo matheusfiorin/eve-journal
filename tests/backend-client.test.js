@@ -38,3 +38,8 @@ test('sessions last up to 31 days and adopt the longer expiry the backend return
  const s=storage();const a=new BackendClient('https://api.example',s);a.acceptRedirect(`#backend_session=${'c'.repeat(43)}&pilot=${id}&expires=${later}`);
  assert.equal(new BackendClient('https://api.example',s).has(id),true,'a new page load finds the stored session');
 });
+test('the market read carries a signed-in session when there is one so pilot regions come back',async()=>{
+ const seen=[];const c=client(async(url,options)=>{seen.push(options.headers.Authorization);return Response.json({meta:null,universe:null,regions:[]});});
+ await c.market();auth(c);await c.market();
+ assert.deepEqual(seen,[undefined,`Bearer ${'a'.repeat(43)}`]);
+});

@@ -34,7 +34,8 @@ export class BackendClient {
  }
  authURL(id){return `${this.url}/auth/start?pilot=${encodeURIComponent(id)}`;}
  async wing(id){const data=await this.call('/api/wing',{id});if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid wing summary.');return data.pilots;}
- async market(){return this.call('/api/market');}
+ // Any signed-in pilot unlocks the regions the pilots fly in; without one the backend serves the trade hubs only.
+ async market(){const id=[...this.sessions.keys()].find(id=>this.has(id));return this.call('/api/market',id?{id}:{});}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  async disconnect(id){await this.call('/api/disconnect',{id,method:'POST'});this.sessions.delete(id);this.save();}
  expire(){const ids=[];for(const[id,s]of this.sessions)if(s.expires<=Date.now()){ids.push(id);this.sessions.delete(id);}if(ids.length)this.save();return ids;}

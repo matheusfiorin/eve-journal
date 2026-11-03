@@ -9,7 +9,7 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
 const ESI = 'https://esi.evetech.net/latest';
-const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
+export const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
 const SDE = 'https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip';
 const HEADERS = {Accept:'application/json', 'User-Agent':'eve-journal market pipeline (github.com/matheusfiorin/eve-journal)'};
 const TOP = 6;
@@ -309,7 +309,7 @@ async function main() {
 
   for (const region of regions) {
     const name = (await esi(`/universe/regions/${region}/`)).body.name;
-    meta.regions[region] = name;
+    if (HUBS.includes(region)) meta.regions[region] = name; // meta is public; pilot regions would say where pilots fly
     const types = {}, stations = new Map();
     await pool(scan, 24, async id => {
       try {
