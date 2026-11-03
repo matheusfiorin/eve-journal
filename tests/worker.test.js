@@ -126,14 +126,14 @@ test('wing summaries need a session and include only pilots who opted in',async(
  const {bearer}=await connect(app,{wing:false});
  let wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();
  assert.equal(wing.pilots.length,1);assert.equal(wing.pilots[0].sharing,false);assert.equal(wing.pilots[0].wallet,12345678.25);
- app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,0)").run(JSON.stringify({operations:{wallet:{value:777},location:{value:{solar_system_id:30000142}},mining:{value:[{type_id:1230,quantity:5}]}}}));
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,0)").run(JSON.stringify({operations:{wallet:{value:777},location:{value:{solar_system_id:30000142}},mining:{value:[{type_id:1230,quantity:5}]},jobs:{value:[{job_id:9,status:'active'}]}}}));
  wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,1);
  app.env.DB.raw.exec('UPDATE pilots SET share_wing = 1 WHERE character_id = 2124815118');
  wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(wing.pilots.length,2);assert.equal(wing.pilots.find(p=>p.name==='Decxus').wallet,777);assert.ok(!JSON.stringify(wing).includes('credentials'));
  assert.equal(wing.pilots.find(p=>p.name==='Decxus').location,undefined,'the first consent did not cover location');
  app.env.DB.raw.exec('UPDATE pilots SET share_wing = 2 WHERE character_id = 2124815118');
  wing=await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json();const d=wing.pilots.find(p=>p.name==='Decxus');
- assert.equal(d.location.solar_system_id,30000142);assert.equal(d.mining[0].quantity,5);
+ assert.equal(d.location.solar_system_id,30000142);assert.equal(d.mining[0].quantity,5);assert.equal(d.jobs[0].job_id,9);
 });
 test('consent records the wingmate choice',async()=>{
  const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,2);

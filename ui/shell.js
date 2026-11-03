@@ -10,7 +10,7 @@ export const DESTS = [
   {id:'bridge', label:'Bridge', key:'b', views:[{id:'bridge', slug:'', label:'Bridge'}]},
   {id:'wing', label:'Wing', key:'w', views:[{id:'strengths', slug:'crew', label:'Crew map'}, {id:'goals', slug:'goals', label:'Goals'}]},
   {id:'pilot', label:'Pilot', key:'p', sep:true, views:[{id:'training', slug:'training', label:'Training'}, {id:'skills', slug:'skills', label:'Skills'}, {id:'clones', slug:'clones', label:'Clones'}]},
-  {id:'earn', label:'Earn', key:'e', views:[{id:'industry', slug:'build', label:'Build'}, {id:'mining', slug:'mine', label:'Mine'}, {id:'exploration', slug:'explore', label:'Explore'}, {id:'market', slug:'trade', label:'Trade'}]},
+  {id:'earn', label:'Earn', key:'e', views:[{id:'industry', slug:'build', label:'Build'}, {id:'mining', slug:'mine', label:'Mine'}, {id:'exploration', slug:'explore', label:'Explore'}, {id:'market', slug:'trade', label:'Trade'}, {id:'jobs', slug:'jobs', label:'Jobs'}]},
   {id:'navigate', label:'Navigate', key:'n', views:[{id:'map', slug:'map', label:'Star map'}, {id:'hauling', slug:'haul', label:'Haul plan'}]},
   {id:'ledger', label:'Ledger', key:'l', sep:true, views:[{id:'ledger', slug:'', label:'Ledger'}]},
   {id:'logbook', label:'Logbook', key:'j', views:[{id:'logbook', slug:'', label:'Logbook'}]}
