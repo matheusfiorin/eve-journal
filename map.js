@@ -5,6 +5,32 @@ import {secShown} from './route.js';
 // EVE's own security palette, from 1.0 (blue) to 0.0 and below (purple).
 const SEC = ['#8d3264', '#722020', '#bb1116', '#ce440f', '#dc6d07', '#f3fd82', '#71e554', '#60dba3', '#4ecef8', '#399aeb', '#2c75e1'];
 export const secColor = sec => SEC[Math.max(0, Math.min(10, Math.round(secShown(sec) * 10)))];
+// WCAG contrast between two #rrggbb colours, and a colour lifted toward white until it reads on a dark background.
+const lum = hex => { const c = hex.match(/\w\w/g).map(h => parseInt(h, 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+export const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+export function readable(hex, bg = '#121C2E', min = 4.5) {
+  const rgb = hex.match(/\w\w/g).map(h => parseInt(h, 16));
+  for (let t = 0; t <= 1.0001; t += 0.05) {
+    const out = `#${rgb.map(v => Math.round(v + (255 - v) * t).toString(16).padStart(2, '0')).join('')}`;
+    if (contrast(out, bg) >= min) return out;
+  }
+  return '#ffffff';
+}
+// Security text colour: the in-game hue, lifted where it would be too dark to read (0.0–0.3 reds and purples).
+const SEC_TEXT = SEC.map(c => readable(c));
+export const secText = sec => SEC_TEXT[Math.max(0, Math.min(10, Math.round(secShown(sec) * 10)))];
+// The three bands pilots talk about, for the legend and screen-reader labels.
+export const secBand = sec => secShown(sec) >= 0.5 ? 'high-sec' : secShown(sec) > 0 ? 'low-sec' : 'null-sec';
+// A stable, distinct colour per sovereignty owner (alliance or faction id), spread around the hue wheel.
+export function ownerColor(id) {
+  const h = Math.round(((Number(id) * 0.618033988749895) % 1) * 360);
+  return hsl(h, 70, 62);
+}
+function hsl(h, s, l) {
+  s /= 100; l /= 100;
+  const f = n => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
 
 // A region drawn the way CCP lays it out in 2D. Their schematic sits on a 2.05-unit grid, and systems on one row are
 // at least 3 cells apart, so a 28 px cell fits 76 px boxes with no overlaps. Big regions get a big canvas to pan.
@@ -52,6 +78,9 @@ export function projector({center = [0, 0, 0], yaw = 0, pitch = 0.5, distance = 
     return [width / 2 + rx * scale, height / 2 - ry * scale, depth, scale];
   };
 }
+// Camera easing that doesn't depend on the frame rate: the share of the remaining distance covered in dt ms
+// (12% per 60 Hz frame).
+export const easeStep = (dt, perFrame = 0.12) => 1 - Math.pow(1 - perFrame, Math.max(0, dt) / (1000 / 60));
 // Bounding sphere of some systems: where to point the camera and how far back to sit.
 export function frame(systems) {
   const pts = systems.map(s => s.pos).filter(Boolean);

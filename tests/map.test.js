@@ -53,3 +53,12 @@ test('leg follows the safe route by default and the shortest when asked',async()
  const cache=new Map();
  assert.deepEqual(leg(u,1,3,cache).systems.map(s=>s.id),[1,4,5,3]);assert.deepEqual(leg(u,1,3,cache,{safe:false}).systems.map(s=>s.id),[1,2,3]);
 });
+test('security text is lifted until it reads on the dark map, and bands are named the way pilots say them',async()=>{
+ const {contrast,readable,secText,secBand,ownerColor,secColor}=await import('../map.js');
+ for(const sec of [1,0.5,0.3,0.1,0,-0.5])assert.ok(contrast(secText(sec),'#121C2E')>=4.5,`${sec} readable`);
+ assert.equal(secText(0.5),secColor(0.5),'colours that already read stay as they are');assert.notEqual(secText(-0.5),secColor(-0.5),'null-sec purple is lifted');
+ assert.equal(readable('#ffffff'),'#ffffff');near21(contrast('#000000','#ffffff'));
+ assert.equal(secBand(0.46),'high-sec');assert.equal(secBand(0.3),'low-sec');assert.equal(secBand(0.04),'low-sec');assert.equal(secBand(-0.2),'null-sec');
+ assert.match(ownerColor(99000001),/^#[0-9a-f]{6}$/);assert.equal(ownerColor(500001),ownerColor(500001));assert.notEqual(ownerColor(500001),ownerColor(500002));
+});
+function near21(v){assert.ok(Math.abs(v-21)<0.01);}
