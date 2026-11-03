@@ -146,8 +146,9 @@ export async function renderIndustry() {
   const categories = [...new Set(catalog.map(item => item.cat))].sort();
   if (category.options.length !== categories.length + 1) { const prior = category.value; category.innerHTML = `<option value="">All categories</option>${categories.map(c => `<option>${esc(c)}</option>`).join('')}`; category.value = categories.includes(prior) ? prior : ''; }
   const skillOf = x.skills?.skills ? id => levelOf(x.skills, id) : undefined;
-  const ranked = rank(catalog.filter(item => !category.value || item.cat === category.value).map(item => evaluate(item, {book:marketBook, adjusted, fees:f, index:buildIndex, researchIndex, levels, alpha, skillOf, budget})), budget)
-    .map(pick => ({...pick, seller:sellerOf(pick)}));
+  // Price every blueprint for one pilot: their fees, slots (capacity), Alpha tax, skills and wallet.
+  const priceFor = pilot => rank(catalog.filter(item => !category.value || item.cat === category.value).map(item => evaluate(item, {book:marketBook, adjusted, index:buildIndex, researchIndex, ...pilot})), pilot.budget);
+  const ranked = priceFor({fees:f, levels, alpha, skillOf, budget}).map(pick => ({...pick, seller:sellerOf(pick)}));
   const SORTS = {profit:(a, b) => b.profitDay - a.profitDay, payback:(a, b) => a.payback - b.payback, margin:(a, b) => b.margin - a.margin, cheap:(a, b) => a.price - b.price,
     near:(a, b) => (a.seller?.route.jumps ?? 999) - (b.seller?.route.jumps ?? 999)};
   // Only what the wallet covers, unless the pilot asks to see the rest.
@@ -175,7 +176,9 @@ export async function renderIndustry() {
   const mePlan = portfolio(ranked, {slots:known ? s.build : 2, budget:budget ?? Infinity});
   const ox = o ? summary(o) : null, oLevels = ox ? skillLevels(ox.skills, meta.skills || {}) : null;
   const oSkillOf = ox?.skills?.skills ? id => levelOf(ox.skills, id) : null;
-  const themPlan = o ? portfolio(ranked.filter(pick => !mePlan.chosen.includes(pick) && !(oSkillOf && pick.sk?.some(([id, lvl]) => oSkillOf(id) < lvl))).map(pick => ({...pick, flags:pick.flags.filter(fl => fl !== 'skills'), affordable:!(ox.wallet >= 0) || pick.invest <= ox.wallet})),
+  // The wingmate's plan is priced with their own skills, fees, Alpha status and wallet, skipping what this pilot builds.
+  const taken = new Set(mePlan.chosen.map(c => c.bp));
+  const themPlan = o ? portfolio(priceFor({fees:fees(ox.skills, meta.skills), levels:oLevels, alpha:isAlpha(ox.skills), skillOf:oSkillOf || undefined, budget:ox.wallet}).filter(pick => !taken.has(pick.bp)),
     {slots:ox.skills?.skills ? slots(oLevels).build : 2, budget:ox.wallet ?? Infinity}) : null;
   const owner = pick => mePlan.chosen.includes(pick) ? p : themPlan?.chosen.some(c => c.bp === pick.bp) ? o : null;
   const skillName = id => meta.skillNames?.[id] || name(id);
