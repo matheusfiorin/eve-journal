@@ -141,13 +141,14 @@ export function renderSkills() {
   <section class="card panel--primary sheet" data-pilot="${esc(p.name.toLowerCase())}" aria-label="${esc(p.name)}’s skill sheet">
     <div class="rows sheet__rows" role="table" aria-label="Skills">${rowsHead('skills', [['Skill', 'name'], ['Level', 'level'], ['Skill points', 'sp']])}
     ${[...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, skills]) => { const total = skills.reduce((t, s) => t + (s.skillpoints_in_skill || 0), 0); return `<details class="skill-group" ${open ? 'open' : ''}><summary><b>${esc(group)}</b><span class="skill-group__bar" aria-hidden="true"><i style="width:${(total / maxGroup * 100).toFixed(1)}%"></i></span><span class="hint">${plural(skills.length, 'skill')} · <span class="num">${total.toLocaleString()}</span> SP</span></summary>
-      ${sortBy(skills, st, get).map(s => { const q = queued.get(s.skill_id); return `<div class="skill rows__row" role="row" data-row tabindex="-1" data-skill="${s.skill_id}" data-five="${s.trained_skill_level === 5}" data-queue="${Boolean(q)}"><span role="cell" class="skill__name">${esc(name(s.skill_id))}${q ? ` <span class="chip chip--accent">to ${ROMAN[q.finished_level]}${q.finish_date ? ` · ${esc(short(q.finish_date))}` : ''}</span>` : ''}</span><span role="cell" class="skill__lvl rows__key">${pips(s)}<small>${s.active_skill_level < s.trained_skill_level ? `Active ${s.active_skill_level} of ${s.trained_skill_level}` : `Level ${s.trained_skill_level}`}</small></span><span role="cell" class="num">${s.skillpoints_in_skill ? `${s.skillpoints_in_skill.toLocaleString()} SP` : '—'}</span></div>`; }).join('')}</details>`; }).join('')}
+      ${sortBy(skills, st, get).map(s => { const q = queued.get(s.skill_id); return `<div class="skill rows__row" role="row" data-row tabindex="-1" data-skill="${s.skill_id}" data-five="${s.trained_skill_level === 5}" data-queue="${Boolean(q)}"><span role="cell" class="skill__name rows__main">${esc(name(s.skill_id))}${q ? ` <span class="chip chip--accent">to ${ROMAN[q.finished_level]}${q.finish_date ? ` · ${esc(short(q.finish_date))}` : ''}</span>` : ''}</span><span role="cell" class="skill__lvl rows__key">${pips(s)}<small>${s.active_skill_level < s.trained_skill_level ? `Active ${s.active_skill_level} of ${s.trained_skill_level}` : `Level ${s.trained_skill_level}`}</small></span><span role="cell" class="num">${s.skillpoints_in_skill ? `${s.skillpoints_in_skill.toLocaleString()} SP` : '—'}</span></div>`; }).join('')}</details>`; }).join('')}
     </div><p id="skills-none" class="state" hidden>No skills match. Clear the search or pick All.</p>
   </section>`;
   filterSkills();
 }
+let wasFiltered = false;
 function filterSkills() {
-  const term = ($('#skill-search')?.value || '').trim().toLowerCase();
+  const term = ($('#skill-search')?.value || '').trim().toLowerCase(), filtered = Boolean(term) || skillFilter !== 'all';
   let total = 0;
   document.querySelectorAll('#skills .skill-group').forEach(group => {
     let shown = 0;
@@ -156,8 +157,10 @@ function filterSkills() {
       row.hidden = !ok; shown += ok;
     });
     group.hidden = !shown; total += shown;
-    if (term || skillFilter !== 'all') group.open = shown > 0;
+    // A search or filter opens the groups with matches; clearing both folds the sheet back to its overview.
+    if (filtered) group.open = shown > 0; else if (wasFiltered) group.open = false;
   });
+  wasFiltered = filtered;
   const none = document.getElementById('skills-none'); if (none) none.hidden = total > 0; // rendered with the sheet
   // The first visible row takes the roving tab stop.
   document.querySelectorAll('#skills .skill').forEach(r => r.tabIndex = -1);

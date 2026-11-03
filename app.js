@@ -25,8 +25,9 @@ const RENDER = {
   industry:earn.renderIndustry, mining:earn.renderMining, exploration:earn.renderExploration, market:earn.renderMarket, jobs:jobs.render,
   map:navigate.renderMap, hauling:navigate.renderHauling, ledger:ledger.render, logbook:logbook.render
 };
-// Views that load market data draw only while they're on screen.
-const LAZY = new Set(['industry', 'mining', 'exploration', 'market', 'map', 'hauling']);
+// Views that load market data or rank the whole map draw only while they're on screen (Bridge and the crew map
+// score mining, industry and exploration, which is too heavy to redo for every hidden view).
+const LAZY = new Set(['bridge', 'strengths', 'industry', 'mining', 'exploration', 'market', 'map', 'hauling']);
 
 function renderAll() {
   shell.renderStrip(); hero.renderMe(); pilotOptions();
