@@ -16,7 +16,8 @@ const TOP = 6;
 const isStation = id => id >= 60000000 && id < 64000000;
 
 // Keep the cheapest sells and richest buys per NPC station; player structures may refuse docking.
-export function aggregate(orders, history = []) {
+// ESI history has no rows for days without trades, so daily volume is the last 7 calendar days' total / 7.
+export function aggregate(orders, history = [], now = Date.now()) {
   const sells = new Map(), buys = new Map(), systems = new Map();
   for (const o of orders) {
     if (!isStation(o.location_id)) continue;
@@ -28,9 +29,10 @@ export function aggregate(orders, history = []) {
       : {...best, volume:best.volume + (Math.abs(best.price - o.price) <= best.price * 0.02 ? o.volume_remain : 0)});
   }
   const top = (side, dir) => [...side].sort((a,b) => dir * (a[1].price - b[1].price)).slice(0, TOP).map(([loc, v]) => [loc, v.price, v.volume]);
-  const recent = history.slice(-7);
+  const since = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
+  const recent = history.filter(h => h.date >= since);
   return {
-    d: recent.length ? Math.round(recent.reduce((t, h) => t + h.volume, 0) / recent.length) : 0,
+    d: Math.round(recent.reduce((t, h) => t + h.volume, 0) / 7),
     p: recent.length ? Math.round(recent.reduce((t, h) => t + h.average, 0) / recent.length * 100) / 100 : 0,
     s: top(sells, 1), b: top(buys, -1), systems
   };

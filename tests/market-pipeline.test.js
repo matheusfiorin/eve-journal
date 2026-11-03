@@ -3,10 +3,19 @@ import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes,decayTraffic,history} from '../scripts/market-pipeline.mjs';
 import {pipelineToken} from '../worker/index.js';
+const day=n=>new Date(Date.now()-n*86400000).toISOString().slice(0,10);
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
 test('aggregate keeps the best price per station with volume near that price, and skips structures',()=>{
- const r=aggregate([order(60003760,10,5),order(60003760,10.1,7),order(60003760,20,100),order(60008494,12,3),order(1035466617946,1,999),order(60003760,8,50,true),order(60003760,2,50,true)],[{volume:10},{volume:20}]);
- assert.deepEqual(r.s,[[60003760,10,12],[60008494,12,3]]);assert.deepEqual(r.b,[[60003760,8,50]]);assert.equal(r.d,15);assert.equal(r.systems.has(1035466617946),false);
+ const r=aggregate([order(60003760,10,5),order(60003760,10.1,7),order(60003760,20,100),order(60008494,12,3),order(1035466617946,1,999),order(60003760,8,50,true),order(60003760,2,50,true)],[{date:day(2),volume:28},{date:day(1),volume:56}]);
+ assert.deepEqual(r.s,[[60003760,10,12],[60008494,12,3]]);assert.deepEqual(r.b,[[60003760,8,50]]);assert.equal(r.d,12);assert.equal(r.systems.has(1035466617946),false);
+});
+test('daily volume spreads the last 7 calendar days over 7, counting days without trades',()=>{
+ const now=Date.parse('2026-05-20T12:00:00Z');
+ // ESI omits no-trade days: three trading days in the past week, plus older rows that must not count.
+ const history=[{date:'2026-05-01',volume:9000,average:1},{date:'2026-05-12',volume:7000,average:1},{date:'2026-05-14',volume:70,average:2},{date:'2026-05-17',volume:140,average:3},{date:'2026-05-19',volume:210,average:4}];
+ const r=aggregate([],history,now);
+ assert.equal(r.d,60,'420 traded over 7 days, not 3 rows');assert.equal(r.p,3,'price averages the traded days');
+ assert.equal(aggregate([],[{date:'2026-05-01',volume:9000,average:1}],now).d,0,'no trades this week');
 });
 test('aggregate handles a cheaper order arriving after a pricier one',()=>{
  assert.deepEqual(aggregate([order(60003760,10.1,7),order(60003760,10,5)]).s,[[60003760,10,12]]);
@@ -68,7 +77,7 @@ test('high-sec regions come from systems at 0.45 or better, ignoring wormhole sp
  assert.deepEqual(highsecRegions({systems:{1:['A',0.9,10000002,[]],2:['B',0.2,10000014,[]],3:['C',0.46,10000043,[]],4:['D',0.9,11000001,[]],5:['E',0.5,10000002,[]]}}),[10000002,10000043]);
 });
 test('aggregate keeps the 7-day average price',()=>{
- assert.equal(aggregate([],[{volume:1,average:10},{volume:1,average:20}]).p,15);
+ assert.equal(aggregate([],[{date:day(2),volume:1,average:10},{date:day(1),volume:1,average:20}]).p,15);
 });
 
 test('the survey refreshes unseen and stale regions first, pilot regions ahead of the rest',()=>{
