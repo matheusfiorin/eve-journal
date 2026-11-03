@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {mockApp,openApp,tab} from './fixtures.js';
+import {mockApp,openApp,tab,isMobile} from './fixtures.js';
 test('a new browser picks its pilot in the hero, and the choice sticks',async({page},testInfo)=>{
  const {errors}=await mockApp(page,{fresh:true});await page.goto('/');
  const hero=page.locator('#hero');await expect(hero).toBeVisible();await expect(hero.locator('.hero-pilot')).toHaveCount(2);await expect(hero).toContainText('Who’s flying today?');
@@ -33,19 +33,37 @@ test('the crew map credits both pilots and never scores them against each other'
  await page.screenshot({path:testInfo.outputPath('empire.png'),fullPage:true});expect(errors).toEqual([]);
 });
 test('market ranks hauls, station trades and manufacturing from the pilot’s location',async({page},testInfo)=>{
- const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'market');const market=page.locator('#market');
+ test.setTimeout(90000);
+ const {errors,state}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'market');const market=page.locator('#market'),drawer=page.locator('#drawer'),mobile=isMobile(page);
+ await page.evaluate(()=>localStorage.removeItem('eve.trade.list'));
  await expect(page.locator('#market-status')).toContainText('2 regions');await expect(page.locator('#market-origin')).toContainText('Jita · Fiofka’s location');
  await expect(page.locator('#market-cargo')).toHaveValue('400');await expect(page.locator('#market-fees')).toContainText('from Fiofka’s skills');
- const haul=market.locator('.opp').filter({hasText:'Tritanium'}).first();await expect(haul).toContainText('Amarr VIII');await expect(haul).toContainText('+3 j');await expect(haul).toContainText('40,000 units');
- await expect(market.locator('article').nth(1)).toContainText('Rifter');
- await expect(market.locator('article').nth(2)).toContainText('Rifter');await expect(market.locator('article').nth(2)).toContainText('5.00% system index');
+ const sum=market.locator('.earn-sum');await expect(sum.locator('.readout>div')).toHaveCount(3);await expect(sum).toContainText('Jita');await expect(sum).toContainText('ISK per jump');
+ await sum.locator('.fees summary').click();await expect(page.locator('#market-fees')).toBeVisible();
+ const rows=market.locator('.rows__row'),haul=rows.filter({hasText:'Tritanium'}).first();
+ await expect(market.locator('[data-trade="haul"]')).toHaveAttribute('aria-selected','true');await expect(haul).toContainText('Amarr');await expect(haul).toContainText('+3 j');
  await page.screenshot({path:testInfo.outputPath('market.png'),fullPage:true});
- await page.locator('#market-cargo').fill('100');await page.locator('#market-cargo').dispatchEvent('change');await expect(haul).toContainText('10,000 units');
+ // A haul opens with both legs, the fees context and the autopilot.
+ await haul.click();await expect(page.locator('#drawer-title')).toHaveText('Tritanium');await expect(drawer).toContainText('40,000 units');await expect(drawer).toContainText('Amarr VIII');
+ await expect(drawer.locator('.legs>li')).toHaveCount(2);await expect(drawer.locator('.legs>li').last()).toContainText('3 jumps');
+ await page.screenshot({path:testInfo.outputPath('market-drawer.png')});
+ await drawer.getByRole('button',{name:'Send to Fiofka’s autopilot'}).click();await expect(page.locator('#market-sent')).toContainText('Autopilot set');expect(state.waypoints.at(-1)).toBe(30002187);
+ await page.keyboard.press('Escape');await expect(drawer).toBeHidden();
+ // The other two lists, one at a time.
+ await market.locator('[data-trade="spread"]').click();await expect(market.locator('[data-trade="spread"]')).toHaveAttribute('aria-selected','true');await expect(rows.filter({hasText:'Rifter'})).toHaveCount(1);
+ await rows.filter({hasText:'Rifter'}).click();await expect(drawer).toContainText('Top bid');await expect(drawer).toContainText('Place a buy order at the top bid');await page.keyboard.press('Escape');
+ await market.locator('[data-trade="build"]').click();await expect(rows.filter({hasText:'Rifter'})).toHaveCount(1);await expect(market).toContainText('5.00% system index');
+ await rows.filter({hasText:'Rifter'}).click();await expect(drawer).toContainText('Materials');await expect(drawer).toContainText('Job cost');await page.keyboard.press('Escape');
+ if(mobile)await page.locator('#market-sort').selectOption('materials');else await market.locator('.sort[data-sort="materials"]').click();await expect(page.locator('#market-sort')).toHaveValue('materials');
+ await market.locator('[data-trade="haul"]').click();await expect(page.locator('#market-sort')).toHaveValue('');
+ await page.locator('#market-filter').fill('pyer');await expect(rows.filter({visible:true}).filter({hasText:'Tritanium'})).toHaveCount(0);await page.locator('#market-filter').fill('');
+ // Toolbar inputs resize every suggestion.
+ await page.locator('#market-cargo').fill('100');await page.locator('#market-cargo').blur();await expect(page.locator('#market-fees')).toContainText('cargo 100 m³');await haul.click();await expect(drawer).toContainText('10,000 units');await page.keyboard.press('Escape');
  await expect(page.locator('#market-budget')).toHaveValue('12500000');await expect(page.locator('#market-fees')).toContainText('budget 12.5M ISK');
- await page.locator('#market-budget').fill('20000');await page.locator('#market-budget').dispatchEvent('change');
- await expect(haul).toContainText('4,000 units');await expect(haul).toContainText('your whole budget');
- await expect(market.locator('article').nth(1)).not.toContainText('Rifter','a Rifter buy order costs more than 20k');
- await expect(market.locator('article').nth(2)).toContainText('1 more profitable build needs more than 20.0k ISK');
+ await page.locator('#market-budget').fill('20000');await page.locator('#market-budget').blur();await expect(page.locator('#market-fees')).toContainText('budget 20.0k ISK');
+ await expect(haul).toContainText('Whole budget');await haul.click();await expect(drawer).toContainText('4,000 units');await expect(drawer).toContainText('This uses your whole budget');await page.keyboard.press('Escape');
+ await market.locator('[data-trade="spread"]').click();await expect(rows.filter({hasText:'Rifter'})).toHaveCount(0,'a Rifter buy order costs more than 20k');
+ await market.locator('[data-trade="build"]').click();await expect(market).toContainText('1 more profitable build needs more than 20.0k ISK');await market.locator('[data-trade="haul"]').click();
  expect(errors).toEqual([]);
 });
 test('a cold start fetches the market snapshot and live prices once, and Refresh fetches them again',async({page})=>{
@@ -63,5 +81,5 @@ test('a cold start fetches the market snapshot and live prices once, and Refresh
  await expect.poll(market).toBe(2);expect(prices).toHaveLength(2);
 });
 test('market explains an empty pipeline',async({page})=>{
- await mockApp(page,{noMarket:true});await openApp(page);await tab(page,'market');await expect(page.locator('#market-status')).toContainText('has not stored any data yet');
+ await mockApp(page,{noMarket:true});await openApp(page);await tab(page,'market');await expect(page.locator('#market-status')).toContainText('has not stored any data yet');await expect(page.locator('#market .state')).toContainText('No market data yet');
 });
