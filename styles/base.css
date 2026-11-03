@@ -35,7 +35,7 @@ button:hover{background:var(--accent-strong)}
 button:active{transform:translateY(1px)}
 button:disabled,button[aria-busy=true]{opacity:.55;cursor:progress}
 .secondary,button.secondary{background:var(--surface-2);color:var(--text);border-color:var(--line-strong)}
-.secondary:hover{background:var(--surface-3);border-color:var(--accent-line)}
+@media (hover:hover){ .secondary:hover{background:var(--surface-3);border-color:var(--accent-line)} }
 .small,button.small{min-height:28px;padding:0 10px;font-size:var(--fs-xs)}
 a.button{display:inline-flex;align-items:center;min-height:36px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--r-ctl);
   background:var(--surface-2);color:var(--text);font:600 var(--fs-sm)/1 var(--ff-ui);text-decoration:none}

@@ -21,7 +21,11 @@ test('the command palette opens with Control+K and jumps to screens and systems'
  // Systems come from the universe graph once the market snapshot has loaded.
  await expect(page.locator('#mining .opps .opp').first()).toBeVisible();
  await page.keyboard.press('Control+K');await page.keyboard.type('niarja');await expect(palette.locator('[aria-selected="true"]')).toContainText('System');
- await page.keyboard.press('Enter');await expect(page.locator('#map-modal')).toBeVisible();await expect(page.locator('#map-modal-title')).toHaveText('Niarja');
+ // Enter shows a system on the Star map; Shift+Enter opens it in the 3D modal.
+ await page.keyboard.press('Enter');await expect(page.locator('#map')).toBeVisible();await expect(page.locator('#map-panel h3')).toHaveText('Niarja');
+ await expect(page.locator('#map-region')).toHaveValue('10000043');await expect.poll(()=>hash(page)).toContain('s=30003504');
+ await page.keyboard.press('Control+K');await page.keyboard.type('niarja');await expect(palette.locator('[aria-selected="true"]')).toContainText('System');
+ await page.keyboard.press('Shift+Enter');await expect(page.locator('#map-modal')).toBeVisible();await expect(page.locator('#map-modal-title')).toHaveText('Niarja');
  await page.locator('#map-modal-close').click();
  await page.keyboard.press('Control+K');await page.keyboard.type('jitxq');await expect(palette).toContainText('No match for “jitxq”');await page.keyboard.press('Escape');await expect(palette).toBeHidden();
  expect(errors).toEqual([]);

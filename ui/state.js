@@ -16,8 +16,9 @@ export const S = {
   config:{pilots:[]}, data:emptyData(), store:null, backend:null, universeStatus:null, generation:0,
   pilots:[], me:null, wing:new Map(),
   prices:null, adjusted:new Map(), marketData:null, marketBook:null, costIndices:null,
-  // Navigate's map view state; the map modal writes it when "Open in Star map" is pressed.
-  map:{region:null, view:'region', overlay:'security', jump:'', selected:null, route:[], routeLabel:''}
+  // Navigate's Star map state (see ui/mapstate.js). layers: [{id, label, color, kind:'route'|'pins'|'trail'|'ring', ids}],
+  // added by "Open in Star map"; linked: the address names this state (#navigate/map?r=…&s=…).
+  map:{region:null, view:'region', overlay:'security', jump:'', selected:null, layers:[], viewBox:null, linked:false}
 };
 export const names = new Map(), corporations = new Map(), typeGroup = new Map(), assetCats = new Map(), counters = new Map();
 try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => assetCats.set(id, cat)); } catch { /* Categories are refetched. */ }

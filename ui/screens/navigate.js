@@ -1,34 +1,16 @@
-// Navigate: the Star map (region maps, 3D, live overlays, jump range, system panel) and the risk-weighted Haul plan.
+// Navigate: the Star map (ui/screens/starmap.js) and the risk-weighted Haul plan.
 import {HULLS, MODES, suggestHull, campIntel, plan} from '../../hauling.js';
-import {secColor, inRange, JUMP_SHIPS, strengths, lightYears} from '../../map.js';
-import {secLight, regionSvg, StarMap} from '../../mapview.js';
+import {secLight} from '../../mapview.js';
 import {secClass, dotlanRoute} from '../../route.js';
-import {S, reduced, mine} from '../state.js';
+import {S, mine} from '../state.js';
 import {esi, json, name, resolveNames} from '../esi.js';
-import {loadMarket} from '../marketdata.js';
-import {$, esc, format, plural, mapButton, routeAttrs, tabReady, skeleton, go} from '../shared.js';
-import {mapGraph, fillSystemList, regionName, sendable, autopilotButton} from '../routes.js';
-import {mapLive, mapLiveData, systemPanel} from '../mapmodal.js';
+import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go} from '../shared.js';
+import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
+import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
+export {renderMap};
 
-const OVERLAY_OPTIONS = [['security','Security'],['shipKills','Ship kills (last hour)'],['podKills','Pod kills (last hour)'],['npcKills','NPC kills (last hour)'],['jumps','Jumps (last hour)'],['kills24','Ship kills (~24 h)'],['sov','Sovereignty'],['fw','Faction warfare'],['incursion','Incursions'],['industry','Manufacturing index'],['belts','Asteroid belts'],['stations','NPC stations']];
 export const markup = {
-  map:`<div class="card market-controls">
-  <div class="card-head"><div><h2>Star map</h2><p id="map-status" class="hint">Loading the map…</p></div></div>
-  <div class="row">
-   <form id="map-find" class="find"><label>Find system<input id="map-search" list="systems" data-filter placeholder="Jita, Amarr, Tama…" autocomplete="off"></label><button class="secondary">Go</button></form>
-   <label>Region<select id="map-region"></select></label>
-  </div>
-  <div class="row">
-   <label>View<select id="map-view"><option value="region">Region map</option><option value="region3d">Region in 3D</option><option value="universe">New Eden in 3D</option></select></label>
-   <label>Overlay<select id="map-overlay">${OVERLAY_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
-   <label>Jump range<select id="map-jump"><option value="">Off</option><option value="blops">Black Ops · 8 ly</option><option value="jf">Jump freighter · 10 ly</option><option value="capital">Carrier, Dread, FAX · 7 ly</option><option value="super">Super, Titan · 6 ly</option></select></label>
-  </div>
-  <div id="map-route" class="map-route" hidden></div>
- </div>
- <div class="map-layout">
-  <div id="map-stage" class="map-stage card"><div id="map-canvas-wrap" class="map-canvas-wrap"></div><div class="map-zoom"><button type="button" class="secondary small" data-zoom="0.75" aria-label="Zoom in">+</button><button type="button" class="secondary small" data-zoom="1.33" aria-label="Zoom out">−</button><button type="button" class="secondary small" data-zoom="0" aria-label="Fit the whole region">Fit</button></div><div id="map-tip" class="map-tip" hidden></div><div id="map-legend" class="map-legend"></div></div>
-  <aside id="map-panel" class="card map-panel"></aside>
- </div>`,
+  map:mapMarkup,
   hauling:`<form id="haul-form" class="card market-controls">
   <div class="card-head"><div><h2>Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
   <div id="haul-stops" class="stops"></div>
@@ -50,144 +32,6 @@ export const markup = {
  </form>
  <div id="haul-content"></div>`
 };
-
-// ── Star map ──
-const OVERLAYS = {
-  security:{color:'#4ecef8'}, shipKills:{color:'#ff7e70'}, podKills:{color:'#ff7e70'}, npcKills:{color:'#f4c55a'}, jumps:{color:'#4ecef8'}, kills24:{color:'#ff7e70'},
-  sov:{color:'#c3b9ff'}, fw:{color:'#f4c55a'}, incursion:{color:'#bb1116'}, industry:{color:'#8fb2ff'}, belts:{color:'#e8956a'}, stations:{color:'#62d99b'}
-};
-for (const [key, label] of OVERLAY_OPTIONS) OVERLAYS[key].label = label;
-let starMap = null;
-const mapState = S.map;
-function overlayValues(g, overlay) {
-  const live = mapLiveData() || {kills:{}, jumps:{}, sov:{}, fw:{}, incursions:new Map()}, meta = S.marketData?.meta?.data || {}, out = {};
-  for (const sys of g.systems.values()) {
-    const id = sys.id, k = live.kills[id];
-    out[id] = {shipKills:k?.ship_kills, podKills:k?.pod_kills, npcKills:k?.npc_kills, jumps:live.jumps[id], kills24:meta.risk?.s?.[id]?.[0], belts:sys.belts,
-      sov:live.sov[id] ? 1 : 0, fw:live.fw[id] ? (live.fw[id].contested === 'uncontested' ? 0.3 : 0.6 + 0.4 * (live.fw[id].victory_points / (live.fw[id].victory_points_threshold || 1))) : 0,
-      incursion:live.incursions.has(id) ? 1 : 0, industry:S.costIndices?.get(id)?.manufacturing, stations:0}[overlay];
-  }
-  if (overlay === 'stations') for (const st of g.stations.values()) out[st.system] = (out[st.system] || 0) + 1;
-  return out;
-}
-function mapColor(g, overlay) {
-  if (overlay === 'security') return id => secColor(g.systems.get(id).sec);
-  const k = strengths(overlayValues(g, overlay)), [r, gg, b] = OVERLAYS[overlay].color.match(/\w\w/g).map(h => parseInt(h, 16));
-  return id => { const v = k(id); return v ? `rgba(${r},${gg},${b},${(0.35 + 0.65 * v).toFixed(2)})` : 'rgba(139,155,176,0.35)'; };
-}
-function mapZoom(f) {
-  const svg = $('#map-canvas-wrap svg.region-map');
-  if (svg) {
-    const b = svg.viewBox.baseVal, [fw, fh] = (svg.dataset.full || `${b.width} ${b.height}`).split(' ').map(Number);
-    const box = f ? [b.x + b.width * (1 - f) / 2, b.y + b.height * (1 - f) / 2, b.width * f, b.height * f] : [0, 0, fw, fh];
-    svg.setAttribute('viewBox', box.join(' ')); mapState.viewBox = {region:mapState.region, box};
-  } else if (starMap && f) starMap.target.distance = Math.max(8, starMap.target.distance * f);
-  else { delete $('#map-canvas-wrap').dataset.framed; renderMap(); }
-}
-const regionIdsWithLayout = g => Object.keys(g.regions).map(Number).filter(r => [...g.systems.values()].some(s => s.region === r && s.p2)).sort((a, b) => regionName(a).localeCompare(regionName(b)));
-export async function renderMap() {
-  const status = $('#map-status'), stage = $('#map-stage');
-  if (!S.backend) { status.textContent = 'The map needs the backend.'; return; }
-  try { await loadMarket(); } catch (error) { status.textContent = `Map unavailable: ${error.message}`; return; }
-  const g = mapGraph();
-  if (!g || !Object.keys(g.regions).length || ![...g.systems.values()].some(x => x.pos)) {
-    status.textContent = 'Map data (star positions, region layouts and stations) is still being built by the hourly pipeline. Reload in a few minutes.';
-    $('#map-canvas-wrap').innerHTML = skeleton('Charting New Eden…'); return;
-  }
-  fillSystemList(g);
-  const regionSelect = $('#map-region');
-  if (!regionSelect.options.length) regionSelect.innerHTML = regionIdsWithLayout(g).map(r => `<option value="${r}">${esc(regionName(r))}</option>`).join('');
-  if (!mapState.region) {
-    const here = mine()?.ops?.location?.value?.solar_system_id;
-    mapState.selected ??= g.systems.has(here) ? here : 30000142;
-    mapState.region = g.systems.get(mapState.selected)?.region || 10000002;
-  }
-  regionSelect.value = mapState.region;
-  $('#map-view').value = mapState.view; $('#map-overlay').value = mapState.overlay; $('#map-jump').value = mapState.jump;
-  const routeBar = $('#map-route');
-  routeBar.hidden = !mapState.route.length;
-  routeBar.innerHTML = mapState.route.length ? `<span>${esc(mapState.routeLabel)} · ${plural(mapState.route.length - 1, 'jump')}</span><button type="button" class="secondary small" id="map-route-clear">Clear route</button>` : '';
-  status.textContent = 'Loading live kills, jumps, sovereignty and incursions…';
-  const live = await mapLive();
-  const missing = [...new Set([...Object.values(live.sov).map(x => x.alliance_id || x.faction_id), ...Object.values(live.fw).map(x => x.occupier_faction_id)])].filter(Boolean);
-  await resolveNames(missing).catch(() => {});
-  const kills = Object.values(live.kills).reduce((t, k) => t + k.ship_kills, 0);
-  status.textContent = `${g.systems.size.toLocaleString()} systems · ${Object.keys(g.regions).length} regions · ${kills.toLocaleString()} ship kills and ${Object.values(live.jumps).reduce((t, j) => t + j, 0).toLocaleString()} jumps in the last hour · ${(n => n ? plural(n, 'incursion') : 'no incursions')(new Set([...live.incursions.values()]).size)}`;
-  const values = overlayValues(g, mapState.overlay), k = strengths(values);
-  const range = mapState.jump && mapState.selected ? inRange(g, mapState.selected, JUMP_SHIPS[mapState.jump].ly) : [];
-  const rangeIds = new Set(range.map(r => r.system.id));
-  const legend = $('#map-legend');
-  legend.innerHTML = mapState.overlay === 'security'
-    ? `<span>Security</span>${[1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, -0.5].map(v => `<i class="swatch" style="--c:${secColor(v)}" title="${v > 0 ? v.toFixed(1) : '0.0 and below'}"></i>`).join('')}<span>1.0 → null</span>`
-    : `<span>${esc(OVERLAYS[mapState.overlay].label)}</span><i class="swatch big" style="--c:${OVERLAYS[mapState.overlay].color}"></i><span>more</span>`;
-  if (mapState.jump && mapState.selected) legend.innerHTML += `<span class="range-note">${range.length ? plural(range.length, 'system') : 'No low-sec or null-sec systems'} within ${JUMP_SHIPS[mapState.jump].ly} ly (${esc(JUMP_SHIPS[mapState.jump].name)})</span>`;
-  const tip = $('#map-tip');
-  const showTip = (sys, x, y) => {
-    if (!sys) { tip.hidden = true; return; }
-    const v = values[sys.id];
-    tip.innerHTML = `<b>${esc(sys.name)}</b> ${secLight(sys.sec)}<small>${esc(regionName(sys.region))}${mapState.overlay !== 'security' ? ` · ${esc(OVERLAYS[mapState.overlay].label)}: ${v === undefined ? '—' : typeof v === 'number' && v < 1 && v > 0 ? `${(v * 100).toFixed(1)}%` : v}` : ''}${rangeIds.has(sys.id) ? ` · ${lightYears(g.systems.get(mapState.selected), sys).toFixed(1)} ly` : ''}</small>`;
-    tip.style.left = `${Math.min(x + 14, stage.clientWidth - 200)}px`; tip.style.top = `${y + 14}px`; tip.hidden = false;
-  };
-  const select = id => { mapState.selected = id; const r = g.systems.get(id)?.region; if (mapState.view === 'region' && r !== mapState.region && g.systems.get(id)?.p2) mapState.region = r; renderMap(); };
-  const wrap = $('#map-canvas-wrap');
-  if (mapState.view === 'region') {
-    starMap?.stop();
-    wrap.innerHTML = regionSvg(g, mapState.region, {strength:mapState.overlay === 'security' ? () => 0 : k, value:id => values[id] ?? '', route:mapState.route, selected:mapState.selected, range:rangeIds, overlayColor:OVERLAYS[mapState.overlay].color});
-    const svg = wrap.querySelector('svg');
-    if (svg) {
-      svg.addEventListener('mouseover', e => { const n = e.target.closest('.sys'); if (n) { const r = stage.getBoundingClientRect(); showTip(g.systems.get(Number(n.dataset.system)), e.clientX - r.left, e.clientY - r.top); } });
-      svg.addEventListener('mouseout', e => { if (e.target.closest('.sys') && !e.relatedTarget?.closest?.('.sys')) tip.hidden = true; });
-      svg.addEventListener('click', e => { const n = e.target.closest('[data-system]'); if (n) { e.stopPropagation(); select(Number(n.dataset.system)); } });
-      svg.addEventListener('keydown', e => { const n = e.target.closest('.sys'); if (n && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(Number(n.dataset.system)); } });
-      zoomable(svg, box => { mapState.viewBox = {region:mapState.region, box}; });
-      // Keep the reader's zoom across overlay changes; a big region opens at reading size around the selected system.
-      const full = svg.viewBox.baseVal, px = wrap.clientWidth || 900, ph = wrap.clientHeight || 600;
-      const node = svg.querySelector(`.sys[data-system="${mapState.selected}"]`);
-      const at = node ? node.getAttribute('transform').match(/[\d.]+/g).map(Number) : [full.width / 2, full.height / 2];
-      let box = mapState.viewBox?.region === mapState.region ? mapState.viewBox.box : null;
-      if (box && node && (at[0] < box[0] || at[0] > box[0] + box[2] || at[1] < box[1] || at[1] > box[1] + box[3])) box = null;
-      if (!box && (full.width > px * 1.05 || full.height > ph * 1.05)) { const w = px * 1.1, h = w * ph / px; box = [at[0] - w / 2, at[1] - h / 2, w, h]; }
-      if (box) svg.setAttribute('viewBox', box.join(' '));
-      svg.dataset.full = `${full.width} ${full.height}`;
-    }
-  } else {
-    if (!wrap.querySelector('canvas')) { wrap.innerHTML = '<canvas class="star-map" aria-label="3D star map"></canvas>'; starMap = new StarMap(wrap.querySelector('canvas'), {reduced, onHover:(sys, x, y) => showTip(sys, x, y), onSelect:sys => select(sys.id)}); }
-    const inRegion = [...g.systems.values()].filter(x => x.region === mapState.region);
-    const universeView = mapState.view === 'universe';
-    const focus = universeView ? null : new Set([...inRegion.map(x => x.id), ...mapState.route, ...rangeIds]);
-    const labels = universeView ? Object.keys(g.regions).map(Number).map(r => { const sysIn = [...g.systems.values()].filter(x => x.region === r && x.pos); const c = sysIn.reduce((t, x) => t.map((v, i) => v + x.pos[i] / sysIn.length), [0, 0, 0]); return {text:regionName(r), pos:c, n:sysIn.length}; }).sort((a, b) => b.n - a.n) : [];
-    starMap.set({g, systems:[...g.systems.values()].filter(x => x.pos), color:mapColor(g, mapState.overlay), focus, route:mapState.route, selected:mapState.selected, labels});
-    const target = mapState.route.length ? mapState.route.map(id => g.systems.get(id)) : universeView ? [...g.systems.values()] : inRegion;
-    if (wrap.dataset.framed !== `${mapState.view}:${mapState.region}:${mapState.route.join()}`) { starMap.fly(target.filter(x => x?.pos), {snap:!wrap.dataset.framed}); wrap.dataset.framed = `${mapState.view}:${mapState.region}:${mapState.route.join()}`; }
-  }
-  const panel = $('#map-panel');
-  if (mapState.selected) panel.innerHTML = systemPanel(mapState.selected);
-  else panel.innerHTML = `<h3>${esc(regionName(mapState.region))}</h3><p class="hint">Select a system for details.</p>`;
-  if (range.length) panel.innerHTML += `<h4>In jump range (${range.length})</h4><ul class="plain">${range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
-}
-// Wheel to zoom and drag to pan an SVG map by moving its viewBox.
-function zoomable(svg, onChange = () => {}) {
-  const vb = () => svg.viewBox.baseVal;
-  svg.addEventListener('wheel', e => {
-    e.preventDefault();
-    const box = vb(), r = svg.getBoundingClientRect(), f = e.deltaY > 0 ? 1.15 : 0.87;
-    const mx = box.x + (e.clientX - r.left) / r.width * box.width, my = box.y + (e.clientY - r.top) / r.height * box.height;
-    const w = Math.max(150, Math.min(3000, box.width * f)), h = box.height * w / box.width;
-    svg.setAttribute('viewBox', `${mx - (mx - box.x) * w / box.width} ${my - (my - box.y) * h / box.height} ${w} ${h}`);
-    onChange([...svg.getAttribute('viewBox').split(' ').map(Number)]);
-  }, {passive:false});
-  let drag = null;
-  svg.addEventListener('pointerdown', e => { if (!e.target.closest('[data-system]')) drag = {x:e.clientX, y:e.clientY}; });
-  svg.addEventListener('pointermove', e => {
-    if (!drag) return;
-    const box = vb(), r = svg.getBoundingClientRect();
-    svg.setAttribute('viewBox', `${box.x - (e.clientX - drag.x) * box.width / r.width} ${box.y - (e.clientY - drag.y) * box.height / r.height} ${box.width} ${box.height}`);
-    drag = {x:e.clientX, y:e.clientY};
-    onChange([...svg.getAttribute('viewBox').split(' ').map(Number)]);
-  });
-  svg.addEventListener('pointerup', () => { drag = null; });
-  svg.addEventListener('pointerleave', () => { drag = null; });
-}
 
 // ── Haul plan: risk-weighted routes through any number of stops, using live zKillboard kills along the way. ──
 const HAUL_KEY = 'eve-haul:v1';
@@ -224,13 +68,7 @@ export async function renderHauling() {
   if (!g) { status.textContent = 'The gate map appears after the next pipeline run.'; content.innerHTML = ''; return; }
   const byName = new Map([...g.systems.values()].map(s => [s.name.toLowerCase(), s.id]));
   fillSystemList(g);
-  const rows = $('#haul-stops');
-  if (!rows.children.length) {
-    const saved = haulSaved(), here = mine()?.ops?.location?.value?.solar_system_id;
-    for (const v of saved.stops?.length >= 2 ? saved.stops : [g.systems.get(here)?.name || 'Jita', 'Amarr']) rows.append(haulRow(v));
-    for (const key of ['value', 'volume', 'avoid']) if (saved[key] !== undefined) $(`#haul-${key}`).value = saved[key];
-    haulNumber();
-  }
+  const rows = ensureRows();
   const names = [...rows.querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean);
   const unknown = names.filter(n => !byName.has(n.toLowerCase()));
   const stops = names.map(n => byName.get(n.toLowerCase())).filter(Boolean);
@@ -300,29 +138,38 @@ export async function renderHauling() {
   draw();
 }
 
+// The stop rows, filled from this browser's last plan (or here → Amarr) the first time they're needed.
+function ensureRows() {
+  const rows = $('#haul-stops');
+  if (rows.children.length) return rows;
+  const saved = haulSaved(), here = mine()?.ops?.location?.value?.solar_system_id;
+  for (const v of saved.stops?.length >= 2 ? saved.stops : [mapGraph()?.systems.get(here)?.name || 'Jita', 'Amarr']) rows.append(haulRow(v));
+  for (const key of ['value', 'volume', 'avoid']) if (saved[key] !== undefined) $(`#haul-${key}`).value = saved[key];
+  haulNumber();
+  return rows;
+}
+// "Haul here" makes a system the destination (the old destination stays on as a stop), "Haul from" the start,
+// and "Add as stop" slots it in before the destination.
+function haulWith(kind, name) {
+  const rows = ensureRows(), input = row => row.querySelector('input'), first = rows.firstElementChild, last = rows.lastElementChild;
+  if (kind === 'to') {
+    if (!input(last).value.trim() || input(last).value.trim().toLowerCase() === name.toLowerCase()) input(last).value = name;
+    else rows.append(haulRow(name));
+  } else if (kind === 'from') input(first).value = name;
+  else if (![...rows.querySelectorAll('input')].some(i => i.value.trim().toLowerCase() === name.toLowerCase())) rows.insertBefore(haulRow(name), last);
+  haulNumber();
+}
 export function wire() {
-  document.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => mapZoom(Number(b.dataset.zoom)));
-  $('#map-region').onchange = event => { mapState.region = Number(event.target.value); mapState.selected = null; renderMap(); };
-  $('#map-view').onchange = event => { mapState.view = event.target.value; renderMap(); };
-  $('#map-overlay').onchange = event => { mapState.overlay = event.target.value; renderMap(); };
-  $('#map-jump').onchange = event => { mapState.jump = event.target.value; renderMap(); };
-  $('#map-find').onsubmit = event => {
-    event.preventDefault();
-    const g = mapGraph(), q = $('#map-search').value.trim().toLowerCase();
-    const hit = g && [...g.systems.values()].find(x => x.name.toLowerCase() === q) || g && [...g.systems.values()].find(x => x.name.toLowerCase().startsWith(q));
-    if (!hit) { $('#map-status').textContent = `No system named “${$('#map-search').value}”.`; return; }
-    mapState.selected = hit.id; mapState.region = hit.region; renderMap();
-  };
-  // Systems in the side panel select on the map; the route bar clears; "Haul here" fills the last haul stop.
+  wireMap();
   document.addEventListener('click', event => {
-    const sys = event.target.closest('#map-panel [data-system]');
-    if (sys) { event.preventDefault(); mapState.selected = Number(sys.dataset.system); const r = mapGraph()?.systems.get(mapState.selected)?.region; if (mapState.view === 'region' && r) mapState.region = r; renderMap(); }
-    if (event.target.id === 'map-route-clear') { mapState.route = []; mapState.routeLabel = ''; renderMap(); }
-    const haulTo = event.target.closest('[data-haul-to]');
-    if (haulTo) {
-      const target = mapGraph()?.systems.get(Number(haulTo.dataset.haulTo));
-      if (target) { $('#map-modal').close(); go('hauling'); requestAnimationFrame(() => { $('#haul-stops').lastElementChild.querySelector('input').value = target.name; renderHauling(); }); }
-    }
+    const b = event.target.closest('[data-haul-to], [data-haul-from], [data-haul-stop]');
+    if (!b) return;
+    const kind = b.dataset.haulTo ? 'to' : b.dataset.haulFrom ? 'from' : 'stop';
+    const target = mapGraph()?.systems.get(Number(b.dataset.haulTo || b.dataset.haulFrom || b.dataset.haulStop));
+    if (!target) return;
+    if ($('#map-modal').open) $('#map-modal').close();
+    haulWith(kind, target.name);
+    go('hauling');
   });
   $('#haul-add').onclick = () => { const rows = $('#haul-stops'); rows.insertBefore(haulRow(), rows.lastElementChild); haulNumber(); rows.children[rows.children.length - 2].querySelector('input').focus(); };
   $('#haul-stops').onclick = event => {

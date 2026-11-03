@@ -42,7 +42,7 @@ function selectTab(key) {
   const next = document.getElementById(id);
   document.querySelectorAll('.view').forEach(s => { if (s !== next) s.hidden = true; });
   if (next.hidden) { next.hidden = false; next.classList.remove('view--enter'); void next.offsetWidth; next.classList.add('view--enter'); }
-  history.replaceState(null, '', `${location.pathname}${location.search}#${shell.hashOf(id)}`);
+  history.replaceState(null, '', `${location.pathname}${location.search}#${shell.hashOf(id)}${shell.hashQuery(id)}`);
   RENDER[id]();
   next.querySelectorAll('[data-count]').forEach(el => counters.delete(el.dataset.key));
   countUps();

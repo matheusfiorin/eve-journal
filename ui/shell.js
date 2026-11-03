@@ -3,7 +3,7 @@
 import {S, mine, summary} from './state.js';
 import {$, esc, format, openDrawer, closeDrawer, go} from './shared.js';
 import {mapGraph} from './routes.js';
-import {openMap} from './mapmodal.js';
+import {openMap, showOnMap} from './mapmodal.js';
 import {loadMarket} from './marketdata.js';
 
 export const DESTS = [
@@ -24,6 +24,7 @@ const store = {get:k => { try { return localStorage.getItem(k); } catch { return
 
 // A view id, an old tab id, a destination ("earn", its last-used view) or "earn/mine" → a view id, or null.
 export function resolve(key) {
+  key = String(key).split('?')[0];
   key = OLD[key] || key;
   if (VIEWS[key]) return key;
   const [d, slug] = key.split('/'), dest = DEST[d];
@@ -32,6 +33,9 @@ export function resolve(key) {
   return dest.views.find(v => v.slug === slug)?.id || null;
 }
 export const hashOf = id => { const v = VIEWS[id]; return v.dest.views.length > 1 ? `${v.dest.id}/${v.slug}` : v.dest.id; };
+// Views that keep state in the address (the Star map's region, system, overlay…) register a query here.
+export const hashQueries = {};
+export const hashQuery = id => { const q = hashQueries[id]?.(); return q ? `?${q}` : ''; };
 export const currentView = () => document.querySelector('.view:not([hidden])')?.id;
 
 const icon = name => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -92,7 +96,7 @@ function sources() {
     {kind:'Action', label:'Collapse navigation', run:() => toggleRail()},
     {kind:'Action', label:'Show keyboard shortcuts', run:openShortcuts}
   ];
-  const g = mapGraph(), systems = g ? [...g.systems.values()].map(s => ({kind:'System', label:s.name, hint:'Show on the map', run:() => openMap({system:s.id})})) : [];
+  const g = mapGraph(), systems = g ? [...g.systems.values()].map(s => ({kind:'System', label:s.name, hint:'Star map · Shift+Enter for 3D', run:shift => shift ? openMap({system:s.id}) : showOnMap(s.id)})) : [];
   return [...screens, ...actions, ...systems];
 }
 const score = (q, s) => { s = s.toLowerCase(); if (s.startsWith(q)) return 3; if (s.includes(` ${q}`)) return 2; let i = 0; for (const c of s) if (c === q[i]) i++; return i === q.length ? 1 : 0; };
@@ -112,7 +116,7 @@ function paletteMove(d) {
   const el = list.children[palIdx]; el.setAttribute('aria-selected', 'true'); el.scrollIntoView({block:'nearest'});
   $('#palette-input').setAttribute('aria-activedescendant', el.id);
 }
-function runItem(i) { const x = palItems[i]; if (!x) return; $('#palette').close(); x.run(); }
+function runItem(i, shift = false) { const x = palItems[i]; if (!x) return; $('#palette').close(); x.run(shift); }
 export function openPalette() {
   closeDrawer(); $('#palette-input').value = ''; paletteRender(); if (!$('#palette').open) $('#palette').showModal(); $('#palette-input').focus();
   // Systems come from the market snapshot's gate graph; load it so they can be searched from any screen.
@@ -140,9 +144,9 @@ export function wire() {
   $('#palette-input').addEventListener('keydown', event => {
     if (event.key === 'ArrowDown') { event.preventDefault(); paletteMove(1); }
     if (event.key === 'ArrowUp') { event.preventDefault(); paletteMove(-1); }
-    if (event.key === 'Enter') { event.preventDefault(); runItem(palIdx); }
+    if (event.key === 'Enter') { event.preventDefault(); runItem(palIdx, event.shiftKey); }
   });
-  $('#palette-list').addEventListener('click', event => { const li = event.target.closest('[role=option]'); if (li?.id) runItem(Number(li.id.slice(4))); });
+  $('#palette-list').addEventListener('click', event => { const li = event.target.closest('[role=option]'); if (li?.id) runItem(Number(li.id.slice(4)), event.shiftKey); });
   $('#palette').addEventListener('click', event => { if (event.target === $('#palette')) $('#palette').close(); });
   // Arrow keys move along the rail and across sub-view tabs.
   $('#rail-list').addEventListener('keydown', event => {

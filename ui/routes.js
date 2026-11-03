@@ -24,9 +24,9 @@ export function routeIds(stops, safe = true) {
 }
 // The Worker sends at most 40 waypoints; past that only the stops go, and the game plots between them.
 export const sendable = (routeIds, stops) => routeIds.length - 1 <= 40 ? routeIds.slice(1) : stops.slice(1);
-export function autopilotButton(ids, out) {
-  const pilot = mine(), can = pilot?.id && S.backend?.has(pilot.id);
-  return `${can && ids.length ? `<button type="button" data-waypoints="${ids.join(',')}" data-out="${out}">Send to ${esc(pilot.name)}’s autopilot</button>` : ''}<span id="${out}" class="hint" role="status"></span>`;
+export function autopilotButton(ids, out, short = '') {
+  const pilot = mine(), can = pilot?.id && S.backend?.has(pilot.id), full = can ? `Send to ${esc(pilot.name)}’s autopilot` : '';
+  return `${can && ids.length ? `<button type="button" data-waypoints="${ids.join(',')}" data-out="${out}"${short ? ` aria-label="${full}" title="${full}"` : ''}>${short ? esc(short) : full}</button>` : ''}<span id="${out}" class="hint" role="status"></span>`;
 }
 export function fillSystemList(g) {
   const list = $('#systems');
