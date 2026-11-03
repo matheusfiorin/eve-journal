@@ -30,7 +30,7 @@ function privateRecord(id,state){
   trail:ok([[30000144,Date.now()-2*3600000],[30000142,Date.now()-600000]]),
   mining:ok([{date:iso(-48).slice(0,10),solar_system_id:30000144,type_id:1230,quantity:20000},{date:iso(-24).slice(0,10),solar_system_id:30000144,type_id:17470,quantity:5000}]),
   location:ok({solar_system_id:30000142,station_id:60003760}),
-  jobs:ok(state.noJobs?[]:[{job_id:1,blueprint_type_id:1234,product_type_id:605,runs:2,status:'active',end_date:iso(24)}]),
+  jobs:ok(state.noJobs?[]:[{job_id:1,activity_id:1,blueprint_type_id:1234,product_type_id:605,runs:2,status:'active',start_date:iso(-24),end_date:iso(24),station_id:60003760,cost:125000},{job_id:2,activity_id:5,blueprint_type_id:1234,product_type_id:1234,runs:4,licensed_runs:300,status:'active',start_date:iso(-48),end_date:iso(-0.1),station_id:60003760}]),
   journal:ok([{id:2,date:iso(-1),ref_type:'bounty_prizes',amount:1500000,balance:12500000.25,description:'Bounty prizes in Jita'},{id:1,date:iso(-2),ref_type:'market_transaction',amount:-5500,balance:11000000.25}]),
   transactions:ok([{transaction_id:1,date:iso(-2),type_id:34,quantity:1000,unit_price:5.5,is_buy:true,location_id:60003760}]),
   attributes:ok({intelligence:20,memory:21,perception:22,willpower:23,charisma:19,bonus_remaps:2}),
@@ -46,7 +46,7 @@ function privateRecord(id,state){
 // What the wingmate endpoint returns: Decxus is an industrialist with more ISK.
 function wingRecord(id,state){
  if(id===IDS[0]){const r=privateRecord(id,state);return {characterId:id,name:'Fiofka',sharing:true,fetchedAt:r.fetchedAt,skills:r.skills,wallet:r.operations.wallet?.value??null,assets:r.operations.assets?.value||null};}
- return {characterId:id,name:'Decxus',sharing:true,fetchedAt:iso(0),wallet:40000000,assets:{items:2,locations:1,types:[[587,10],[34,500000]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}};
+ return {characterId:id,name:'Decxus',sharing:true,fetchedAt:iso(0),wallet:40000000,jobs:[{job_id:7,activity_id:4,blueprint_type_id:1234,runs:3,status:'active',start_date:iso(-2),end_date:iso(6),station_id:60003760}],assets:{items:2,locations:1,types:[[587,10],[34,500000]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}};
 }
 // Every test runs against a mocked backend; the browser itself must never call private ESI endpoints.
 export async function mockApp(page,options={}) {
@@ -116,7 +116,7 @@ export async function mockApp(page,options={}) {
 export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText('Synced');}
 // The Echelon IA: old tab ids map to a view, and each view lives in one of seven destinations.
 const VIEW={overview:'bridge',empire:'strengths',wallet:'ledger',notes:'logbook',journal:'logbook'};
-export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
+export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
 export const isMobile=page=>page.viewportSize().width<=720;
 // Navigate like a person: the rail on desktop, the tab bar or More sheet on a phone, then the view's sub-view tab.
 export async function tab(page,name){

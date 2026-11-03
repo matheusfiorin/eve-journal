@@ -29,6 +29,10 @@ Visitors without a session see public profiles plus each pilot's shared skill to
 
 A browser stays connected: its session is kept in `localStorage` and renews itself on every daily visit, expiring only after 30 days without use. Redeploys don't log anyone out, because sessions, encrypted EVE authorizations and the encryption key all live in Cloudflare, and the backend keeps syncing every 30 minutes even with no browser open. **Disconnect** ends it everywhere.
 
+## Jobs
+
+**Earn → Jobs** lists every industry job running for the wing (your own, plus your wingmate's when they share with you): ready-to-deliver first, then the soonest to finish, with a progress bar, time left and end time, runs (copies × runs for copy jobs), where it runs and its cost in the detail drawer. It also shows each pilot's build and science slots in use and flags idle build slots. ESI can still report a finished job as active for a few minutes; the page counts it as ready once its end time passes.
+
 ## How it works
 
 Each pilot connects once through the Worker (`/auth/start`), which runs EVE SSO with PKCE and a confidential client, stores the refresh token encrypted in D1, and syncs ESI every 30 minutes. The browser only ever holds an opaque 24-hour session; it never sees EVE tokens. See [worker/README.md](worker/README.md).
