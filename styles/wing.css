@@ -1,21 +1,130 @@
-/* Wing: the crew view (wing net worth, holdings, roles) and shared goals. */
-#crew-content{display:grid;gap:16px}
-.wing-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:end}
-.wing-total{margin:6px 0 2px;font:600 clamp(34px,5vw,52px)/1 var(--ff-num);font-variation-settings:'wdth' 87.5;letter-spacing:-.02em}
-.wing-hero .plain li{border-left:2px solid var(--pilot);padding-left:10px;border-bottom:0;margin-top:4px}
-.title-card .pilot-head h2{margin-bottom:6px}
-.title-card .fill{background:var(--pilot)}
+/* Wing: the Crew map (Tonight strip, radial map, list fallback, drawer details) and Goals & milestones. */
+#strengths>*+*{margin-top:16px}
+
+/* Tonight we're best at: the answer, before the map that explains it. */
+.tonight h2{font:600 var(--fs-lg) var(--ff-ui);margin:0}
+.tonight__top{list-style:none;margin:12px 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.tonight__act{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;padding:2px 20px 2px 0;margin-right:20px;border-right:1px solid var(--line);min-width:0}
+.tonight__act:last-child{border-right:0;margin-right:0}
+.tonight__name{font:600 var(--fs-lg) var(--ff-ui);display:flex;align-items:center;gap:9px}
+.tonight__name::before{content:"";width:9px;height:9px;transform:rotate(45deg);background:var(--act);box-shadow:0 0 10px color-mix(in srgb,var(--act) 60%,transparent)}
+.tonight__score{font-size:var(--fs-xl);font-weight:600;justify-self:end}
+.tonight__word{font-size:var(--fs-xs);color:var(--act)}
+.tonight__act p{grid-column:1/-1;margin:4px 0 0;color:var(--text-muted);font-size:var(--fs-sm)}
+.tonight__plan{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px 16px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.tonight__plan p{margin:0;max-width:72ch}
+.tonight__roles{display:flex;gap:6px;flex-wrap:wrap;margin:0;padding:0;list-style:none}
+.cm-bar-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.cm-bar-row .hint{margin:0}
+
+/* The map. */
+.cm-layout{display:grid;gap:16px}
+.cm{margin:0;padding:22px 12px 12px}
+.cm__svg{display:block;width:100%;height:auto;overflow:visible;font-family:var(--ff-ui)}
+.cm-orbit{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:1 6}
+.cm-orbit--outer{stroke-dasharray:1 10;opacity:.7}
+.cm-core{fill:var(--surface-2);stroke:var(--accent-line);stroke-width:1.5}
+.cm-sat__ring{fill:var(--surface-2);stroke:var(--pilot);stroke-width:2}
+.cm-sat text{fill:var(--text);font:600 14px var(--ff-ui);text-anchor:middle}
+.cm-sat .cm-sat__name{fill:var(--pilot);font:500 11px var(--ff-ui)}
+.cm-edge{fill:none;stroke:var(--act);stroke-linecap:round;transition:opacity var(--dur-2),stroke-width var(--dur-3) var(--ease-out)}
+.cm-link{fill:none;stroke:var(--pilot);stroke-dasharray:2 4;stroke-linecap:round;opacity:.75;transition:opacity var(--dur-2)}
+.cm-twig{stroke:var(--line-strong);stroke-width:1;transition:opacity var(--dur-2)}
+.cm-node{cursor:pointer;outline:none}
+.cm-node__disc{fill:color-mix(in srgb,var(--act) 16%,var(--surface-1));stroke:var(--act);stroke-width:1.5;transition:r var(--dur-3) var(--ease-out)}
+.cm-node__halo{fill:none;stroke:var(--act);stroke-width:8;opacity:0;transition:opacity var(--dur-2)}
+.cm-node[data-strength=ready] .cm-node__disc{filter:url(#cm-glow)}
+.cm-node[data-strength=strong] .cm-node__disc{filter:url(#cm-glow);stroke-width:2.5;fill:color-mix(in srgb,var(--act) 26%,var(--surface-1))}
+.cm-node[data-strength=open] .cm-node__disc{fill:var(--surface-1);stroke-dasharray:3 4}
+.cm-node__score{fill:var(--text);font:600 16px var(--ff-num);text-anchor:middle}
+.cm-node__label{fill:var(--text);font:600 15px var(--ff-ui);text-anchor:middle}
+.cm-node__word{fill:var(--act);font:500 11px var(--ff-ui);text-anchor:middle}
+.cm-node:hover .cm-node__halo,.cm-node:focus-visible .cm-node__halo,.cm-node[aria-pressed=true] .cm-node__halo{opacity:.3}
+.cm-node:focus-visible .cm-node__disc{stroke:var(--accent);stroke-width:3}
+.cm-leaf{cursor:pointer;outline:none}
+.cm-leaf circle{fill:var(--act);stroke:var(--surface-1);stroke-width:2}
+.cm-leaf[data-pilot] circle{stroke:var(--pilot)}
+.cm-leaf text{fill:var(--text-muted);font:500 13px var(--ff-ui)}
+.cm__svg text{paint-order:stroke;stroke:var(--surface-1);stroke-width:4px;stroke-linejoin:round}
+.cm-leaf:hover text,.cm-leaf:focus-visible text{fill:var(--text)}
+.cm-leaf:focus-visible circle{stroke:var(--accent);stroke-width:3}
+.cm__svg[data-active] .cm-node,.cm__svg[data-active] .cm-edge,.cm__svg[data-active] .cm-leaf,.cm__svg[data-active] .cm-link,.cm__svg[data-active] .cm-twig{opacity:.22;transition:opacity var(--dur-2)}
+.cm__svg[data-active=mining] [data-act=mining],.cm__svg[data-active=industry] [data-act=industry],.cm__svg[data-active=exploration] [data-act=exploration],
+.cm__svg[data-active=hauling] [data-act=hauling],.cm__svg[data-active=combat] [data-act=combat],.cm__svg[data-active=trade] [data-act=trade]{opacity:1}
+.cm__svg[data-active=mining] .cm-link[data-act=mining],.cm__svg[data-active=industry] .cm-link[data-act=industry],.cm__svg[data-active=exploration] .cm-link[data-act=exploration],
+.cm__legend{margin:8px 6px 0;font-size:var(--fs-xs);color:var(--text-muted)}
+.cm__partial{color:var(--warn);font-size:var(--fs-sm);margin:0 0 12px}
+
+/* Entry moment, once a session: edges draw outward, nodes lock in, leaves fade. */
+@keyframes cm-draw{to{stroke-dashoffset:0}}
+.cm--enter .cm-edge{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:cm-draw 520ms var(--ease-inout) both;animation-delay:calc(160ms + var(--i) * 50ms)}
+.cm--enter .cm__core{animation:fade 160ms var(--ease-out) both}
+.cm--enter .cm-node__body{animation:lock 420ms var(--ease-lock) both;animation-delay:calc(420ms + var(--i) * 50ms);transform-box:fill-box;transform-origin:center}
+.cm--enter .cm-leaf,.cm--enter .cm-twig,.cm--enter .cm-link{animation:fade var(--dur-3) var(--ease-out) both;animation-delay:calc(760ms + var(--i,0) * 30ms)}
+
+/* List view: the same data as an accordion; the default on phones and for screen readers who prefer it. */
+.cm-list{display:none;gap:8px}
+.cm-layout[data-view=list] .cm{display:none}
+.cm-layout[data-view=list] .cm-list{display:grid}
+.cm-branch{background:var(--surface-1);border:1px solid var(--line);border-left:3px solid var(--act);border-radius:var(--r-panel);padding:0 14px}
+.cm-branch summary{display:grid;grid-template-columns:auto auto minmax(40px,1fr) auto auto;align-items:center;gap:10px;min-height:52px;cursor:pointer;list-style:none}
+.cm-branch summary::-webkit-details-marker{display:none}
+.cm-branch summary small{color:var(--act);font-size:var(--fs-xs);min-width:72px}
+.cm-branch[open]{padding-bottom:14px}
+.cm-branch .cm-dot{margin-right:0}
+.cm-bar{height:6px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.cm-bar i{display:block;height:100%;width:calc(var(--v) * 1%);background:var(--act);transition:width var(--dur-3) var(--ease-out)}
+.cm-branch>button{margin-top:12px}
+@media (max-width:720px){
+  .cm-layout .cm{display:none}
+  .cm-layout .cm-list{display:grid}
+  .cm-bar-row .seg{display:none}
+}
+
+/* Drawer details for one activity (also used inside the list view). */
+.cap-why{margin:0 0 14px;max-width:60ch;line-height:1.45}
+.cap-parts{display:grid;gap:9px;margin:0 0 18px}
+.cap-parts>div{display:grid;grid-template-columns:80px 1fr;align-items:center;gap:10px}
+.cap-parts dt{font-size:var(--fs-xs);color:var(--text-muted)}
+.cap-parts dd{margin:0;display:grid;gap:3px;font-weight:400}
+.cap-parts dd span{font-size:var(--fs-xs);color:var(--text-muted)}
+.cap-parts meter{width:100%;height:6px;-webkit-appearance:none;appearance:none;background:var(--surface-3);border:0;border-radius:3px}
+.cap-parts meter::-webkit-meter-bar{background:var(--surface-3);border:0;border-radius:3px;height:6px}
+.cap-parts meter::-webkit-meter-optimum-value,.cap-parts meter::-webkit-meter-suboptimum-value,.cap-parts meter::-webkit-meter-even-less-good-value{background:var(--act,var(--accent));border-radius:3px}
+.cap-parts meter::-moz-meter-bar{background:var(--act,var(--accent))}
+.cap h3,.cm-branch h3{font:600 var(--fs-sm) var(--ff-ui);color:var(--text);margin:16px 0 8px}
+.cap-contrib{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.cap-contrib li{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0 2px 8px;border-left:2px solid var(--pilot,var(--line-strong))}
+.cap-contrib li[data-pilot=wing]{border-left-color:var(--act)}
+.cap-contrib li.is-focus{background:var(--accent-soft);border-radius:0 var(--r-ctl) var(--r-ctl) 0;outline:none}
+.cap-next{margin:0;padding:10px 12px;border-radius:var(--r-ctl);background:var(--accent-soft);border:1px solid var(--accent-line);max-width:60ch}
+.cm-dot{display:inline-block;flex-shrink:0;width:9px;height:9px;transform:rotate(45deg);background:var(--act);margin-right:4px;vertical-align:middle}
+
+/* Goals & milestones. */
+.goals-summary h2{font:600 var(--fs-lg) var(--ff-ui);margin:0}
+#wing-summary .readout{margin-top:14px}
+.wing-total{font:600 clamp(26px,3.6vw,40px)/1 var(--ff-num);font-variation-settings:'wdth' 87.5;letter-spacing:-.02em}
+.own{margin-top:14px}
+.own .plain li{border-left:2px solid var(--pilot);padding-left:10px;border-bottom:0;margin-top:4px}
+.own .plain .role-badge{margin-left:6px}
+.goals-grid{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(260px,1fr);gap:16px;align-items:start}
+.goals-main h3,.milestones h3{font:600 var(--fs-md) var(--ff-ui);margin:0}
+.goal-form{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.ms-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:2px}
+.ms-list li{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
+.ms-list li:last-child{border-bottom:0}
+.ms-emblem{width:22px;height:22px;flex-shrink:0}
 .holdings{list-style:none;padding:0;margin:0 0 6px}
 .holdings li{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
 .holdings small{display:block;color:var(--text-muted);font-size:11px}
 .holdings b{font:600 var(--fs-sm) var(--ff-num)}
-.goal{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:12px 0}
+.goal{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:12px 0 12px 12px;border-left:2px solid var(--pilot,var(--accent-line))}
+.goal[data-pilot=wing]{--pilot:var(--accent)}
 .goal label{display:flex;align-items:center;gap:10px;font-size:var(--fs-md);color:var(--text);overflow-wrap:anywhere}
 .goal small{display:block;margin:4px 0 0 26px;color:var(--text-muted);font-size:var(--fs-xs)}
 .goal.done label{text-decoration:line-through;color:var(--text-muted)}
 .goal .actions{margin:0;flex-shrink:0}
 .toolbar-row{margin-top:12px}.toolbar-row input,.toolbar-row select{margin-bottom:0}
-@media (max-width:720px){ .wing-hero{grid-template-columns:1fr} .goal{flex-direction:column} }
 .goal-target,.goal-steps,.goal-notes{margin-left:26px!important}
 .goal-target{margin:8px 0 4px;max-width:420px}.goal-target small{display:block;font-size:var(--fs-xs);color:var(--text-muted);margin:4px 0 0}
 .goal-target .fill{background:var(--accent)}
@@ -24,5 +133,10 @@
 .goal-steps li:has(input:checked) label{color:var(--text-muted);text-decoration:line-through}
 .goal.done .goal-steps label{text-decoration:none}
 .goal-notes{white-space:pre-wrap;font-size:var(--fs-sm);color:var(--text-muted);margin:6px 0 0;max-width:72ch}
-.share-row .fill,.goal-target .fill{background:var(--accent)}
-.title-card .share-row .fill{background:var(--pilot)}
+@media (max-width:900px){
+  .tonight__top{grid-template-columns:1fr;gap:10px}
+  .tonight__act{border-right:0;margin:0;padding:0 0 10px;border-bottom:1px solid var(--line)}
+  .tonight__plan{grid-template-columns:1fr}
+  .goals-grid{grid-template-columns:1fr}
+}
+@media (max-width:720px){ .goal{flex-direction:column} }
