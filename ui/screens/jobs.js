@@ -1,6 +1,6 @@
 // Jobs: every industry job running for the wing, how far along it is, what's ready to deliver and which slots sit idle.
 import {wingJobs} from '../../jobs.js';
-import {skillLevels} from '../../industry.js';
+import {skillLevels, SLOT_SKILLS} from '../../industry.js';
 import {S, ordered} from '../state.js';
 import {name, place} from '../esi.js';
 import {$, esc, duration, plural, openDrawer, go} from '../shared.js';
@@ -13,10 +13,9 @@ const when = ms => new Date(ms).toLocaleString([], {weekday:'short', hour:'2-dig
 let current = [], timer = 0;
 
 export function render() {
-  const ids = S.marketData?.meta?.data?.skills;
   const pilots = ordered().map(p => {
     const f = jobsOf(p), skills = p.private ? p.skills : S.wing.get(p.id)?.skills;
-    return {name:p.name, p, f, jobs:f?.permission ? f.value || [] : [], levels:ids && skills?.skills ? skillLevels(skills, ids) : null};
+    return {name:p.name, p, f, jobs:f?.permission ? f.value || [] : [], levels:skills?.skills ? skillLevels(skills, SLOT_SKILLS) : null};
   });
   const w = wingJobs(pilots);
   current = w.list;
