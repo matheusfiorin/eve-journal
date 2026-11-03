@@ -26,12 +26,10 @@ test('a wingmate who does not share keeps their private figures hidden',async({p
  await mockApp(page,{connected:'first',wingPrivate:true});await openApp(page);
  const wing=page.locator('#bridge .wing-card');await expect(wing).toContainText('Decxus hasn’t shared their sheet yet');await expect(wing).toContainText('share with my wingmate');await expect(wing).toContainText('33.5M ISK');await expect(wing).not.toContainText('80.0M');
 });
-test('the crew view shows the wing’s combined worth, roles and what we own',async({page},testInfo)=>{
- const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'empire');const crew=page.locator('#crew-content');
- await expect(crew.locator('.wing-total')).toHaveText('80.0M ISK');await expect(crew).not.toContainText(/share|leads/i);
- await expect(crew).toContainText('Rookie Warrior');await expect(crew).toContainText('Rookie Industrialist');
- await expect(crew).toContainText('Ship');await expect(crew).toContainText('Implant');
- const top=crew.locator('.holdings li');await expect(top.first()).toContainText('Heron');await expect(top.first()).toContainText('Fiofka');await expect(top.nth(1)).toContainText('Rifter');await expect(top.nth(1)).toContainText('Decxus');
+test('the crew map credits both pilots and never scores them against each other',async({page},testInfo)=>{
+ const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'empire');const crew=page.locator('#strengths');
+ await expect(crew.locator('.cap-contrib li[data-pilot="fiofka"]').first()).toBeAttached();await expect(crew.locator('.cap-contrib li[data-pilot="decxus"]').first()).toBeAttached();
+ await expect(crew).not.toContainText(/share of|leads|ahead|Dead even/i);
  await page.screenshot({path:testInfo.outputPath('empire.png'),fullPage:true});expect(errors).toEqual([]);
 });
 test('market ranks hauls, station trades and manufacturing from the pilot’s location',async({page},testInfo)=>{

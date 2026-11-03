@@ -1,17 +1,77 @@
-/* Bridge: the pilot banner and the "Your wing" card. */
-#pilots{display:grid;gap:16px}
-.me-banner{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:center;padding:30px 24px 24px}
-.me-banner .screen-title{margin:10px 0 2px}
-.portrait.xl{width:112px;height:112px}
-.me-stats{align-self:start}
-.wing-card .pilot-head{margin-top:6px}
-.wing-card .readout{margin-top:16px}
+/* Bridge: the pilot line, the "Next up" plan (the screen's answer), Together and Your wing, then ship & position. */
+#pilots{display:grid;gap:18px}
+#pilots>*{margin:0}
+
+/* Pilot line: one sentence of where you are, the training state under it, figures at the side. */
+.pilot-line{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:20px;align-items:start;padding:6px 0 18px;border-bottom:1px solid var(--line)}
+.portrait--lg{width:72px;height:72px}
+.pilot-line__main{min-width:0}
+.pilot-line .screen-title{font-size:var(--fs-2xl);line-height:1.1}
+.pilot-line__where{margin:6px 0 0;color:var(--text-muted);font-size:var(--fs-md);max-width:72ch}
+.pilot-line__where b{color:var(--text);font-weight:500}
+.pilot-line .alert{margin-top:10px;max-width:64ch}
+.pilot-line .actions{margin-top:10px}
+.pilot-line__side{display:grid;justify-items:end;gap:12px}
+.pilot-line__side .readout dd{font-size:var(--fs-lg)}
+
+/* Next up: a plotted course. One diamond waypoint per step on a vertical track; the first one is lit. */
+.bridge-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:18px;align-items:start}
+.bridge-side{display:grid;gap:18px}
+.next-up .panel__head{margin-bottom:6px;flex-wrap:wrap}
+.next-up h2{white-space:nowrap}
+.next-up h2,.together h2,.wing-card h2,.ship-card h2{font:600 var(--fs-lg) var(--ff-ui);margin:0}
+.course{list-style:none;margin:6px 0 0;padding:0;position:relative}
+.course::before{content:"";position:absolute;left:103px;top:22px;bottom:22px;width:1px;background:linear-gradient(var(--accent-line),var(--line) 70%,transparent)}
+.course__step{display:grid;grid-template-columns:86px minmax(0,1fr) auto auto;align-items:center;gap:18px 34px;padding:14px 0;border-bottom:1px solid var(--line)}
+.course__step:last-child{border-bottom:0}
+.course__kind{position:relative;font:500 var(--fs-xs) var(--ff-ui);color:var(--text-muted);text-align:right}
+.course__kind::after{content:"";position:absolute;right:-22px;top:50%;width:9px;height:9px;margin-top:-5px;transform:rotate(45deg);background:var(--surface-1);border:1.5px solid var(--act,var(--accent))}
+.course__step:first-child .course__kind::after{background:var(--act,var(--accent));box-shadow:0 0 12px var(--act,var(--accent))}
+.course__step[data-kind=alert] .course__kind{color:var(--warn)}
+.course__step[data-kind=alert] .course__kind::after{border-color:var(--warn);background:var(--warn);box-shadow:0 0 10px rgb(244 197 90 / .5)}
+.course__body{min-width:0}
+.course__body b{display:block;font-weight:600;font-size:var(--fs-md);color:var(--text)}
+.course__body small{display:block;margin-top:2px;color:var(--text-muted);font-size:var(--fs-sm);max-width:62ch}
+.course__figure{text-align:right;min-width:72px}
+.course__figure .num{font-size:var(--fs-lg);font-weight:600;color:var(--text)}
+.course__step[data-kind=passive] .course__figure .num,.course__step[data-kind=active] .course__figure .num{color:var(--ok)}
+.course__figure small{display:block;color:var(--text-muted);font-size:var(--fs-xs)}
+.next-up .state{margin-top:12px}
+.next-up .skel-rows{margin-top:10px}
+
+/* Together and Your wing: quiet panels, sentences first. */
+.together__line{margin:10px 0 12px;font-size:var(--fs-md);line-height:1.45;max-width:52ch}
+.together .tonight__roles{margin-bottom:14px}
+.tonight__roles{display:flex;gap:6px;flex-wrap:wrap;margin:0;padding:0;list-style:none}
+.wing-card .pilot-head{margin-top:12px}
+.wing-card .pilot-head h3{margin:0;font:600 var(--fs-md) var(--ff-ui)}
+.wing-card .alert{margin-top:10px}
+.wing-card .readout{margin-top:14px}
+.wing-card .readout dd{font-size:var(--fs-lg)}
+.goal-mini{display:grid;gap:6px;margin-top:14px;font-size:var(--fs-sm)}
+.goal-mini .fill{background:var(--accent)}
+.wing-mini__best{margin:14px 0 12px;font-size:var(--fs-sm);color:var(--text-muted)}
+.wing-mini__best b{color:var(--act);font-weight:600}
+
+/* Ship & position and the quiet footer. */
+.ship-card .facts{margin-top:12px}
 .career{list-style:none;padding:0;margin:10px 0}
 .career li{border-left:1px solid var(--accent-line);padding:0 0 10px 12px;display:grid}
 .career span{font-size:var(--fs-xs);color:var(--text-muted)}
+.freshness{margin:0;color:var(--text-faint)}
+
+@media (max-width:900px){
+  .bridge-grid{grid-template-columns:1fr}
+  .course::before,.course__kind::after{display:none}
+  .course__step{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+  .course__kind{grid-column:1/-1;text-align:left;color:var(--act,var(--text-muted));display:flex;align-items:center;gap:8px}
+  .course__kind::before{content:"";width:7px;height:7px;transform:rotate(45deg);background:var(--act,var(--accent))}
+  .course__step[data-kind=alert] .course__kind::before{background:var(--warn)}
+  .course__step button{grid-column:1/-1;justify-self:start}
+}
 @media (max-width:720px){
-  .me-banner{grid-template-columns:auto 1fr;padding:22px 16px 16px;gap:14px}
-  .me-stats{grid-column:1/-1}
-  .portrait.xl{width:72px;height:72px}
-  .me-banner .screen-title{font-size:22px}
+  .pilot-line{grid-template-columns:auto minmax(0,1fr);gap:14px}
+  .portrait--lg{width:56px;height:56px}
+  .pilot-line .screen-title{font-size:22px}
+  .pilot-line__side{grid-column:1/-1;justify-items:start}
 }
