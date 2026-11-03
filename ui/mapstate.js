@@ -3,7 +3,7 @@
 
 export const VIEWS = {region:'region', region3d:'3d', universe:'universe', list:'list'};
 const VIEW_OF = Object.fromEntries(Object.entries(VIEWS).map(([k, v]) => [v, k]));
-export const OVERLAY_IDS = ['security', 'shipKills', 'podKills', 'npcKills', 'jumps', 'kills24', 'sov', 'fw', 'incursion', 'industry', 'belts', 'stations'];
+export const OVERLAY_IDS = ['security', 'danger', 'shipKills', 'podKills', 'npcKills', 'jumps', 'kills24', 'kills7', 'jumps24', 'sov', 'fw', 'incursion', 'industry', 'belts', 'stations'];
 export const JUMP_IDS = ['', 'blops', 'jf', 'capital', 'super'];
 export const DEFAULTS = {view:'region', overlay:'security', jump:''};
 const id = v => { const n = Number(v); return Number.isSafeInteger(n) && n > 0 ? n : null; };

@@ -9,6 +9,7 @@ test('the map address round-trips and leaves defaults out',()=>{
  assert.equal(serializeMapHash({}),'');
  assert.deepEqual(parseMapHash('navigate/map?v=universe'),{view:'universe'});assert.deepEqual(parseMapHash('navigate/map?v=list'),{view:'list'});
  assert.deepEqual(parseMapHash('navigate/map?j='),{jump:''},'an empty jump clears the range');
+ for(const o of ['danger','kills7','jumps24'])assert.deepEqual(parseMapHash(`navigate/map?o=${o}`),{overlay:o},`the ${o} overlay can be linked`);
 });
 test('a hand-edited map address cannot inject bad values',()=>{
  assert.deepEqual(parseMapHash('navigate/map?r=-4&s=abc&o=<script>&j=titan&v=4d'),{});

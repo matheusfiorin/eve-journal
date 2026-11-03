@@ -3,7 +3,8 @@ import {HULLS, MODES, suggestHull, campIntel, plan} from '../../hauling.js';
 import {secLight} from '../../mapview.js';
 import {secClass, dotlanRoute} from '../../route.js';
 import {S, mine} from '../state.js';
-import {esi, json, name, resolveNames} from '../esi.js';
+import {name, resolveNames} from '../esi.js';
+import {regionKills, gateTargets} from '../killfeed.js';
 import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go} from '../shared.js';
 import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
 import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
@@ -35,7 +36,6 @@ export const markup = {
 
 // ── Haul plan: risk-weighted routes through any number of stops, using live zKillboard kills along the way. ──
 const HAUL_KEY = 'eve-haul:v1';
-const killCache = new Map(), gateCache = new Map();
 let haulMode = 'balanced', haulPlans = null;
 function haulSaved() { try { return JSON.parse(localStorage.getItem(HAUL_KEY)) || {}; } catch { return {}; } }
 function haulSave(state) { try { localStorage.setItem(HAUL_KEY, JSON.stringify(state)); } catch { /* Not remembered in this browser. */ } }
@@ -46,20 +46,6 @@ function haulRow(value = '') {
   return row;
 }
 function haulNumber() { document.querySelectorAll('#haul-stops .stop-n').forEach((el, i, all) => { el.textContent = i ? (i === all.length - 1 ? 'To' : `${i}`) : 'From'; }); }
-// The last hour of non-NPC kills in each region, straight from zKillboard (cached 5 minutes per region).
-async function regionKills(region) {
-  const hit = killCache.get(region);
-  if (hit && Date.now() - hit.at < 300000) return hit.kills;
-  const kills = await json(`https://zkillboard.com/api/regionID/${region}/pastSeconds/3600/`, {headers:{Accept:'application/json'}});
-  killCache.set(region, {at:Date.now(), kills:Array.isArray(kills) ? kills : []});
-  return killCache.get(region).kills;
-}
-async function gateTargets(ids) {
-  await Promise.all([...new Set(ids)].filter(id => !gateCache.has(id)).slice(0, 60).map(async id => {
-    try { gateCache.set(id, (await esi(`universe/stargates/${id}/`)).destination?.system_id); } catch { gateCache.set(id, undefined); }
-  }));
-  return new Map([...gateCache].filter(([, to]) => to));
-}
 // Always plans with live camps: regionKills caches each region for 5 minutes, so re-renders cost nothing.
 export async function renderHauling() {
   const t = await tabReady('haul', 'Loading the gate map…', 'Hauling');

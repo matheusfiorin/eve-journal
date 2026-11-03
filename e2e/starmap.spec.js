@@ -35,6 +35,19 @@ test('the map address names the region, system, overlay and view, and Back walks
  expect(errors).toEqual([]);
 });
 
+test('the danger overlay prices a hauler\'s risk from kill history, traffic and live gate camps',async({page})=>{
+ const {errors}=await mockApp(page,{connected:'first'});
+ await page.goto('/#navigate/map?r=10000043&s=30003504&o=danger');await expect(page.locator('#sync-status')).toContainText('Synced');
+ const svg=await mapReady(page),legend=page.locator('#map-legend'),panel=page.locator('#map-panel');
+ await expect(legend).toContainText('Danger to haulers');await expect(legend).toContainText('T1 industrial with 100M ISK · 1 live gate camp');
+ // Three smartbomb kills on a Niarja gate in the last 12 minutes (the NPC kill doesn't count).
+ await expect(panel.locator('.alert.danger')).toHaveText(/^3 kills here in the last hour, 3 on a gate · smartbombs\. A T1 industrial with 100M ISK: [6-8]\d% chance of loss passing through\.$/);
+ await expect(svg.locator('.sys[data-system="30003504"] .halo')).toBeVisible();
+ await choose(page,'#map-overlay','kills7');await expect(legend).toContainText('max ~40');await expect(panel.locator('.alert')).toHaveCount(0);
+ await choose(page,'#map-overlay','jumps24');await expect(legend).toContainText('max ~40,000');
+ await expect.poll(()=>hash(page)).toContain('o=jumps24');
+ expect(errors).toEqual([]);
+});
 test('legends name the security bands and scales, and say when a feed failed or an overlay is empty',async({page})=>{
  const {errors}=await mockApp(page,{connected:'first'});
  await page.route('https://esi.evetech.net/**/universe/system_kills/**',r=>r.fulfill({status:503,body:'{}'}));

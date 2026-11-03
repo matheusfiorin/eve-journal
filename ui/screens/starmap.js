@@ -3,6 +3,8 @@
 import {secColor, secBand, ownerColor, inRange, JUMP_SHIPS, strengths, lightYears} from '../../map.js';
 import {secLight, regionSvg, StarMap} from '../../mapview.js';
 import {secShown} from '../../route.js';
+import {systemRisk, campIntel} from '../../hauling.js';
+import {regionKills, cachedKills} from '../killfeed.js';
 import {S, reduced, mine} from '../state.js';
 import {name, resolveNames} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
@@ -16,11 +18,14 @@ import {hashQueries, currentView} from '../shell.js';
 // Overlays: label, halo colour (sovereignty is coloured per owner), and which live feed it needs.
 const OVERLAYS = {
   security:{label:'Security'},
+  danger:{label:'Danger to haulers', color:'#FF4D4D', feed:'risk'},
   shipKills:{label:'Ship kills (last hour)', color:'#FF7E70', feed:'kills'},
   podKills:{label:'Pod kills (last hour)', color:'#FFA26B', feed:'kills'},
   npcKills:{label:'NPC kills (last hour)', color:'#F4C55A', feed:'kills'},
   jumps:{label:'Jumps (last hour)', color:'#5CD3DE', feed:'jumps'},
   kills24:{label:'Ship kills (~24 h)', color:'#FF5C8A', feed:'risk'},
+  kills7:{label:'Ship kills (~7 days)', color:'#E0457B', feed:'risk'},
+  jumps24:{label:'Jumps (~24 h)', color:'#3FB8C9', feed:'traffic'},
   sov:{label:'Sovereignty', color:'#C3B9FF', feed:'sov'},
   fw:{label:'Faction warfare', color:'#B8E05A', feed:'fw'},
   incursion:{label:'Incursions', color:'#FF4FD8', feed:'incursions'},
@@ -28,7 +33,7 @@ const OVERLAYS = {
   belts:{label:'Asteroid belts', color:'#E8956A'},
   stations:{label:'NPC stations', color:'#62D99B'}
 };
-const FEED_NAMES = {kills:'Kills feed', jumps:'Jumps feed', sov:'Sovereignty feed', fw:'Faction warfare feed', incursions:'Incursions feed', risk:'Kill history', industry:'Industry indices'};
+const FEED_NAMES = {kills:'Kills feed', jumps:'Jumps feed', sov:'Sovereignty feed', fw:'Faction warfare feed', incursions:'Incursions feed', risk:'Kill history', traffic:'Traffic history', industry:'Industry indices'};
 const VIEW_OPTIONS = [['region', 'Region map'], ['region3d', 'Region in 3D'], ['universe', 'New Eden in 3D'], ['list', 'List']];
 const JUMP_OPTIONS = [['', 'Off'], ...Object.entries({blops:'Black Ops · 8 ly', jf:'Jump freighter · 10 ly', capital:'Carrier, Dread, FAX · 7 ly', super:'Super, Titan · 6 ly'})];
 const options = list => list.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
@@ -88,24 +93,54 @@ function fromUrl(hash, restore = false) {
 }
 
 // ── Overlay values, colours and words ──
+// Danger: the chance a T1 industrial carrying 100M ISK dies passing through, from the kill history, traffic and the
+// live zKillboard gate camps of the region on screen (hauling.js prices Haul plan routes the same way).
+// shortcut: camps are fetched for the shown region only, so New Eden in 3D shows them for regions already looked at.
+const DANGER = {value:1e8, hull:'t1'};
+const camps = new Map(); // region → campIntel of its last hour
+function liveCamps(regions) {
+  const out = new Map(), combat = S.marketData?.meta?.data?.combat;
+  for (const r of regions) {
+    const kills = cachedKills(r);
+    if (!kills) { camps.delete(r); continue; } // none yet, or older than the 5-minute cache
+    let c = camps.get(r);
+    if (c?.kills !== kills) camps.set(r, c = {kills, intel:campIntel(kills, {combat})});
+    for (const [id, v] of c.intel) out.set(id, v);
+  }
+  return out;
+}
+const campTried = new Map();
+function wantCamps(region) {
+  if (M.overlay !== 'danger' || !region || cachedKills(region) || Date.now() - (campTried.get(region) || 0) < 300000) return;
+  campTried.set(region, Date.now());
+  regionKills(region).then(() => { if (M.overlay === 'danger' && currentView() === 'map') paint(); }, () => {});
+}
+const passing = (meta, id) => meta.activity?.[id]?.[2] ?? (meta.traffic?.s?.[id] || 0) / 24;
 function overlayValues(g, overlay) {
   const L = live(), meta = S.marketData?.meta?.data || {}, out = {};
+  if (overlay === 'danger') {
+    const history = meta.risk?.s || {}, camp = liveCamps(Object.keys(g.regions).map(Number));
+    for (const sys of g.systems.values()) out[sys.id] = systemRisk(sys, {history, traffic:{[sys.id]:passing(meta, sys.id)}, live:camp, ...DANGER}).p;
+    return out;
+  }
   for (const sys of g.systems.values()) {
     const id = sys.id, k = L.kills[id];
-    out[id] = {shipKills:k?.ship_kills, podKills:k?.pod_kills, npcKills:k?.npc_kills, jumps:L.jumps[id], kills24:meta.risk?.s?.[id]?.[0], belts:sys.belts,
+    out[id] = {shipKills:k?.ship_kills, podKills:k?.pod_kills, npcKills:k?.npc_kills, jumps:L.jumps[id], kills24:meta.risk?.s?.[id]?.[0], kills7:meta.risk?.s?.[id]?.[1], jumps24:meta.traffic?.s?.[id], belts:sys.belts,
       sov:L.sov[id] ? 1 : 0, fw:L.fw[id] ? (L.fw[id].contested === 'uncontested' ? 0.3 : 0.6 + 0.4 * (L.fw[id].victory_points / (L.fw[id].victory_points_threshold || 1))) : 0,
       incursion:L.incursions.has(id) ? 1 : 0, industry:S.costIndices?.get(id)?.manufacturing, stations:0}[overlay];
   }
   if (overlay === 'stations') for (const st of g.stations.values()) out[st.system] = (out[st.system] || 0) + 1;
   return out;
 }
+const pct = p => `${p < 0.001 ? '<0.1' : (p * 100).toFixed(p < 0.1 ? 1 : 0)}%`;
 function valueText(overlay, id, v) {
   const L = live();
   if (overlay === 'sov') return sovOwner(id) ? name(sovOwner(id)) : '';
   if (overlay === 'fw') { const f = L.fw[id]; return f ? `${name(f.occupier_faction_id)} · ${f.contested === 'uncontested' ? 'uncontested' : `${f.contested} ${Math.round(100 * f.victory_points / (f.victory_points_threshold || 1))}%`}` : ''; }
   if (overlay === 'incursion') return L.incursions.get(id)?.state || '';
   if (overlay === 'industry') return Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : '';
-  if (overlay === 'kills24') return Number.isFinite(v) ? `~${Math.round(v)}` : '';
+  if (overlay === 'kills24' || overlay === 'kills7' || overlay === 'jumps24') return Number.isFinite(v) ? `~${Math.round(v).toLocaleString()}` : '';
+  if (overlay === 'danger') return Number.isFinite(v) ? `${pct(v)} per pass${camps.size && [...camps.values()].some(c => c.intel.get(id)?.gateKills) ? ' · live gate camp' : ''}` : '';
   return Number.isFinite(v) ? v.toLocaleString() : '';
 }
 const colorOf = overlay => overlay === 'sov' ? id => ownerColor(sovOwner(id) || 0) : () => OVERLAYS[overlay].color || '#C3B9FF';
@@ -120,6 +155,7 @@ function feedDown(overlay) {
   if (!feed) return '';
   if (feed === 'risk') return meta.risk?.s ? '' : FEED_NAMES.risk;
   if (feed === 'industry') return S.costIndices ? '' : FEED_NAMES.industry;
+  if (feed === 'traffic') return meta.traffic?.s ? '' : FEED_NAMES.traffic;
   return live().failed?.includes(feed) ? FEED_NAMES[feed] : '';
 }
 
@@ -155,6 +191,10 @@ function legendHtml(f) {
   } else {
     const max = Math.max(0, ...Object.values(f.scoped).filter(Number.isFinite));
     html = `<span class="legend-title">${esc(OVERLAYS[overlay].label)}</span><span class="num">0</span><i class="swatch big" style="--c:${OVERLAYS[overlay].color}"></i><span class="num">max ${esc(valueText(overlay, 0, max) || '0')}</span><small class="scale-note">halo size on a √ scale</small>`;
+  }
+  if (overlay === 'danger') {
+    const region = M.view === 'universe' ? null : M.region, campCount = f.scope.filter(id => [...camps.values()].some(c => c.intel.get(id)?.gateKills)).length;
+    html += `<small class="scale-note">T1 industrial with 100M ISK · ${region && !cachedKills(region) ? 'loading live gate camps…' : campCount ? `${plural(campCount, 'live gate camp')}` : 'no live gate camps'}</small>`;
   }
   const down = feedDown(overlay);
   if (down) html += `<span class="feed-bad">${esc(down)} unavailable</span>`;
@@ -359,6 +399,8 @@ function layerBar() {
 function panel(f) {
   const body = $('#map-panel-body');
   body.innerHTML = M.selected ? systemPanel(M.selected) : `<h3>${esc(regionName(M.region))}</h3><p class="hint">Select a system for details.</p>`;
+  const camp = f.overlay === 'danger' && M.selected && [...camps.values()].map(c => c.intel.get(M.selected)).find(Boolean);
+  if (camp?.kills) body.innerHTML += `<p class="alert ${camp.gateKills ? 'danger' : 'warn'}">${plural(camp.kills, 'kill')} here in the last hour${camp.gateKills ? `, ${camp.gateKills} on a gate` : ''}${camp.sb ? ' · smartbombs' : ''}${camp.dictor ? ' · interdictors' : ''}. A T1 industrial with 100M ISK: ${pct(f.values[M.selected])} chance of loss passing through.</p>`;
   if (f.range.length) body.innerHTML += `<h4>In jump range (${f.range.length})</h4><ul class="plain">${f.range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
 }
 // Phone bottom sheet: peek (a strip of the panel), half or full; the handle drags or cycles.
@@ -395,6 +437,7 @@ function paint() {
   $('#map-view').value = M.view; $('#map-overlay').value = M.overlay; $('#map-jump').value = M.jump;
   $('#map').dataset.view = M.view;
   measure();
+  wantCamps(M.view === 'universe' ? null : M.region);
   const f = frameOf(g);
   $('#map-legend').innerHTML = legendHtml(f);
   layerBar(); crumbs(g);
