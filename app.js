@@ -76,7 +76,7 @@ document.addEventListener('click', async event => {
   } catch (error) { notice(error.message); }
 });
 $('#refresh').onclick = async () => {
-  S.marketData = null; S.costIndices = null; S.prices = null;
+  S.marketData = null; S.costIndices = null; S.prices = null; S.marketTask = S.pricesTask = S.costTask = null;
   if (await loadPilots(true, renderAll)) toast(`Refreshed. EVE data from ${new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`, 'ok');
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) expireSessions(); });

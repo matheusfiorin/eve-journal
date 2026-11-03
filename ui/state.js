@@ -16,6 +16,7 @@ export const S = {
   config:{pilots:[]}, data:emptyData(), store:null, backend:null, universeStatus:null, generation:0,
   pilots:[], me:null, wing:new Map(),
   prices:null, adjusted:new Map(), marketData:null, marketBook:null, costIndices:null,
+  marketTask:null, pricesTask:null, costTask:null, // in-flight loads, shared by concurrent callers
   // Navigate's map view state; the map modal writes it when "Open in Star map" is pressed.
   map:{region:null, view:'region', overlay:'security', jump:'', selected:null, route:[], routeLabel:''}
 };

@@ -50,6 +50,20 @@ test('market ranks hauls, station trades and manufacturing from the pilot’s lo
  await expect(market.locator('article').nth(2)).toContainText('1 more profitable build needs more than 20.0k ISK');
  expect(errors).toEqual([]);
 });
+test('a cold start fetches the market snapshot and live prices once, and Refresh fetches them again',async({page})=>{
+ const {calls}=await mockApp(page,{connected:'first'});const prices=[];page.on('request',r=>{if(r.url().includes('/markets/prices/'))prices.push(r.url());});
+ const market=()=>calls.filter(c=>c.path==='/api/market'&&c.method==='GET').length;
+ // A slow backend: the palette and the Market screen both ask for the snapshot before the first answer lands.
+ await page.route('https://api.example/api/market',async route=>{await new Promise(r=>setTimeout(r,800));await route.fallback();});
+ await page.route('https://esi.evetech.net/**/markets/prices/**',async route=>{await new Promise(r=>setTimeout(r,800));await route.fallback();});
+ await openApp(page);
+ await page.keyboard.press('Control+K');await expect(page.locator('#palette')).toBeVisible();await page.keyboard.press('Escape');
+ await tab(page,'market');await expect(page.locator('#market-status')).toContainText('2 regions');
+ await tab(page,'industry');await expect(page.locator('#industry .bpos .opp').first()).toBeVisible();
+ expect(market()).toBe(1);expect(prices).toHaveLength(1);
+ await page.locator('#refresh').click();await expect(page.locator('#sync-status')).toContainText('Synced');await expect(page.locator('#industry .bpos .opp').first()).toBeVisible();
+ await expect.poll(market).toBe(2);expect(prices).toHaveLength(2);
+});
 test('market explains an empty pipeline',async({page})=>{
  await mockApp(page,{noMarket:true});await openApp(page);await tab(page,'market');await expect(page.locator('#market-status')).toContainText('has not stored any data yet');
 });

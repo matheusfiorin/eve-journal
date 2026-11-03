@@ -50,13 +50,15 @@ export function corporation(id) {
   if (!corporations.has(id)) corporations.set(id, esi(`corporations/${id}/`).catch(error => { corporations.delete(id); throw error; }));
   return corporations.get(id);
 }
+// Concurrent callers share one in-flight request (S.pricesTask); Refresh clears it with S.prices.
 export async function loadPrices() {
   if (S.prices) return;
-  try {
-    const rows = await esi('markets/prices/');
+  const task = S.pricesTask ||= esi('markets/prices/').then(rows => {
+    if (S.pricesTask !== task) return;
     S.prices = new Map(rows.map(r => [r.type_id, r.average_price || r.adjusted_price || 0]));
     S.adjusted = new Map(rows.map(r => [r.type_id, r.adjusted_price || 0]));
-  } catch { /* Asset values stay unknown until the next refresh. */ }
+  }).catch(() => { if (S.pricesTask === task) S.pricesTask = null; /* Asset values stay unknown; the next call retries. */ });
+  await task;
 }
 export async function loadAssetCategories(ids) {
   const missing = ids.filter(id => !assetCats.has(id)), groups = new Map(), categories = new Map();
