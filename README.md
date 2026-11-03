@@ -8,7 +8,7 @@ Live: https://matheusfiorin.github.io/eve-journal/
 
 The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker. The browser remembers the choice, every view centres on that pilot, and the wingmate's plans sit right alongside. Switch from the top bar.
 
-Seven destinations sit in the left rail (a bottom bar on phones): **Bridge**, **Wing** (Crew map, Goals), **Pilot** (Training, Skills, Clones), **Earn** (Build, Mine, Explore, Trade), **Navigate** (Star map, Haul plan), **Ledger** and **Logbook**. Each view has its own address (`#earn/mine`), and old links like `#mining` still work. **Ctrl/Cmd K** searches screens, actions and systems; `g` then a letter jumps to a destination, `1`–`4` switches views, and `?` lists every shortcut.
+Seven destinations sit in the left rail (a bottom bar on phones): **Bridge**, **Wing** (Crew map, Goals), **Pilot** (Training, Skills, Clones), **Earn** (Build, Mine, Explore, Trade, Jobs), **Navigate** (Star map, Haul plan), **Ledger** and **Logbook**. Each view has its own address (`#earn/mine`), and old links like `#mining` still work. **Ctrl/Cmd K** searches screens, actions and systems; `g` then a letter jumps to a destination, `1`–`5` switches views, and `?` lists every shortcut.
 
 - **Bridge** — your title (rank + specialty from your skill points), training alert, ship and position, and your wing: the wingmate's training, wing net worth and combined skill points.
 - **Wing → Crew map** — wing net worth, holdings by category, what we own (grouped, with each owner's portrait) and each pilot's role breakdown.
@@ -35,7 +35,7 @@ A browser stays connected: its session is kept in `localStorage` and renews itse
 
 ## How it works
 
-Each pilot connects once through the Worker (`/auth/start`), which runs EVE SSO with PKCE and a confidential client, stores the refresh token encrypted in D1, and syncs ESI every 30 minutes. The browser only ever holds an opaque 24-hour session; it never sees EVE tokens. See [worker/README.md](worker/README.md).
+Each pilot connects once through the Worker (`/auth/start`), which runs EVE SSO with PKCE and a confidential client, stores the refresh token encrypted in D1, and syncs ESI every 30 minutes. The browser only ever holds an opaque session that lasts 30 days from its last use (it slides forward on each daily visit); it never sees EVE tokens. See [worker/README.md](worker/README.md).
 
 ### EVE application scopes
 
@@ -53,7 +53,7 @@ A pilot who connected before a scope was added sees "Permission not granted" for
 
 ### Wingmate sharing
 
-On the consent page each pilot can tick **share with my wingmate**. Their skills, wallet balance and asset summary (and, for pilots who connected after the Mining tab shipped, their ship, location and mining ledger) then reach the other pilot's session through `GET /api/wing`. That data is never public.
+On the consent page each pilot can tick **share with my wingmate**. Their skills, wallet balance and asset summary (and, for pilots who connected after the Mining tab shipped, their ship, location, 7-day location trail, industry jobs and mining ledger) then reach the other pilot's session through `GET /api/wing`. That data is never public.
 
 ### Market pipeline
 
