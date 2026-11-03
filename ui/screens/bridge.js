@@ -140,14 +140,13 @@ function together(p, o, crew) {
 function wingCard(p, s, o, crew) {
   if (!o) return '';
   const t = summary(o), sharing = o.private || S.wing.get(o.id)?.sharing;
-  const sum = list => { const k = list.filter(Number.isFinite); return k.length ? k.reduce((a, b) => a + b, 0) : undefined; };
   const goal = S.data.goals.find(g => !g.done);
   const progress = !goal ? null : Number.isFinite(goal.target) && goal.target > 0 ? Math.min(1, (goal.result || 0) / goal.target) : goal.steps?.length ? goal.steps.filter(st => st.done).length / goal.steps.length : null;
   const [a, b] = crew.caps;
   return `<section class="panel wing-card" aria-labelledby="wing-mini-title"><h2 id="wing-mini-title">Your wing</h2>
     <div class="pilot-head" data-pilot="${esc(keyOf(o))}">${portrait(o, 40, 'portrait--sm')}<div><h3>${esc(o.name)}</h3><p class="hint">${corpLine(o)}</p></div>${t.title ? `<span class="role-badge">${esc(t.title)}</span>` : ''}</div>
     ${trainingAlert(o)}
-    <dl class="readout">${fact('Wing net worth', count('wing-worth', sum([s.worth, t.worth]), 'isk'))}${fact('Wing skill points', count('wing-sp', sum([s.sp, t.sp])))}</dl>
+    <dl class="readout">${fact('Net worth', count('wing-worth', t.worth, 'isk'))}${fact('Skill points', count('wing-sp', t.sp))}</dl>
     ${sharing ? '' : `<p class="hint">${esc(o.name)} hasn’t shared their sheet yet. Once they reconnect and tick “share with my wingmate”, their plans show up here.</p>`}
     ${goal ? `<div class="goal-mini"><span>${esc(goal.title)}</span>${progress === null ? '' : `<span class="stack" role="img" aria-label="${Math.round(progress * 100)}% done"><i class="fill" style="width:${(progress * 100).toFixed(1)}%"></i></span>`}</div>` : ''}
     ${a ? `<p class="wing-mini__best">Tonight you’re best at <b data-act="${a.activity}">${a.label}</b> (${a.score})${b ? `, then ${b.label} (${b.score})` : ''}.</p>` : ''}

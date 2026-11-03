@@ -39,7 +39,7 @@ test('the command palette opens with Control+K and jumps to screens and systems'
  await page.keyboard.type('mine');await expect(palette.locator('[aria-selected="true"]')).toContainText('Mine');
  await page.keyboard.press('Enter');await expect(palette).toBeHidden();await expect(page.locator('#mining')).toBeVisible();expect(hash(page)).toBe('#earn/mine');
  // Systems come from the universe graph once the market snapshot has loaded.
- await expect(page.locator('#mining .opps .opp').first()).toBeVisible();
+ await expect(page.locator('#mining .rows__row').first()).toBeVisible();
  await page.keyboard.press('Control+K');await page.keyboard.type('niarja');await expect(palette.locator('[aria-selected="true"]')).toContainText('System');
  // Enter shows a system on the Star map; Shift+Enter opens it in the 3D modal.
  await page.keyboard.press('Enter');await expect(page.locator('#map')).toBeVisible();await expect(page.locator('#map-panel h3')).toHaveText('Niarja');

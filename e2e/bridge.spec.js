@@ -6,7 +6,7 @@ test('next up ranks what to do now, and each action opens the right view',async(
  const steps=page.locator('#bridge .course__step');await expect(steps.filter({hasText:'Mine '})).toHaveCount(1);
  expect(await steps.count()).toBeGreaterThanOrEqual(3);expect(await steps.count()).toBeLessThanOrEqual(5);
  // Fiofka's Heron job ends within a day, so it comes first and links to Earn → Jobs.
- await expect(steps.first()).toContainText('job finishes soon');await expect(steps.first().locator('button')).toHaveAttribute('data-go','earn/jobs');
+ await expect(steps.first()).toContainText('Deliver 1 finished job','the copy job in the fixtures is past its end');await expect(steps.first().locator('button')).toHaveAttribute('data-go','earn/jobs');
  await expect(steps.filter({hasText:'Start a Hobgoblin I run'})).toContainText('ISK/day');
  await page.screenshot({path:testInfo.outputPath('bridge.png'),fullPage:true});
  for(const [text,button,view] of [['Mine ','Show the belts','mining'],['Start a Hobgoblin','Plan the build','industry'],['Scan from','Plan the loop','exploration']]){

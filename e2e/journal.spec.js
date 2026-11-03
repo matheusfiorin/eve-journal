@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {mockApp,openApp,tab,addEntry,data,KEY} from './fixtures.js';
 test('public profiles, navigation and overview are usable without login',async({page})=>{
  const {errors}=await mockApp(page);await openApp(page);
- await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#bridge .wing-card')).toContainText('Wing skill points');
+ await expect(page.locator('.me-banner h1')).toHaveText('Fiofka');await expect(page.locator('#bridge .wing-card')).toContainText('Skill points');
  await expect(page.locator('.me-banner')).toContainText('Test Flight Academy');await expect(page.locator('#bridge')).toContainText('Security status');
  for(const name of ['empire','market','training','skills','wallet','clones','goals','overview'])await tab(page,name);
  await tab(page,'journal');await expect(page.locator('#journal')).toBeVisible();expect(errors).toEqual([]);
@@ -86,4 +86,18 @@ test('a goal with a target, steps and notes imports, ticks off and records its r
  await page.locator('#goal-filter').selectOption('done');await expect(page.locator('.goal').filter({hasText:'Antimatter'})).toBeVisible();
  await page.reload();await expect(page.locator('#sync-status')).toContainText('Synced');await tab(page,'goals');await page.locator('#goal-filter').selectOption('all');
  await expect(page.locator('.goal').filter({hasText:'Antimatter'})).toContainText('target reached');expect(ctx.errors).toEqual([]);
+});
+test('logbook reads an entry in the drawer, counts entries and starts a new one with n',async({page},testInfo)=>{
+ const {errors}=await mockApp(page,{data});await openApp(page);await tab(page,'journal');const book=page.locator('#logbook');
+ await expect(book.locator('.readout')).toContainText('Entries');await expect(book.locator('.readout')).toContainText('2026-10-30');await expect(page.locator('#entry-count')).toContainText('2 entries');
+ await expect(book.locator('.entry').first()).toContainText('Wormhole discovery');await expect(book.locator('.entry').first()).toHaveAttribute('data-pilot','decxus');
+ await book.locator('.entry h3').first().click();const drawer=page.locator('#drawer');await expect(drawer).toBeVisible();await expect(page.locator('#drawer-title')).toHaveText('Wormhole discovery');await expect(drawer.locator('.reading')).toHaveText('Decxus found a connection.');
+ await drawer.getByRole('button',{name:'Edit',exact:true}).click();await expect(drawer).toBeHidden();await expect(page.locator('#desk-title')).toHaveText('Edit entry');await expect(page.locator('#journal-form').getByLabel('Entry title')).toHaveValue('Wormhole discovery');
+ page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Cancel edit',exact:true}).click();await expect(page.locator('#desk-title')).toHaveText('New entry');
+ await page.locator('#journal-search').fill('connection');await expect(page.locator('#entry-count')).toContainText('1 of 2 entries match');await page.locator('#journal-search').fill('');
+ await page.locator('#journal-search').blur();await page.keyboard.press('n');await expect(page.locator('#journal-form').getByLabel('Entry title')).toBeFocused();
+ await page.keyboard.type('Quiet night');await page.locator('#journal-form').getByLabel('Private notes').fill('Ran a few sites.');await page.getByRole('button',{name:'Save entry locally'}).click();
+ await expect(page.locator('#toasts')).toContainText('Entry saved');await expect(book.locator('.entry')).toHaveCount(3);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ await page.screenshot({path:testInfo.outputPath('logbook.png'),fullPage:true});expect(errors).toEqual([]);
 });

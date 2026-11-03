@@ -18,13 +18,13 @@ test('the bridge shows the pilot and the wing together, never as a contest',asyn
  await expect(page.locator('.me-banner .role-badge')).toHaveText('Rookie Warrior');await expect(page.locator('.me-banner')).toContainText('33.5M ISK');
  // Fiofka 12.5M wallet + 21.005M assets; Decxus 40M + 6.5M. One wing figure, no verdicts between pilots.
  await expect(wing).toContainText('Decxus');await expect(wing).toContainText('Rookie Industrialist');
- await expect(wing).toContainText('80.0M ISK');await expect(wing).toContainText('2,125,000');
+ await expect(wing).toContainText('46.5M ISK','Decxus alone, not both pilots');await expect(wing).toContainText('2,000,000');await expect(wing).not.toContainText('2,125,000');
  await expect(page.locator('#bridge')).not.toContainText(/ leads| vs |Dead even/);
  await page.screenshot({path:testInfo.outputPath('overview.png'),fullPage:true});
 });
 test('a wingmate who does not share keeps their private figures hidden',async({page})=>{
  await mockApp(page,{connected:'first',wingPrivate:true});await openApp(page);
- const wing=page.locator('#bridge .wing-card');await expect(wing).toContainText('Decxus hasn’t shared their sheet yet');await expect(wing).toContainText('share with my wingmate');await expect(wing).toContainText('33.5M ISK');await expect(wing).not.toContainText('80.0M');
+ const wing=page.locator('#bridge .wing-card');await expect(wing).toContainText('Decxus hasn’t shared their sheet yet');await expect(wing).toContainText('share with my wingmate');await expect(wing).not.toContainText('33.5M',"Fiofka's worth never shows under Decxus");await expect(wing).not.toContainText('80.0M');
 });
 test('the crew map credits both pilots and never scores them against each other',async({page},testInfo)=>{
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'empire');const crew=page.locator('#strengths');
@@ -75,9 +75,9 @@ test('a cold start fetches the market snapshot and live prices once, and Refresh
  await openApp(page);
  await page.keyboard.press('Control+K');await expect(page.locator('#palette')).toBeVisible();await page.keyboard.press('Escape');
  await tab(page,'market');await expect(page.locator('#market-status')).toContainText('2 regions');
- await tab(page,'industry');await expect(page.locator('#industry .bpos .opp').first()).toBeVisible();
+ await tab(page,'industry');await expect(page.locator('#industry .rows__row').first()).toBeVisible();
  expect(market()).toBe(1);expect(prices).toHaveLength(1);
- await page.locator('#refresh').click();await expect(page.locator('#sync-status')).toContainText('Synced');await expect(page.locator('#industry .bpos .opp').first()).toBeVisible();
+ await page.locator('#refresh').click();await expect(page.locator('#sync-status')).toContainText('Synced');await expect(page.locator('#industry .rows__row').first()).toBeVisible();
  await expect.poll(market).toBe(2);expect(prices).toHaveLength(2);
 });
 test('market explains an empty pipeline',async({page})=>{

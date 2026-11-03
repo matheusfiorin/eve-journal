@@ -200,8 +200,8 @@ function renderSummary() {
   for (const r of top) { const c = assetCats.get(r.type) || 'Other'; if (!groups.has(c)) groups.set(c, []); groups.get(c).push(r); }
   const missing = ps.filter((p, i) => sums[i].worth === undefined).map(p => p.name);
   $('#wing-summary').innerHTML = `<dl class="readout">
-      <div><dt>Wing net worth</dt><dd class="wing-total">${count('wing-total', total, 'isk')}</dd></div>
-      <div><dt>Wing skill points</dt><dd>${count('wing-sp-total', sum(sums.map(x => x.sp)))}</dd></div>
+      <div><dt>Combined net worth</dt><dd class="wing-total">${count('wing-total', total, 'isk')}</dd></div>
+      <div><dt>Combined skill points</dt><dd>${count('wing-sp-total', sum(sums.map(x => x.sp)))}</dd></div>
       <div><dt>Goals done</dt><dd><span class="num">${done}</span><small>of ${S.data.goals.length}</small></dd></div></dl>
     ${missing.length ? `<p class="hint">Not counted yet: ${missing.map(esc).join(', ')}. Wallet and assets appear after connecting with the asset permission${missing.some(n => n !== S.me) ? ' and wingmate sharing' : ''}.</p>` : ''}
     <details class="own"><summary>What we own</summary>${top.length ? [...groups].map(([c, rows]) => `<h4>${esc(c)}</h4><ul class="holdings">${rows.map(r => `<li data-pilot="${esc(r.owner.name.toLowerCase())}">${portrait(r.owner, 24, 'portrait--xs')}<span>${esc(name(r.type))}<small>×${Number(r.quantity).toLocaleString()} · ${esc(r.owner.name)}</small></span><b>${format(r.value, 'isk')}</b></li>`).join('')}</ul>`).join('') : '<p class="hint">Nothing valued yet.</p>'}

@@ -1,8 +1,73 @@
-/* Ledger (wallet history) and Logbook (journal entries and backups). */
-.big{font-size:26px;font-weight:600;margin:0;text-align:left}
-.entry{border-top:1px solid var(--line);padding:12px 0}
-.entry h3{font-size:var(--fs-lg);margin:4px 0}
-.entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-muted);margin:8px 0 0;max-width:72ch;line-height:1.55}
-.entry small{color:var(--text-muted);font-size:var(--fs-xs)}
-.entry .actions{margin:0;flex-shrink:0}
-.backup{border-top:1px solid var(--line);margin-top:16px;padding-top:8px}
+/* Ledger (one table of wallet entries) and Logbook (a quiet writing desk beside the entry list, backups below). */
+
+/* ── Ledger ── */
+.ledger{padding:26px 0 0}
+.ledger .rows__head,.ledger .rows__row{padding:0 18px}
+.ledger .rows__row:last-child{border-bottom:0}
+.rows__date{color:var(--text-muted);font-size:var(--fs-xs);text-align:left!important;justify-self:start!important;order:-1}
+.vk .ledger .rows__head>:first-child,.vk .ledger .rows__row>:first-child{text-align:left;justify-self:start}
+.vk .ledger .rows__head>:nth-child(2),.vk .ledger .rows__row>:nth-child(2){text-align:left;justify-self:stretch}
+.ledger .rows__main b{font-weight:500;white-space:nowrap}
+.ledger .rows__main b::first-letter{text-transform:uppercase}
+.ledger .rows__key{font-weight:600}
+.ledger .state{margin:0 18px 18px}
+/* Entry type: a small activity-like diamond plus its word, never colour alone. */
+.kind{display:inline-flex;align-items:center;gap:6px;min-width:72px;font:500 11px var(--ff-ui);color:var(--text-muted)}
+.kind::before{content:"";width:6px;height:6px;transform:rotate(45deg);background:var(--k,var(--text-faint))}
+.kind[data-kind=bounty]{--k:var(--act-combat)}.kind[data-kind=market]{--k:var(--act-trade)}.kind[data-kind=industry]{--k:var(--act-industry)}
+.kind[data-kind=tax]{--k:var(--warn)}.kind[data-kind=transfer]{--k:var(--info)}.kind[data-kind=mining]{--k:var(--act-mining)}
+.jobs-line{display:flex;width:100%;align-items:center;justify-content:space-between;gap:16px;margin-top:16px;padding:14px 18px;text-align:left;color:var(--text);font-weight:400;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-panel)}
+.jobs-line:hover{background:var(--surface-2);border-color:var(--line-strong)}
+.jobs-line b{display:block;font-weight:600;font-size:var(--fs-md)}
+.jobs-line small{display:block;color:var(--text-muted);font-size:var(--fs-sm);margin-top:2px}
+.jobs-line__go{flex:none;color:var(--accent-strong);font-weight:600;font-size:var(--fs-sm)}
+.drawer-amount{margin:0 0 14px;font-size:var(--fs-xl);font-weight:600}.drawer-amount small{font:400 var(--fs-sm) var(--ff-ui);color:var(--text-muted)}
+
+/* ── Logbook ── */
+.logbook{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr);gap:16px;align-items:start}
+.logbook>*+*{margin-top:0}
+#entry-count{margin:0 0 6px}
+.entries{list-style:none;margin:0;padding:0}
+.entry{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:4px 16px;padding:16px 10px;margin:0 -10px;border-top:1px solid var(--line);cursor:pointer;border-radius:var(--r-ctl);transition:background var(--dur-1)}
+.entry:first-child{border-top:0}
+.entry:hover{background:var(--surface-2)}
+.entry:focus-visible{outline:none;background:var(--surface-3);box-shadow:inset 3px 0 0 var(--accent)}
+.entry__date{padding-top:3px;font-size:var(--fs-xs);color:var(--text-faint)}
+.entry h3{margin:0;font-size:var(--fs-lg);font-weight:600;overflow-wrap:anywhere}
+.entry__meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 0;font-size:var(--fs-xs)}
+.entry__meta .who{font-weight:600}
+.entry__body{margin:8px 0 0;color:var(--text-muted);max-width:68ch;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.entry__actions{display:flex;gap:6px;align-self:start;opacity:.55;transition:opacity var(--dur-1)}
+.entry:hover .entry__actions,.entry:focus-within .entry__actions{opacity:1}
+.entry .who{color:var(--pilot,var(--text))}
+.reading{white-space:pre-wrap;overflow-wrap:anywhere;font-size:17px;line-height:1.65;max-width:62ch;color:var(--text)}
+#drawer .entry__meta{margin:0 0 16px;font-size:var(--fs-sm)}
+/* The writing desk: big quiet fields, the text area first. */
+.desk{position:sticky;top:calc(var(--strip-h) + var(--viewbar-h) + var(--toolbar-h) + 12px)}
+.desk .panel__head{margin-bottom:10px;align-items:baseline}
+.desk .panel__head .hint{margin:0;text-align:right}
+.desk input[name=title]{font-size:var(--fs-lg);font-weight:600;padding:10px 12px}
+.desk textarea{min-height:200px;font-size:var(--fs-md);line-height:1.6;padding:12px}
+.desk__meta{display:grid;grid-template-columns:minmax(0,1fr) 150px minmax(0,1fr);gap:0 10px}
+.desk .actions{margin-top:4px}
+.backup{margin-top:16px}
+.backup__actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px}
+.backup__actions .import{flex:none;display:inline-flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border:1px dashed var(--line-strong);border-radius:var(--r-ctl);font-size:var(--fs-sm);color:var(--text-muted)}
+.backup__actions .import input{margin:0;width:auto;padding:4px;border:0;background:none;font-size:var(--fs-xs)}
+#backup-status{margin:10px 0 0}
+
+@media (max-width:1000px){ .logbook{grid-template-columns:1fr} .desk{position:static} }
+@media (max-width:720px){
+  .vk .ledger .rows__row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"main key" "date key"}
+  .vk .ledger .rows__row>.rows__date{display:block!important;grid-area:date;order:0}
+  .ledger .rows__main{grid-area:main}.ledger .rows__key{grid-area:key}
+  .ledger .rows__main b{white-space:normal}
+  .kind{min-width:0}
+  .backup__actions .import{flex:1 1 100%;flex-wrap:wrap;padding:8px 12px}
+  .backup__actions .import input{max-width:100%;min-width:0}
+  .entry{grid-template-columns:1fr;padding:14px 8px;margin:0 -8px}
+  .entry__actions{opacity:1}
+  .desk__meta{grid-template-columns:1fr 1fr}.desk__meta label:last-child{grid-column:1/-1}
+  .desk textarea{min-height:140px}
+  .desk .panel__head{display:block}.desk .panel__head .hint{text-align:left;margin-top:2px}
+}

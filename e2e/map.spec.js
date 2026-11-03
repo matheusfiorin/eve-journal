@@ -53,12 +53,12 @@ test('routes across the app preview on hover and open in the 3D modal, then in t
  await modal.getByRole('button',{name:'Open in Star map'}).click();await expect(modal).toBeHidden();await expect(page.locator('#map')).toBeVisible();
  await expect(page.locator('#map-route')).toContainText('Balanced route · 3 jumps');await expect(page.locator('svg.region-map .route-line')).toHaveCount(1,'Jita–Perimeter is inside Domain? no: the Forge part');
  await page.locator('#map-route-clear').click();await expect(page.locator('#map-route')).toBeHidden();
- await tab(page,'industry');const trip=page.locator('.bpos .opp').filter({hasText:'Rifter'}).locator('details.trip');await trip.locator('summary').click();
+ await tab(page,'industry');await page.locator('#industry .rows__row').filter({hasText:'Rifter'}).click();const trip=page.locator('#drawer');await expect(trip).toBeVisible();
  if(!touch){await trip.locator('.leg').first().hover();await expect(pop).toBeVisible();await expect(pop).toContainText('Buy the blueprint');}
  await trip.locator('.leg').first().locator('.map-btn').click();await expect(modal).toBeVisible();await expect(modal.locator('.hop-strip li')).toHaveCount(4);
  await modal.locator('.hop-strip').getByRole('button',{name:/Perimeter/}).click();await expect(modal.locator('#map-modal-title')).toHaveText('Perimeter');await expect(modal.locator('.sys-panel')).toContainText('Kimotoro');
- await page.locator('#map-modal-close').click();await expect(modal).toBeHidden();
- await tab(page,'mining');await page.locator('#mining .opps .opp').first().locator('a[data-system]').click();await expect(modal).toBeVisible();await expect(modal.locator('#map-modal-title')).toHaveText('Perimeter');
+ await page.locator('#map-modal-close').click();await expect(modal).toBeHidden();await page.keyboard.press('Escape');
+ await tab(page,'mining');await page.locator('#mining .rows__row').first().locator('a[data-system]').click();await expect(modal).toBeVisible();await expect(modal.locator('#map-modal-title')).toHaveText('Perimeter');
  await modal.getByRole('button',{name:'Haul here'}).click();await expect(page.locator('#hauling')).toBeVisible();await expect(page.locator('#haul-stops input').last()).toHaveValue('Perimeter');
  expect(ctx.errors).toEqual([]);
 });
