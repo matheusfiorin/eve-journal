@@ -207,7 +207,7 @@ async function main() {
   if (!secret) throw new Error('EVE_CLIENT_SECRET is required to sign pipeline uploads.');
   const token = createHmac('sha256', secret).update('market-pipeline').digest('base64url');
   const site = process.env.SITE_URL || 'https://matheusfiorin.github.io/eve-journal/';
-  const backend = (await (await fetch(new URL('config.json', site))).json()).backendUrl;
+  const backend = (await (await fetch(new URL('config.json', site), {signal:AbortSignal.timeout(30000)})).json()).backendUrl;
   if (!backend) throw new Error('The published config.json has no backendUrl yet.');
   const api = (path, init = {}) => fetch(`${backend}${path}`, {...init, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...init.headers}, signal:AbortSignal.timeout(60000)});
 
@@ -237,11 +237,12 @@ async function main() {
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
   let pilotSystems = [];
   try { pilotSystems = (await (await api('/api/market/regions')).json()).systems || []; } catch (error) { console.warn(`Pilot regions: ${error.message}`); }
-  const pilotRegions = await Promise.all(pilotSystems.map(async system => {
+  // One failed lookup skips that pilot's region rather than the whole run.
+  const pilotRegions = (await Promise.all(pilotSystems.map(async system => {
     if (map?.systems[system]) return map.systems[system][2];
     const s = (await esi(`/universe/systems/${system}/`)).body;
     return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
-  }));
+  }).map(lookup => lookup.catch(error => { console.log(`::warning title=Pilot region::${error.message}`); return null; })))).filter(Number.isSafeInteger);
   // Keep only blueprints an NPC actually sells in high-sec. The survey is too big for one run under ESI's
   // market rate limit, so it is incremental: each run refreshes the stalest regions within a time budget.
   // shortcut: a blueprint new to the candidate list is only checked in a region at that region's next refresh.
