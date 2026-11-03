@@ -19,8 +19,10 @@ export class BackendClient {
  async call(path,{id,method='GET',body}={}){
   const headers={Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})};if(id){if(!this.has(id))throw new Error('Connect this pilot again.');headers.Authorization=`Bearer ${this.sessions.get(id).token}`;}
   const response=await this.fetch(`${this.url}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
-  const data=await response.json();
-  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(data.error||`Backend returned ${response.status}.`);}
+  // A proxy or Cloudflare error page is HTML, not JSON: report the status rather than a parse error.
+  const data=/json/i.test(response.headers.get('Content-Type')||'')?await response.json().catch(()=>null):null;
+  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(data?.error||`Backend returned ${response.status}.`);}
+  if(!data||typeof data!=='object')throw new Error('Backend returned an unreadable response.');
   return data;
  }
  async publicPilots(){const data=await this.call('/api/public/pilots');if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid public snapshot.');return data.pilots;}

@@ -43,3 +43,13 @@ test('the market read carries a signed-in session when there is one so pilot reg
  await c.market();auth(c);await c.market();
  assert.deepEqual(seen,[undefined,`Bearer ${'a'.repeat(43)}`]);
 });
+test('an HTML or empty error page reports the HTTP status, not a JSON parse error',async()=>{
+ const html=client(async()=>new Response('<!doctype html><h1>502 Bad Gateway</h1>',{status:502,headers:{'Content-Type':'text/html'}}));
+ await assert.rejects(html.publicPilots(),{message:'Backend returned 502.'});
+ const empty=client(async()=>new Response(null,{status:503}));
+ await assert.rejects(empty.publicPilots(),{message:'Backend returned 503.'});
+ const json=client(async()=>Response.json({error:'Pilot is syncing.'},{status:409}));
+ await assert.rejects(json.publicPilots(),{message:'Pilot is syncing.'});
+ const garbled=client(async()=>new Response('<html>',{status:200,headers:{'Content-Type':'text/html'}}));
+ await assert.rejects(garbled.publicPilots(),{message:'Backend returned an unreadable response.'});
+});
