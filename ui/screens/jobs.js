@@ -3,7 +3,7 @@ import {wingJobs} from '../../jobs.js';
 import {skillLevels, SLOT_SKILLS} from '../../industry.js';
 import {S, ordered} from '../state.js';
 import {name, place} from '../esi.js';
-import {$, esc, duration, plural, openDrawer, go} from '../shared.js';
+import {$, esc, duration, plural, openDrawer} from '../shared.js';
 
 export const markup = {jobs:`<div class="panel panel--primary jobs-head"><div class="panel__head"><div><h2>Industry jobs</h2><p id="jobs-status" class="panel__sub">What the wing has cooking, and what's ready to deliver.</p></div></div><div id="jobs-summary"></div></div>
   <div id="jobs-content"></div>`};
@@ -28,7 +28,7 @@ export function render() {
     <div class="job__main"><b>${esc(name(x.job.product_type_id || x.job.blueprint_type_id))}</b><small><span class="tag ${x.kind === 'science' ? 'dim' : ''}">${esc(x.activity)}</span> ${x.job.activity_id === 5 ? `${plural(x.job.runs, 'copy', 'copies')} × ${plural(x.job.licensed_runs || 1, 'run')}` : plural(x.job.runs, 'run')} · ${esc(place(x.job.station_id || x.job.facility_id))}</small></div>
     <div class="job__bar" role="progressbar" aria-valuenow="${Math.round(x.progress * 100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${(x.progress * 100).toFixed(1)}%"></i></div>
     <div class="job__eta">${x.ready ? '<b class="pos">Ready to deliver</b>' : x.paused ? '<b class="warn-text">Paused</b>' : `<b class="num">${esc(duration(x.remaining / 1000))}</b><small>${esc(when(Date.parse(x.job.end_date)))}</small>`}</div></li>`;
-  $('#jobs-content').innerHTML = w.list.length ? `<ol class="jobs" data-filter-scope>${w.list.map(row).join('')}</ol>`
+  $('#jobs-content').innerHTML = w.list.length ? `<ol class="jobs">${w.list.map(row).join('')}</ol>`
     : `<div class="empty">No jobs running. <button type="button" class="link-btn" data-go="earn/build">Find something to build</button></div>`;
   clearInterval(timer);
   // Countdowns tick while the view is on screen.
@@ -48,4 +48,3 @@ export function wire() {
   $('#jobs-content').addEventListener('click', e => { const el = e.target.closest('[data-job]'); if (el) open(el); });
   $('#jobs-content').addEventListener('keydown', e => { const el = e.target.closest('[data-job]'); if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(el); } });
 }
-export const goJobs = () => go('earn/jobs');

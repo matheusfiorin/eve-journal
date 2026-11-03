@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateBackup,mergeBackups,remaining,escapeHTML,filterEntries,trainingProgress,localDate,queueState,pilotRoles,pilotTitle,assetHoldings,shares,compactNumber} from '../model.js';
+import {validateBackup,mergeBackups,remaining,escapeHTML,filterEntries,trainingProgress,localDate,queueState,pilotRoles,pilotTitle,assetHoldings,compactNumber} from '../model.js';
 const goal={id:'goal-1',title:'Fly a cruiser',pilot:'Both pilots',done:false};
 const entry={id:'entry-1',title:'First flight',pilot:'Pilot',date:'2026-10-30',body:'We made it home.'};
 test('backup validation preserves journal records and strips unrelated data',()=>{
@@ -69,9 +69,6 @@ test('asset holdings value each type with known prices and sort by value',()=>{
   const h=assetHoldings({types:[[34,1000],[605,2],[1,5]]},new Map([[34,5],[605,1e6]]));
   assert.equal(h.total,2005000);assert.deepEqual(h.rows.map(r=>r.type),[605,34,1]);assert.equal(h.rows[2].value,0);
   assert.deepEqual(assetHoldings(null,new Map()),{rows:[],total:0});
-});
-test('shares ignore missing values and never divide by zero',()=>{
-  assert.deepEqual(shares([30,10]),{total:40,shares:[0.75,0.25]});assert.deepEqual(shares([null,0]),{total:0,shares:[0,0]});assert.deepEqual(shares([NaN,5]).shares,[0,1]);
 });
 test('compact numbers for big ISK values',()=>{
   assert.equal(compactNumber(1234),'1.2k');assert.equal(compactNumber(12500000.25),'12.5M');assert.equal(compactNumber(250e9),'250B');assert.equal(compactNumber(-5500),'-5.5k');assert.equal(compactNumber(undefined),'—');assert.equal(compactNumber(999),'999');

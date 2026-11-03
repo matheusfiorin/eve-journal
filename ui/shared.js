@@ -11,7 +11,7 @@ export const when = date => new Date(date).toLocaleString(undefined,{dateStyle:'
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export const pct = v => `${(v * 100).toFixed(v < 0.1 ? 2 : 1)}%`;
 export const duration = sec => sec >= 86400 ? `${(sec / 86400).toFixed(1)} d` : sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(sec / 60))} min`;
-export const scannedAgo = () => `scanned ${Math.max(1, Math.round((Date.now() - Math.min(...S.marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
+export const scannedAgo = () => S.marketData?.regions?.length ? `scanned ${Math.max(1, Math.round((Date.now() - Math.min(...S.marketData.regions.map(r => r.updatedAt))) / 60000))} min ago` : 'no recent scan';
 export function format(value, kind) {
   if (!Number.isFinite(value)) return '—';
   if (kind === 'isk') return `${compactNumber(value)} ISK`;
