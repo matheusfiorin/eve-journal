@@ -52,6 +52,12 @@ function wingRecord(id,state){
 export async function mockApp(page,options={}) {
  const state={fail:false,missing:false,...options};
  const errors=[],calls=[],privateEsi=[];page.on('pageerror',e=>errors.push(e.message));
+ // The page's CSP allows the deployed Worker (*.workers.dev); let it reach the mocked backend too, and fail on any other violation.
+ await page.route(url=>url.hostname==='127.0.0.1'&&/^\/(index\.html)?$/.test(url.pathname),async route=>{
+  const response=await route.fetch();
+  await route.fulfill({response,body:(await response.text()).replace('https://*.workers.dev','https://*.workers.dev '+API)});
+ });
+ await page.addInitScript(()=>document.addEventListener('securitypolicyviolation',e=>setTimeout(()=>{throw new Error(`CSP blocked ${e.blockedURI} (${e.violatedDirective})`);})));
  await page.route('**/config.json',r=>r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({title:'EVE Pilot Console',pilots:names,backendUrl:API})}));
  await page.route('https://images.evetech.net/**',r=>r.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#284736"/></svg>'}));
  await page.route('https://esi.evetech.net/**',async route=>{

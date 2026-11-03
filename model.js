@@ -89,10 +89,6 @@ export function assetHoldings(summary, prices) {
   const rows = (summary?.types || []).map(([type, quantity]) => ({type, quantity, value:quantity * (prices.get(type) || 0)}));
   return {rows:rows.sort((a,b) => b.value - a.value), total:rows.reduce((t, r) => t + r.value, 0)};
 }
-export function shares(values) {
-  const known = values.map(v => Number.isFinite(v) && v > 0 ? v : 0), total = known.reduce((a,b) => a + b, 0);
-  return {total, shares:known.map(v => total ? v / total : 0)};
-}
 export function compactNumber(value) {
   if (!Number.isFinite(value)) return '—';
   const abs = Math.abs(value);

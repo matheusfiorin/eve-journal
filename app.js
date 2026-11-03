@@ -3,7 +3,7 @@ import {BackendClient} from './backend.js';
 import {JournalStore} from './storage.js';
 import {S, KEY, ME, home, counters} from './ui/state.js';
 import {json} from './ui/esi.js';
-import {$, countUps, notice, toast, pilotOptions} from './ui/shared.js';
+import {$, countUps, notice, toast, pilotOptions, landOn} from './ui/shared.js';
 import {loadPilots, clearPrivate} from './ui/pilots.js';
 import * as routes from './ui/routes.js';
 import * as mapmodal from './ui/mapmodal.js';
@@ -35,9 +35,11 @@ function renderAll() {
   if (!$('#hero').hidden) hero.renderHero();
   countUps();
 }
-function selectTab(key) {
+// focus: a person asked for this view (not the boot), so move focus there and announce it.
+function selectTab(key, focus = false) {
   const id = shell.resolve(key);
   if (!id) return;
+  const viaTabs = Boolean(document.activeElement?.closest('#viewbar [role=tab]'));
   shell.mark(id);
   const next = document.getElementById(id);
   document.querySelectorAll('.view').forEach(s => { if (s !== next) s.hidden = true; });
@@ -46,6 +48,7 @@ function selectTab(key) {
   RENDER[id]();
   next.querySelectorAll('[data-count]').forEach(el => counters.delete(el.dataset.key));
   countUps();
+  if (focus) landOn(id, viaTabs);
 }
 function expireSessions() {
   if (!S.backend) return;
@@ -55,16 +58,16 @@ function expireSessions() {
   renderAll(); notice('A pilot session expired. Connect again to see private data.');
 }
 
-document.addEventListener('go', event => selectTab(event.detail));
+document.addEventListener('go', event => selectTab(event.detail, true));
 document.addEventListener('click', async event => {
   const b = event.target.closest('button'); if (!b) return;
   try {
-    if (b.dataset.go) selectTab(b.dataset.go);
+    if (b.dataset.go) selectTab(b.dataset.go, true);
     if (b.id === 'switch-pilot') hero.openHero();
     if (b.dataset.connect !== undefined) {
       const p = S.pilots[Number(b.dataset.connect)];
       if (!S.backend || !p?.id) throw new Error('Wait for the pilot lookup before connecting.');
-      location.assign(S.backend.authURL(p.id));
+      location.assign(S.backend.connect(p.id));
     }
     if (b.dataset.disconnect) {
       const id = Number(b.dataset.disconnect);
@@ -76,7 +79,7 @@ document.addEventListener('click', async event => {
   } catch (error) { notice(error.message); }
 });
 $('#refresh').onclick = async () => {
-  S.marketData = null; S.costIndices = null; S.prices = null;
+  S.marketData = null; S.costIndices = null; S.prices = null; S.marketTask = S.pricesTask = S.costTask = null;
   if (await loadPilots(true, renderAll)) toast(`Refreshed. EVE data from ${new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`, 'ok');
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) expireSessions(); });
@@ -98,10 +101,10 @@ async function init() {
     try {
       S.backend = new BackendClient(S.config.backendUrl);
       if (S.backend.acceptRedirect(location.hash)) { history.replaceState(null, '', home); notice('Pilot connected. Training is shared and private data is now available.'); }
-    } catch (error) { notice(error.message); }
+    } catch (error) { if (location.hash.includes('backend_session')) history.replaceState(null, '', home); notice(error.message); }
   }
   for (const module of [routes, mapmodal, shell, ...SCREENS]) module.wire?.();
-  hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); });
+  hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); });
   // Populate selects before restoring an existing author in a draft.
   S.pilots = S.config.pilots.map(n => ({name:n})); pilotOptions(); logbook.resetEntry(true);
   try { S.me = localStorage.getItem(ME); } catch { /* Ask again. */ }

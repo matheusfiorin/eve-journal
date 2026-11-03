@@ -2,7 +2,7 @@ const MAX_SESSION=31*86400000;
 export class BackendClient {
  constructor(url,storage=globalThis.localStorage,fetchImpl=globalThis.fetch){
   const parsed=new URL(url);if(parsed.protocol!=='https:')throw new Error('The backend URL must use HTTPS.');
-  this.url=parsed.origin;this.storage=storage;this.fetch=(...args)=>fetchImpl(...args);this.key=`eve-backend-sessions:${this.url}`;
+  this.url=parsed.origin;this.storage=storage;this.fetch=(...args)=>fetchImpl(...args);this.key=`eve-backend-sessions:${this.url}`;this.connectKey=`eve-backend-connect:${this.url}`;
   // Sessions used to live in sessionStorage and died with the tab; carry an open tab's session over once.
   try{const legacy=globalThis.sessionStorage?.getItem(this.key);if(legacy&&!storage.getItem(this.key))storage.setItem(this.key,legacy);globalThis.sessionStorage?.removeItem(this.key);}catch{/* Start fresh. */}
   try{this.sessions=new Map(JSON.parse(storage.getItem(this.key)||'[]').filter(([id,s])=>Number.isSafeInteger(id)&&/^[\w-]{43}$/.test(s?.token)&&s.expires>Date.now()));}catch{this.sessions=new Map();}
@@ -14,13 +14,23 @@ export class BackendClient {
   const params=new URLSearchParams(hash.replace(/^#/,''));if(!params.has('backend_session'))return false;
   const token=params.get('backend_session'),id=Number(params.get('pilot')),expires=Number(params.get('expires'));
   if(![2124810474,2124815118].includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+MAX_SESSION)throw new Error('Backend session response was invalid. Connect the pilot again.');
+  // A link carrying someone else's session must not silently replace a working one (login CSRF): a pilot who is
+  // already connected here is replaced only by a redirect this tab asked for with connect().
+  const mark=this.tab(t=>{const v=t.getItem(this.connectKey);t.removeItem(this.connectKey);return v;});
+  let asked=null;try{asked=JSON.parse(mark);}catch{/* No mark. */}
+  if(this.has(id)&&!(asked?.id===id&&Date.now()-asked.at<1800000))throw new Error('This pilot is already connected in this browser; ignored a connection link it did not start. Use Reconnect to replace the session.');
   this.sessions.set(id,{token,expires});this.save();return true;
  }
+ tab(fn){try{return globalThis.sessionStorage?fn(globalThis.sessionStorage):null;}catch{return null;}}
+ // The EVE login URL for a pilot; remembers in this tab that a redirect back for them is expected.
+ connect(id){this.tab(t=>t.setItem(this.connectKey,JSON.stringify({id,at:Date.now()})));return this.authURL(id);}
  async call(path,{id,method='GET',body}={}){
   const headers={Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})};if(id){if(!this.has(id))throw new Error('Connect this pilot again.');headers.Authorization=`Bearer ${this.sessions.get(id).token}`;}
   const response=await this.fetch(`${this.url}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
-  const data=await response.json();
-  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(data.error||`Backend returned ${response.status}.`);}
+  // A proxy or Cloudflare error page is HTML, not JSON: report the status rather than a parse error.
+  const data=/json/i.test(response.headers.get('Content-Type')||'')?await response.json().catch(()=>null):null;
+  if(!response.ok){if(response.status===401&&id){this.sessions.delete(id);this.save();}throw new Error(data?.error||`Backend returned ${response.status}.`);}
+  if(!data||typeof data!=='object')throw new Error('Backend returned an unreadable response.');
   return data;
  }
  async publicPilots(){const data=await this.call('/api/public/pilots');if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid public snapshot.');return data.pilots;}
@@ -34,7 +44,8 @@ export class BackendClient {
  }
  authURL(id){return `${this.url}/auth/start?pilot=${encodeURIComponent(id)}`;}
  async wing(id){const data=await this.call('/api/wing',{id});if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid wing summary.');return data.pilots;}
- async market(){return this.call('/api/market');}
+ // Any signed-in pilot unlocks the regions the pilots fly in; without one the backend serves the trade hubs only.
+ async market(){const id=[...this.sessions.keys()].find(id=>this.has(id));return this.call('/api/market',id?{id}:{});}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  async disconnect(id){await this.call('/api/disconnect',{id,method:'POST'});this.sessions.delete(id);this.save();}
  expire(){const ids=[];for(const[id,s]of this.sessions)if(s.expires<=Date.now()){ids.push(id);this.sessions.delete(id);}if(ids.length)this.save();return ids;}

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY} from '../worker/index.js';
+import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
 const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -23,7 +24,7 @@ function setup(options={}){
  const calls=[];const fetchImpl=async(url,init={})=>{
   calls.push({url:String(url),init});const path=new URL(url).pathname;
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
-  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
+  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
   if(path.endsWith('/oauth/jwks'))return json({keys:[jwk]});
   if(path.endsWith('/oauth/revoke'))return new Response(null,{status:200});
   assert.match(init.headers.Authorization,/^Bearer /);
@@ -102,6 +103,11 @@ test('expired access token refreshes and persists encrypted rotation before ESI 
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
  const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);assert.equal((await decrypt(synced.credentials,app.env.TOKEN_ENCRYPTION_KEY)).refreshToken,'private-rotating-refresh-token');assert.ok(app.calls.some(call=>call.url.includes('/oauth/token')&&String(call.init.body).includes('grant_type=refresh_token')));
 });
+test('a revoked refresh token asks the pilot to reconnect instead of blaming EVE',async()=>{
+ const app=setup({revoked:true});const {bearer}=await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
+ const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(synced.last_error,/authorization expired or was revoked.*Reconnect/);
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.match(payload.lastError,/Reconnect/);
+});
 test('disconnect removes enrollment, all sessions and public snapshot and requests EVE revocation',async()=>{
  const app=setup();const {bearer}=await connect(app);const disconnected=await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}});assert.equal(disconnected.status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,0);assert.ok(app.calls.some(call=>call.url.endsWith('/oauth/revoke')));assert.deepEqual((await(await app.request('/api/public/pilots')).json()).pilots,[]);
 });
@@ -138,6 +144,17 @@ test('wing summaries need a session and include only pilots who opted in',async(
 test('consent records the wingmate choice',async()=>{
  const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,2);
 });
+test('each scheduled run syncs one pilot, taking turns, to stay within the per-invocation subrequest limit',async()=>{
+ const app=setup();await connect(app);const other=2124815118;
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, snapshot, share_training) SELECT ?, 'Decxus', credentials, snapshot, 1 FROM pilots WHERE character_id = ?").run(other,id);
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0, last_error = ?').run('still failing');
+ let before;const synced=()=>[...new Set(app.calls.slice(before).map(c=>Number(c.url.match(/characters\/(\d+)\//)?.[1])).filter(Boolean))];
+ const tick=n=>n*SYNC_EVERY;
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(100));assert.deepEqual(synced(),[id]);
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(101));assert.deepEqual(synced(),[other],'the next run takes the other pilot');
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0').run();
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(102));assert.deepEqual(synced(),[id]);
+});
 test('market pipeline must authenticate, stores snapshots per region and the public read returns them',async()=>{
  const app=setup();await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
  const ingest=(auth,body)=>app.request('/api/market/ingest',{method:'POST',headers:auth?{Authorization:`Bearer ${auth}`}:{},body:JSON.stringify(body)});
@@ -156,6 +173,19 @@ test('market pipeline must authenticate, stores snapshots per region and the pub
  assert.equal((await app.request('/api/market/regions')).status,401);
  const regions=await(await app.request('/api/market/regions',{headers:{Authorization:`Bearer ${token}`}})).json();assert.deepEqual(regions.systems,[30000142]);
 });
+test('the public market read serves only trade hubs; a signed-in session also sees the pilots\' regions',async()=>{
+ const app=setup();const {bearer}=await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const ingest=body=>app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+ for(const body of [{region:0,data:{types:{}}},{region:1,data:{systems:{}}},{region:2,data:{done:{10000002:1}}},{region:10000002,data:{name:'The Forge',types:{34:{d:5,s:[[60003760,5.5,1000]]}}}},{region:10000020,data:{name:'Tash-Murkon',types:{}}}])assert.equal((await ingest(body)).status,200);
+ const anonymous=await app.request('/api/market');const open=await anonymous.json();
+ assert.deepEqual(open.regions.map(r=>r.region),[10000002],'a pilot region is not public');assert.match(anonymous.headers.get('Cache-Control'),/^public/);assert.equal(anonymous.headers.get('Vary'),'Authorization');
+ assert.deepEqual(open.regions[0].data,{name:'The Forge',types:{34:{d:5,s:[[60003760,5.5,1000]]}}});assert.deepEqual(open.universe,{systems:{}});assert.equal(open.meta.region,0);assert.ok(Number.isFinite(open.meta.updatedAt));
+ assert.ok(!JSON.stringify(open).includes('done'),'the blueprint survey is never served');
+ const forged=await(await app.request('/api/market',{headers:{Authorization:`Bearer ${'x'.repeat(43)}`}})).json();assert.deepEqual(forged.regions.map(r=>r.region),[10000002],'an invalid session gets the public view');
+ const signed=await app.request('/api/market',{headers:{Authorization:`Bearer ${bearer}`}});
+ assert.deepEqual((await signed.json()).regions.map(r=>r.region).sort(),[10000002,10000020]);assert.match(signed.headers.get('Cache-Control'),/^private/);
+});
+test('the Worker and the pipeline agree on the trade hubs',()=>{assert.deepEqual([...HUB_REGIONS].sort(),[...HUBS].sort());});
 test('active sessions slide forward at most once a day and expire after 30 idle days',async()=>{
  const app=setup();const {bearer}=await connect(app);const read=()=>app.env.DB.raw.prepare('SELECT expires_at FROM sessions').get().expires_at;
  const first=read();assert.ok(first>Date.now()+29*86400000);

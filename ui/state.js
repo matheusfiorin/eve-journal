@@ -16,6 +16,7 @@ export const S = {
   config:{pilots:[]}, data:emptyData(), store:null, backend:null, universeStatus:null, generation:0,
   pilots:[], me:null, wing:new Map(),
   prices:null, adjusted:new Map(), marketData:null, marketBook:null, costIndices:null,
+  marketTask:null, pricesTask:null, costTask:null, // in-flight loads, shared by concurrent callers
   // Navigate's Star map state (see ui/mapstate.js). layers: [{id, label, color, kind:'route'|'pins'|'trail'|'ring', ids}],
   // added by "Open in Star map"; linked: the address names this state (#navigate/map?r=…&s=…).
   map:{region:null, view:'region', overlay:'security', jump:'', selected:null, layers:[], viewBox:null, linked:false}

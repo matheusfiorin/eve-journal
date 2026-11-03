@@ -50,17 +50,21 @@ export function corporation(id) {
   if (!corporations.has(id)) corporations.set(id, esi(`corporations/${id}/`).catch(error => { corporations.delete(id); throw error; }));
   return corporations.get(id);
 }
+// Concurrent callers share one in-flight request (S.pricesTask); Refresh clears it with S.prices.
 export async function loadPrices() {
   if (S.prices) return;
-  try {
-    const rows = await esi('markets/prices/');
+  const task = S.pricesTask ||= esi('markets/prices/').then(rows => {
+    if (S.pricesTask !== task) return;
     S.prices = new Map(rows.map(r => [r.type_id, r.average_price || r.adjusted_price || 0]));
     S.adjusted = new Map(rows.map(r => [r.type_id, r.adjusted_price || 0]));
-  } catch { /* Asset values stay unknown until the next refresh. */ }
+  }).catch(() => { if (S.pricesTask === task) S.pricesTask = null; /* Asset values stay unknown; the next call retries. */ });
+  await task;
 }
 export async function loadAssetCategories(ids) {
-  const missing = ids.filter(id => !assetCats.has(id)), groups = new Map(), categories = new Map();
-  await Promise.all(missing.map(async id => {
+  const missing = [...new Set(ids.filter(id => !assetCats.has(id)))], groups = new Map(), categories = new Map();
+  // Four lookups at a time: up to 120 types otherwise all hit ESI at once.
+  const queue = missing.values();
+  await Promise.all(Array.from({length:Math.min(4, missing.length)}, async () => { for (const id of queue) {
     try {
       const type = await esi(`universe/types/${id}/`);
       if (!groups.has(type.group_id)) groups.set(type.group_id, esi(`universe/groups/${type.group_id}/`));
@@ -68,6 +72,6 @@ export async function loadAssetCategories(ids) {
       if (!categories.has(group.category_id)) categories.set(group.category_id, esi(`universe/categories/${group.category_id}/`));
       assetCats.set(id, (await categories.get(group.category_id)).name);
     } catch { /* Shown as uncategorized. */ }
-  }));
+  } }));
   try { localStorage.setItem(CATS, JSON.stringify([...assetCats])); } catch { /* Cache is optional. */ }
 }

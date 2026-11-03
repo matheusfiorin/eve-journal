@@ -3,6 +3,8 @@ import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} fr
 const EVE='https://login.eveonline.com';
 const ESI='https://esi.evetech.net/latest';
 const ALLOWED=new Map([[2124810474,'Fiofka'],[2124815118,'Decxus']]);
+// The pipeline's trade hubs (scripts/market-pipeline.mjs HUBS). Any other market region is where a pilot is flying.
+export const HUB_REGIONS=new Set([10000002,10000043,10000032,10000030,10000042]);
 // Dashboard sessions slide: each day of use pushes expiry 30 days out, so an active browser never logs out.
 const SESSION_MS=30*24*60*60*1000;
 const encoder=new TextEncoder();
@@ -31,8 +33,9 @@ const random=()=>base64url(crypto.getRandomValues(new Uint8Array(32)));
 const hash=async value=>base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
 const authCookie=(name,value,seconds)=>`${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
 function frontend(env){const u=new URL(env.FRONTEND_URL);if(u.protocol!=='https:')throw new ServiceError('Frontend configuration is invalid.',503);return u;}
-function response(body,status=200,headers={}){
- return new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...headers}});
+function response(body,status=200,headers={}){return jsonText(JSON.stringify(body),status,headers);}
+function jsonText(text,status=200,headers={}){
+ return new Response(text,{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...headers}});
 }
 function html(body,status=200,headers={}){
  // 'same-origin' (not 'no-referrer') so the consent form's POST carries a real Origin header; nothing leaks cross-origin.
@@ -55,6 +58,8 @@ export async function decrypt(value,secret){
 }
 async function fetchOk(url,options,fetchImpl){
  const r=await fetchImpl(url,{...options,signal:AbortSignal.timeout(20000)});
+ // The token endpoint answers a revoked or expired refresh token (or a reused code) with 400 invalid_grant: only reconnecting helps.
+ if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError('EVE authorization expired or was revoked. Reconnect the pilot.',502);
  if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':r.status===429||r.status===420?'EVE rate limit reached. Try again later.':'EVE service is temporarily unavailable.',502);
  return r;
 }
@@ -233,11 +238,18 @@ async function route(request,env,ctx,fetchImpl){
   return response({stored:body.region});
  }
  if(url.pathname==='/api/market'&&request.method==='GET'){
-  // Region rows the pipeline stopped scanning (a pilot flew home) go stale; serve only the last 6 hours of them.
-  const rows=await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id <= 2 OR updated_at > ?').bind(Date.now()-6*3600000).all();
-  const parsed=rows.results.map(row=>({region:row.region_id,updatedAt:row.updated_at,data:JSON.parse(row.data)}));
-  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations; region 2 the pipeline's blueprint survey.
-  return response({meta:parsed.find(r=>r.region===0)||null,universe:parsed.find(r=>r.region===1)?.data||null,regions:parsed.filter(r=>r.region>2)},200,{'Cache-Control':'public, max-age=300'});
+  // Pilot regions reveal where the pilots fly, so only a signed-in dashboard session sees them; everyone else gets the hubs.
+  let signedIn=false;
+  if(request.headers.has('Authorization'))try{await session(request,env);signedIn=true;}catch{/* Serve the public view. */}
+  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations; region 2 (the
+  // pipeline's blueprint survey) is not served. Region rows the pipeline stopped scanning (a pilot flew home) go stale;
+  // serve only the last 6 hours of them.
+  const rows=(await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id < 2 OR (region_id > 2 AND updated_at > ?)').bind(Date.now()-6*3600000).all()).results;
+  // Stored data is already JSON (ingest wrote it), so splice it in rather than parsing megabytes per request.
+  const meta=rows.find(r=>r.region_id===0),universe=rows.find(r=>r.region_id===1);
+  const regions=rows.filter(r=>r.region_id>2&&(signedIn||HUB_REGIONS.has(r.region_id))).map(r=>`{"region":${r.region_id},"updatedAt":${r.updated_at},"data":${r.data}}`);
+  const text=`{"meta":${meta?`{"region":0,"updatedAt":${meta.updated_at},"data":${meta.data}}`:'null'},"universe":${universe?universe.data:'null'},"regions":[${regions.join(',')}]}`;
+  return jsonText(text,200,{'Cache-Control':`${signedIn?'private':'public'}, max-age=300`,Vary:'Authorization'});
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);
@@ -285,9 +297,14 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))headers.set(key,value);
  return new Response(result.body,{status:result.status,headers});
 }
-export async function scheduledSync(env,fetchImpl=fetch){
+// One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,
+// and the free plan allows 50 subrequests per invocation. The cron runs every 15 minutes (scripts/deploy-backend.mjs),
+// so with two pilots each one still refreshes every 30 minutes. Turns follow the clock rather than the last sync, so a
+// pilot whose sync keeps failing cannot starve the other.
+export const SYNC_EVERY=15*60000;
+export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now())]);
- const rows=await env.DB.prepare('SELECT character_id FROM pilots').all();
- for(const row of rows.results)if(ALLOWED.has(row.character_id))await syncPilot(row.character_id,env,fetchImpl);
+ const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
+ if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
 }
-export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env));}};
+export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env,fetch,event.scheduledTime));}};

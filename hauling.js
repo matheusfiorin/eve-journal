@@ -135,6 +135,6 @@ export function plan(g, waypoints, ctx, {mode = 'balanced', lowsec = false, avoi
   });
   const survival = steps.reduce((t, s) => t * (1 - s.p), 1);
   const jumps = route.length - 1;
-  return {mode, stops, legs, route, steps, jumps, survival, expectedLoss:(ctx.value + 0) * (1 - survival), minutes:jumps * HULLS[ctx.hull || 't1'].jump / 60,
+  return {mode, stops, legs, route, steps, jumps, survival, expectedLoss:ctx.value * (1 - survival), minutes:jumps * HULLS[ctx.hull || 't1'].jump / 60,
     lowsec:steps.some(s => secClass(s.system.sec) !== 'hi')};
 }

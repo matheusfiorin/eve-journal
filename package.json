@@ -6,7 +6,7 @@
   "scripts": {
     "check": "for f in *.js ui/*.js ui/screens/*.js scripts/*.mjs worker/index.js; do node --check \"$f\" || exit 1; done",
     "test": "node --test tests/*.test.js",
-    "start": "python3 -m http.server 8000",
+    "start": "node scripts/static-server.mjs",
     "test:e2e": "playwright test --grep-invert LIVE:",
     "test:live": "playwright test --grep LIVE:"
   },

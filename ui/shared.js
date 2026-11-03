@@ -11,7 +11,7 @@ export const when = date => new Date(date).toLocaleString(undefined,{dateStyle:'
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export const pct = v => `${(v * 100).toFixed(v < 0.1 ? 2 : 1)}%`;
 export const duration = sec => sec >= 86400 ? `${(sec / 86400).toFixed(1)} d` : sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(sec / 60))} min`;
-export const scannedAgo = () => `scanned ${Math.max(1, Math.round((Date.now() - Math.min(...S.marketData.regions.map(r => r.updatedAt))) / 60000))} min ago`;
+export const scannedAgo = () => S.marketData?.regions?.length ? `scanned ${Math.max(1, Math.round((Date.now() - Math.min(...S.marketData.regions.map(r => r.updatedAt))) / 60000))} min ago` : 'no recent scan';
 export function format(value, kind) {
   if (!Number.isFinite(value)) return '—';
   if (kind === 'isk') return `${compactNumber(value)} ISK`;
@@ -120,3 +120,12 @@ export function openDrawer({title, body, foot = ''}) {
   return d;
 }
 export const closeDrawer = () => { if ($('#drawer').open) $('#drawer').close(); };
+// After a person moves to another view: keep focus on the sub-view tabs if they were using them, otherwise move it to
+// the screen's title, and announce where they landed.
+export function landOn(id, viaTabs) {
+  const view = document.getElementById(id), bar = $('#viewbar');
+  const target = (viaTabs && bar.querySelector('[role=tab][aria-selected="true"]')) || view.querySelector('.screen-title') || (!bar.hidden && bar.querySelector('.screen-title')) || view;
+  if (!target.matches('[role=tab]')) target.tabIndex = -1;
+  target.focus({preventScroll:true});
+  $('#announcer').textContent = document.title.replace(/ · Echelon$/, '');
+}

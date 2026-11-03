@@ -9,14 +9,15 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
 const ESI = 'https://esi.evetech.net/latest';
-const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
+export const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
 const SDE = 'https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip';
 const HEADERS = {Accept:'application/json', 'User-Agent':'eve-journal market pipeline (github.com/matheusfiorin/eve-journal)'};
 const TOP = 6;
 const isStation = id => id >= 60000000 && id < 64000000;
 
 // Keep the cheapest sells and richest buys per NPC station; player structures may refuse docking.
-export function aggregate(orders, history = []) {
+// ESI history has no rows for days without trades, so daily volume is the last 7 calendar days' total / 7.
+export function aggregate(orders, history = [], now = Date.now()) {
   const sells = new Map(), buys = new Map(), systems = new Map();
   for (const o of orders) {
     if (!isStation(o.location_id)) continue;
@@ -28,9 +29,10 @@ export function aggregate(orders, history = []) {
       : {...best, volume:best.volume + (Math.abs(best.price - o.price) <= best.price * 0.02 ? o.volume_remain : 0)});
   }
   const top = (side, dir) => [...side].sort((a,b) => dir * (a[1].price - b[1].price)).slice(0, TOP).map(([loc, v]) => [loc, v.price, v.volume]);
-  const recent = history.slice(-7);
+  const since = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
+  const recent = history.filter(h => h.date >= since);
   return {
-    d: recent.length ? Math.round(recent.reduce((t, h) => t + h.volume, 0) / recent.length) : 0,
+    d: Math.round(recent.reduce((t, h) => t + h.volume, 0) / 7),
     p: recent.length ? Math.round(recent.reduce((t, h) => t + h.average, 0) / recent.length * 100) / 100 : 0,
     s: top(sells, 1), b: top(buys, -1), systems
   };
@@ -205,7 +207,7 @@ async function main() {
   if (!secret) throw new Error('EVE_CLIENT_SECRET is required to sign pipeline uploads.');
   const token = createHmac('sha256', secret).update('market-pipeline').digest('base64url');
   const site = process.env.SITE_URL || 'https://matheusfiorin.github.io/eve-journal/';
-  const backend = (await (await fetch(new URL('config.json', site))).json()).backendUrl;
+  const backend = (await (await fetch(new URL('config.json', site), {signal:AbortSignal.timeout(30000)})).json()).backendUrl;
   if (!backend) throw new Error('The published config.json has no backendUrl yet.');
   const api = (path, init = {}) => fetch(`${backend}${path}`, {...init, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...init.headers}, signal:AbortSignal.timeout(60000)});
 
@@ -235,11 +237,12 @@ async function main() {
   } catch (error) { meta.recipesError = `Blueprint data unavailable: ${error.message}`; console.log(`::warning title=Blueprints::${meta.recipesError}`); }
   let pilotSystems = [];
   try { pilotSystems = (await (await api('/api/market/regions')).json()).systems || []; } catch (error) { console.warn(`Pilot regions: ${error.message}`); }
-  const pilotRegions = await Promise.all(pilotSystems.map(async system => {
+  // One failed lookup skips that pilot's region rather than the whole run.
+  const pilotRegions = (await Promise.all(pilotSystems.map(async system => {
     if (map?.systems[system]) return map.systems[system][2];
     const s = (await esi(`/universe/systems/${system}/`)).body;
     return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
-  }));
+  }).map(lookup => lookup.catch(error => { console.log(`::warning title=Pilot region::${error.message}`); return null; })))).filter(Number.isSafeInteger);
   // Keep only blueprints an NPC actually sells in high-sec. The survey is too big for one run under ESI's
   // market rate limit, so it is incremental: each run refreshes the stalest regions within a time budget.
   // shortcut: a blueprint new to the candidate list is only checked in a region at that region's next refresh.
@@ -307,7 +310,7 @@ async function main() {
 
   for (const region of regions) {
     const name = (await esi(`/universe/regions/${region}/`)).body.name;
-    meta.regions[region] = name;
+    if (HUBS.includes(region)) meta.regions[region] = name; // meta is public; pilot regions would say where pilots fly
     const types = {}, stations = new Map();
     await pool(scan, 24, async id => {
       try {

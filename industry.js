@@ -12,6 +12,8 @@ export function skillLevels(skills, ids = {}) {
 }
 // Alpha clones see a lower active level than the level they trained.
 export const isAlpha = skills => Boolean(skills?.skills?.some(s => s.active_skill_level < s.trained_skill_level));
+// The skills that add industry job slots (SDE type IDs), so slot counts never wait for the market snapshot.
+export const SLOT_SKILLS = {massProduction:3387, advancedMassProduction:24625, labOperation:3406, advancedLabOperation:24624};
 export function slots(l) {
   return {build:1 + (l.massProduction || 0) + (l.advancedMassProduction || 0), science:1 + (l.labOperation || 0) + (l.advancedLabOperation || 0)};
 }

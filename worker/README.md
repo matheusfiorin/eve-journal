@@ -35,12 +35,16 @@ Then connect each pilot from Pages. A GitHub secret being present does not prove
 - `GET /api/public/pilots`: whitelisted total SP and queue snapshots only.
 - `GET /api/session`: own private snapshot; opaque bearer required.
 - `POST /api/sync`: own ESI refresh, minimum one minute between successful updates.
+- `GET /api/wing`: the pilots' wing summaries (skills, wallet, asset summary, and with the newer consent ship, location, 7-day trail, industry jobs and mining ledger) for pilots who share with their wingmate, plus the caller's own; opaque bearer required.
+- `POST /api/waypoints`: replaces the caller's in-game autopilot route with up to 40 systems; opaque bearer required and the pilot must be logged in to the game.
+- `GET /api/market`: the hourly market snapshot (item metadata, gate map, prices per region, regions scanned in the last 6 hours). Without a valid opaque bearer it serves the trade hubs only, since other regions show where the pilots fly.
+- `GET /api/market/regions`, `GET /api/market/survey`, `POST /api/market/ingest`: the market pipeline's reads and uploads, authorized with an HMAC of the EVE client secret.
 - `POST /api/disconnect`: requests EVE revocation and deletes stored enrollment, all that pilot's dashboard sessions and shared snapshot. If EVE's revocation service is unavailable, deletion still proceeds; account management can revoke the remote grant.
 
-Opaque dashboard sessions expire after 24 hours. Encrypted refresh tokens remain server-side for scheduled updates until disconnected or revoked. D1 stores private snapshots, protected by the API session checks; the credentials themselves are additionally encrypted with AES-GCM.
+Opaque dashboard sessions expire 30 days after their last use; each day of use pushes the expiry forward. Scheduled refreshes run every 15 minutes and sync one pilot per run (the free plan allows 50 subrequests per invocation), so each pilot refreshes every 30 minutes. Encrypted refresh tokens remain server-side for scheduled updates until disconnected or revoked. D1 stores private snapshots, protected by the API session checks; the credentials themselves are additionally encrypted with AES-GCM.
 
 Only the configured Pages origin can issue browser API requests. OAuth consent/callback cookies are first-party, HttpOnly, Secure, SameSite=Lax. No cross-site third-party cookie is required by Pages. EVE responses and secrets are not logged by the Worker; observability is disabled in deployment configuration.
 
 ## Verification
 
-Worker unit tests use SQLite to exercise real migrations and query behavior, generated signed tokens, encrypted-at-rest assertions, public/private data separation, OAuth state/cookie binding and replay rejection, token rotation, session expiration, CORS, deletion and scheduler behavior. Frontend tests cover opaque sessions and shared snapshots alongside existing browser-only fallback behavior. Build validation uses Wrangler dry-run. Actual Cloudflare deployment and EVE consent must be verified separately.
+Worker unit tests use SQLite to exercise real migrations and query behavior, generated signed tokens, encrypted-at-rest assertions, public/private data separation, OAuth state/cookie binding and replay rejection, token rotation, session expiration, CORS, deletion and scheduler behavior. Frontend tests cover opaque sessions and shared snapshots alongside existing browser-only fallback behavior. `npm run check` syntax-checks the Worker; there is no Wrangler dry-run build. Actual Cloudflare deployment and EVE consent must be verified separately.
