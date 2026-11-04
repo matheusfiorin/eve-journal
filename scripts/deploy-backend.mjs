@@ -22,7 +22,7 @@ if(!subdomain?.subdomain)subdomain=await cf('/workers/subdomain','PUT',{subdomai
 const url=`https://${name}.${subdomain.subdomain}.workers.dev`;
 console.log(`Worker target: ${url}`);
 await mkdir('.cloudflare',{recursive:true});
-const config={name,main:resolve('worker/index.js'),compatibility_date:'2025-09-01',workers_dev:true,observability:{enabled:false},vars:{FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:clientId},d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid,migrations_dir:resolve('worker/migrations')}],triggers:{crons:['*/15 * * * *']}};
+const config={name,main:resolve('worker/index.js'),compatibility_date:'2025-09-01',workers_dev:true,observability:{enabled:false},vars:{FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:clientId},d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid,migrations_dir:resolve('worker/migrations')}],triggers:{crons:['*/5 * * * *']}};
 const configPath=resolve('.cloudflare/wrangler.json');await writeFile(configPath,JSON.stringify(config,null,2));
 function wrangler(args){
  const result=spawnSync('npx',['--no-install','wrangler',...args,'--config',configPath],{encoding:'utf8',input:'y\n',env:process.env,maxBuffer:4*1024*1024});

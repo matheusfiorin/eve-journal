@@ -4,7 +4,7 @@ import {remaining, queueState, trainingProgress, levelOf} from '../../model.js';
 import {nextSkills as buildNext, isAlpha, skillLevels} from '../../industry.js';
 import {nextSkills as exploreNext} from '../../exploration.js';
 import {SKILL as MINING} from '../../mining.js';
-import {S, ROMAN, typeGroup, mine, ordered, summary} from '../state.js';
+import {S, ROMAN, typeGroup, mine, ordered, summary, viaWing} from '../state.js';
 import {name, place} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
 import {$, esc, when, plural, portrait, connectButtons, trainingAlert, field, openDrawer} from '../shared.js';
@@ -107,7 +107,7 @@ export function renderTraining() {
     ${a ? `<div class="active"><div><span class="label">Training now</span><h3>${esc(name(a.skill_id))} ${ROMAN[a.finished_level]}</h3></div><p class="active__left"><span class="num">${esc(short(a.finish_date))}</span><small>ends ${esc(when(a.finish_date))}</small></p><progress max="100" value="${trainingProgress(a, now).toFixed(1)}" aria-label="Current skill progress"></progress></div>` : ''}
     <div class="ruler" aria-hidden="true">${ticks.map(x => `<i style="left:${x.toFixed(2)}%"></i>`).join('')}<span class="ruler__now" style="left:${Math.min(100, nowAt).toFixed(2)}%">now</span><span class="ruler__end">${state.end ? esc(new Date(state.end).toLocaleDateString(undefined, {month:'short', day:'numeric'})) : ''}</span></div>
     <ol class="timeline rows ${reveal(`training-${p.name}`)}" aria-label="${plural(state.pending.length, 'skill')} queued">${items || '<li class="timeline__empty">Your training queue is empty. Add a skill in EVE Online.</li>'}</ol>
-    ${p.private ? '' : connectButtons(p, i)}
+    ${p.private || viaWing(p) ? '' : connectButtons(p, i)}
   </section>
   ${next.length ? `<section class="card suggest"><h2>Suggested next</h2><p class="panel__sub">Each opens up a way to earn. One level at a time; the goal level is noted.</p><ul class="suggest__list">${next.map(k => `<li data-act="${k.act}"><span class="suggest__tag">${k.tag}</span><span><b>${esc(k.label)} ${ROMAN[k.next]}</b><small>${esc(k.why)}${k.level > k.next ? ` · aim for ${ROMAN[k.level]}` : ''}</small></span><button type="button" class="btn--link" data-go="${k.act}">Open ${k.tag}</button></li>`).join('')}</ul></section>` : ''}
   ${mateLine}`;
@@ -207,7 +207,7 @@ export function renderClones() {
     <section class="card"><h2>Attributes</h2>${field(p, 'attributes', a => { const top = Math.max(...ATTRS.map(k => a[k] || 0), 1); return `<ul class="attrs">${ATTRS.map(k => `<li><span>${k[0].toUpperCase() + k.slice(1)}</span><span class="attrs__bar"><i style="width:${((a[k] || 0) / top * 100).toFixed(1)}%"></i></span><b class="num">${a[k]}</b></li>`).join('')}</ul><p class="hint">${a.bonus_remaps || 0} bonus remaps · ${!a.accrued_remap_cooldown_date || Date.parse(a.accrued_remap_cooldown_date) <= Date.now() ? 'yearly remap available' : `yearly remap ${esc(new Date(a.accrued_remap_cooldown_date).toLocaleDateString())}`}</p>`; })}</section>
     <section class="card"><h2>Active implants</h2>${field(p, 'implants', ids => ids.length ? `<ul class="plain">${ids.map(id => `<li>${esc(name(id))}</li>`).join('')}</ul>` : '<p class="hint">No implants plugged in.</p>')}</section>
   </div>
-  ${p.private ? '' : `<div class="state"><p><b>Clones and attributes are private.</b> ${esc(p.name)} can connect to show them here.</p>${connectButtons(p, i)}</div>`}`;
+  ${p.private ? '' : `<div class="state"><p><b>Clones and attributes are private.</b> ${viaWing(p) ? `${esc(p.name)} shares other data with the wing, but these stay on their own device. Connect ${esc(p.name)} in this browser too to see them.` : `${esc(p.name)} can connect to show them here.`}</p>${connectButtons(p, i)}</div>`}`;
 }
 
 export function wire() {

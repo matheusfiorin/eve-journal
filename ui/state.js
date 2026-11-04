@@ -27,7 +27,17 @@ try { JSON.parse(localStorage.getItem(CATS) || '[]').forEach(([id, cat]) => asse
 export const mine = () => S.pilots.find(p => p.name === S.me) || null;
 export const wingmate = () => S.pilots.find(p => p.name !== S.me) || null;
 export const ordered = () => [...S.pilots].sort((a,b) => (b.name === S.me) - (a.name === S.me));
-export const assetsOf = p => p.private ? p.ops?.assets?.value : S.wing.get(p.id)?.assets;
+// A pilot's private ESI fields: from their own session in this browser, else what they share with the wing (wallet
+// and assets; at consent level 2 also ship, location, mining, trail and jobs). Journal, trades, clones and attributes
+// are never shared, so they only show on the device the pilot connected from.
+const WING_FIELDS = ['wallet', 'assets', 'ship', 'location', 'mining', 'trail', 'jobs'];
+export const viaWing = p => Boolean(p && !p.private && S.wing.get(p.id)?.sharing);
+export function opsOf(p) {
+  if (p?.private) return p.ops || {};
+  const w = viaWing(p) ? S.wing.get(p.id) : null;
+  return w ? Object.fromEntries(WING_FIELDS.filter(k => w[k] !== undefined && w[k] !== null).map(k => [k, {permission:true, value:w[k]}])) : {};
+}
+export const assetsOf = p => opsOf(p).assets?.value;
 export function summary(p) {
   if (!p) return {};
   const w = S.wing.get(p.id);

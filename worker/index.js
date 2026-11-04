@@ -81,9 +81,19 @@ async function assetSummary(url,options,fetchImpl){
 async function exchange(env,fields,fetchImpl){
  return remote(`${EVE}/v2/oauth/token`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams(fields)},fetchImpl);
 }
+// EVE's signing keys change rarely: keep them for an hour per Worker instance, and refetch once if a token doesn't
+// validate against the cached set (the keys may have just rotated).
+let jwks=null;
+export const resetJwks=()=>{jwks=null;};
 async function verify(access,env,id,fetchImpl){
- const keys=await remote(`${EVE}/oauth/jwks`,{},fetchImpl);
- try{return await validateToken(access,env.EVE_CLIENT_ID,id,keys.keys);}catch{throw new ServiceError('EVE authorization did not match this pilot, application, or requested permissions.',403);}
+ const load=async()=>{jwks={at:Date.now(),keys:(await remote(`${EVE}/oauth/jwks`,{},fetchImpl)).keys};return jwks.keys;};
+ const cached=jwks&&Date.now()-jwks.at<3600000;
+ try{return await validateToken(access,env.EVE_CLIENT_ID,id,cached?jwks.keys:await load());}
+ catch(error){
+  if(error instanceof ServiceError)throw error;
+  if(cached){try{return await validateToken(access,env.EVE_CLIENT_ID,id,await load());}catch(retry){if(retry instanceof ServiceError)throw retry;}}
+  throw new ServiceError('EVE authorization did not match this pilot, application, or requested permissions.',403);
+ }
 }
 async function session(request,env){
  const token=request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
@@ -103,10 +113,14 @@ async function freshCredentials(row,env,fetchImpl,lockUntil){
  let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY);
  if(credentials.expires<Date.now()+60000){
   const refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);
+  // EVE has rotated the refresh token: the old one is dead from here on. Save the new one before anything else can
+  // fail (checking the access token fetches EVE's keys), or one failed check would leave the pilot needing a reconnect.
+  const save=async c=>env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(c,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();
+  credentials={...credentials,accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:0};
+  await save(credentials);
   const identity=await verify(refreshed.access_token,env,row.character_id,fetchImpl);
-  credentials={accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:identity.expires,scopes:identity.scopes};
-  // Persist rotation before any ESI request; the prior refresh token may already be invalid.
-  await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(credentials,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();
+  credentials={...credentials,expires:identity.expires,scopes:identity.scopes};
+  await save(credentials);
  }
  return credentials;
 }
@@ -253,10 +267,10 @@ async function route(request,env,ctx,fetchImpl){
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);
-  const rows=await env.DB.prepare('SELECT character_id, name, snapshot, share_wing FROM pilots WHERE share_wing > 0 OR character_id = ?').bind(s.character_id).all();
+  const rows=await env.DB.prepare('SELECT character_id, name, snapshot, share_wing, updated_at, last_error FROM pilots WHERE share_wing > 0 OR character_id = ?').bind(s.character_id).all();
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
-   return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
+   return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),shareLevel:row.share_wing,lastError:row.last_error||null,fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
     // Consent version 2 also covers ship, location and the mining ledger.
     ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null}:{})};
   })});
@@ -298,10 +312,10 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  return new Response(result.body,{status:result.status,headers});
 }
 // One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,
-// and the free plan allows 50 subrequests per invocation. The cron runs every 15 minutes (scripts/deploy-backend.mjs),
-// so with two pilots each one still refreshes every 30 minutes. Turns follow the clock rather than the last sync, so a
+// and the free plan allows 50 subrequests per invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs),
+// so with two pilots each one refreshes every 10 minutes, about as often as ESI's own caches turn over. Turns follow the clock rather than the last sync, so a
 // pilot whose sync keeps failing cannot starve the other.
-export const SYNC_EVERY=15*60000;
+export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now())]);
  const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));

@@ -4,7 +4,7 @@ import {JournalStore} from './storage.js';
 import {S, KEY, ME, home, counters} from './ui/state.js';
 import {json} from './ui/esi.js';
 import {$, countUps, notice, toast, pilotOptions, landOn} from './ui/shared.js';
-import {loadPilots, clearPrivate} from './ui/pilots.js';
+import {loadPilots, clearPrivate, dataTime, STALE_MS} from './ui/pilots.js';
 import * as routes from './ui/routes.js';
 import * as mapmodal from './ui/mapmodal.js';
 import * as hero from './ui/hero.js';
@@ -81,9 +81,19 @@ document.addEventListener('click', async event => {
 });
 $('#refresh').onclick = async () => {
   S.marketData = null; S.costIndices = null; S.prices = null; S.marketTask = S.pricesTask = S.costTask = null;
-  if (await loadPilots(true, renderAll)) toast(`Refreshed. EVE data from ${new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`, 'ok');
+  if (await loadPilots(true, renderAll)) toast(`Refreshed. EVE data from ${new Date(dataTime() || Date.now()).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`, 'ok');
 };
-document.addEventListener('visibilitychange', () => { if (!document.hidden) expireSessions(); });
+// Opening the page, or coming back to it, shows the last snapshot at once; if that is more than 10 minutes old, sync
+// this browser's pilots in the background (the Worker skips a pilot synced in the last minute).
+let autoSynced = 0;
+async function syncIfStale() {
+  if (!S.backend || !S.pilots.some(p => p.id && S.backend.has(p.id)) || Date.now() - autoSynced < STALE_MS) return;
+  const at = dataTime();
+  if (at && Date.now() - at < STALE_MS) return;
+  autoSynced = Date.now();
+  await loadPilots(true, renderAll);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { expireSessions(); syncIfStale(); } });
 setInterval(expireSessions, 30000);
 
 async function init() {
@@ -113,6 +123,6 @@ async function init() {
   hero.renderMe();
   selectTab(shell.resolve(location.hash.slice(1)) || 'bridge');
   logbook.restoreDraft();
-  await loadPilots(false, renderAll);
+  if (await loadPilots(false, renderAll)) await syncIfStale();
 }
 await init();

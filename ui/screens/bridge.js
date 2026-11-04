@@ -6,7 +6,7 @@ import {skillLevels, isAlpha, evaluate, rank} from '../../industry.js';
 import {SHIPS, yieldRate, holdOf, canFly, oreValue, sites} from '../../mining.js';
 import {rankSystems} from '../../exploration.js';
 import {capabilities, groupPlan, ACT} from '../../capabilities.js';
-import {S, mine, wingmate, ordered, summary, assetCats} from '../state.js';
+import {S, mine, wingmate, ordered, summary, assetCats, opsOf} from '../state.js';
 import {name} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
 import {$, esc, isk, when, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert} from '../shared.js';
@@ -98,7 +98,7 @@ function nextUp(p, crew) {
   if (q?.kind === 'paused') steps.push({kind:'alert', label:'Training', title:'Start your skill queue', why:'Skills are queued but paused. Start the queue in game.', go:'training', button:'Open training'});
   if (q?.kind === 'ending') steps.push({kind:'alert', label:'Training', title:'Queue more skills', why:`Your queue runs out in ${remaining(q.end).replace(' remaining', '')}.`, go:'training', button:'Open training'});
   // Industry jobs from either connected pilot that are done or finish within a day.
-  const jobs = S.pilots.filter(x => x.private).flatMap(x => (x.ops?.jobs?.value || []).map(j => ({...j, who:x.name})))
+  const jobs = S.pilots.flatMap(x => (opsOf(x).jobs?.value || []).map(j => ({...j, who:x.name})))
     .filter(j => j.status === 'ready' || (j.status === 'active' && Date.parse(j.end_date) - Date.now() < 86400000));
   if (jobs.length) {
     const ready = jobs.filter(j => j.status === 'ready' || Date.parse(j.end_date) <= Date.now()), soon = jobs.find(j => !ready.includes(j));
@@ -156,7 +156,7 @@ function wingCard(p, s, o, crew) {
 export function render() {
   const p = mine(), o = wingmate();
   if (!p) { $('#pilots').innerHTML = '<div class="empty">Choose your pilot to begin.</div>'; return; }
-  const i = S.pilots.indexOf(p), s = summary(p), ops = p.ops || {}, loc = ops.location?.value, ship = ops.ship?.value;
+  const i = S.pilots.indexOf(p), s = summary(p), ops = opsOf(p), loc = ops.location?.value, ship = ops.ship?.value;
   const crew = crewInput(() => { if (!$('#bridge').hidden) render(); });
   const birthday = p.profile?.birthday, age = birthday ? Math.floor((Date.now() - Date.parse(birthday)) / 86400000) : null;
   const where = loc ? `${loc.station_id ? 'Docked at' : loc.structure_id ? 'Docked in a structure in' : 'In space in'} <b>${esc(loc.station_id ? name(loc.station_id) : name(loc.solar_system_id))}</b>${ship ? ` in a ${esc(name(ship.ship_type_id))}` : ''}` : '';

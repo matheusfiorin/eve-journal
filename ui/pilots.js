@@ -40,6 +40,15 @@ async function loadPrivate(p, force, shared) {
   Object.assign(p, {skills:p.shared?.skills, queue:p.shared?.queue, ops:undefined, synced:p.shared?.fetchedAt, private:false});
   if (p.shared?.stale && !p.error) p.error = 'The shared training snapshot could not be refreshed. This pilot may need to reconnect.';
 }
+// When the oldest private data on screen was fetched from EVE: the pilot's own snapshot, or the wing summary for a
+// wingmate connected elsewhere. The Worker refreshes each pilot every 10 minutes, so older than that means a sync
+// is failing or the page has been open a while.
+export function dataTime() {
+  const times = S.pilots.filter(p => p.id).map(p => p.private ? p.synced : S.wing.get(p.id)?.fetchedAt).filter(Boolean).map(Date.parse).filter(Number.isFinite);
+  return times.length ? Math.min(...times) : null;
+}
+export const STALE_MS = 10 * 60000;
+const clock = t => new Date(t).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
 // render() redraws the page; it runs at the start (to show "refreshing") and once everything has settled.
 export async function loadPilots(force, render) {
   const request = ++S.generation;
@@ -66,7 +75,8 @@ export async function loadPilots(force, render) {
     await loadWing();
     if (next.some(p => p.skills?.skills) || [...S.wing.values()].some(w => w.skills?.skills)) await loadSkillGroups();
     await loadHoldings();
-    $('#sync-status').textContent = `Synced ${new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`;
+    const at = dataTime();
+    $('#sync-status').textContent = at && Date.now() - at > STALE_MS ? `EVE data from ${clock(at)}` : `Synced ${clock(at || Date.now())}`;
     ok = true;
   } catch (error) {
     if (request !== S.generation) return false;

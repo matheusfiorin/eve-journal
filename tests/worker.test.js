@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks} from '../worker/index.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
 const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
@@ -25,7 +25,7 @@ function setup(options={}){
   calls.push({url:String(url),init});const path=new URL(url).pathname;
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
   if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
-  if(path.endsWith('/oauth/jwks'))return json({keys:[jwk]});
+  if(path.endsWith('/oauth/jwks'))return options.jwksDown?json({},503):json({keys:[jwk]});
   if(path.endsWith('/oauth/revoke'))return new Response(null,{status:200});
   assert.match(init.headers.Authorization,/^Bearer /);
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
@@ -102,6 +102,17 @@ test('training-only consent does not fetch optional private endpoints',async()=>
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
  const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);assert.equal((await decrypt(synced.credentials,app.env.TOKEN_ENCRYPTION_KEY)).refreshToken,'private-rotating-refresh-token');assert.ok(app.calls.some(call=>call.url.includes('/oauth/token')&&String(call.init.body).includes('grant_type=refresh_token')));
+});
+test('a failed key check after a refresh keeps the rotated refresh token, so the next sync recovers without a reconnect',async()=>{
+ const options={},app=setup(options);await connect(app);
+ const expire=async()=>{const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));};
+ await expire();resetJwks();options.jwksDown=true;
+ const failed=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(failed.last_error,/temporarily unavailable/);
+ const stored=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY);
+ assert.equal(stored.refreshToken,'private-rotating-refresh-token','EVE already rotated the token, so the new one must be kept');assert.equal(stored.expires,0,'and the next sync refreshes again');
+ options.jwksDown=false;const recovered=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(recovered.last_error,null);
+ // The keys are cached: another refresh within the hour doesn't fetch them again.
+ const jwksCalls=()=>app.calls.filter(c=>c.url.endsWith('/oauth/jwks')).length,before=jwksCalls();await expire();await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(jwksCalls(),before);
 });
 test('a revoked refresh token asks the pilot to reconnect instead of blaming EVE',async()=>{
  const app=setup({revoked:true});const {bearer}=await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));

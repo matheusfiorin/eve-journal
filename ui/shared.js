@@ -1,6 +1,6 @@
 // Rendering helpers every screen uses: formatting, pilot headers, toasts, the drawer, skeletons and the tab scaffold.
 import {escapeHTML as esc, remaining, queueState, compactNumber} from '../model.js';
-import {S, ROMAN, reduced, counters} from './state.js';
+import {S, ROMAN, reduced, counters, viaWing, opsOf} from './state.js';
 import {name} from './esi.js';
 import {loadMarket} from './marketdata.js';
 
@@ -40,10 +40,20 @@ export const portrait = (p, size, cls = '') => p?.id ? `<img class="portrait ${c
 export const corpLine = p => p.corp ? `${esc(p.corp.name)} [${esc(p.corp.ticker)}]` : p.refreshing ? 'Loading…' : '';
 export function connectButtons(p, index) {
   if (!S.backend) return '<p class="hint">Private data needs the backend, which is not configured here.</p>';
-  return `<div class="actions"><button data-connect="${index}" class="${p.private ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${p.private ? 'Reconnect' : 'Connect with EVE'}</button>${S.backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button>` : ''}</div>`;
+  // A wingmate who connected on their own device is already connected: offer "Connect here too", never a bare Connect.
+  const label = p.private ? 'Reconnect' : viaWing(p) ? 'Connect here too' : 'Connect with EVE';
+  return `<div class="actions"><button data-connect="${index}" class="${p.private || viaWing(p) ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${label}</button>${S.backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button>` : ''}</div>`;
+}
+// Why a wingmate's shared data is thin: an older consent (level 1 shares only wallet and assets) or a failing sync.
+export function wingNote(p) {
+  const w = !p.private && S.wing.get(p.id);
+  if (!w?.sharing) return '';
+  if (w.lastError) return `<p class="alert warn">${esc(p.name)}’s last sync failed: ${esc(w.lastError)}</p>`;
+  if (w.shareLevel < 2) return `<p class="alert muted">${esc(p.name)} shares skills, wallet and assets. To share ship, location, jobs and mining too, ${esc(p.name)} reconnects once with the wing box ticked.</p>`;
+  return '';
 }
 export function head(p, index, extra = '') {
-  return `<div class="pilot-head" data-pilot="${esc(p.name.toLowerCase())}">${portrait(p, 56)}<div><h2>${esc(p.name)}</h2><p class="hint">${corpLine(p) || 'Corporation unavailable'}</p></div><span class="pill ${p.private ? 'ok' : ''}">${p.private ? 'Connected' : p.shared ? 'Shared' : 'Public'}</span></div>${extra}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}`;
+  return `<div class="pilot-head" data-pilot="${esc(p.name.toLowerCase())}">${portrait(p, 56)}<div><h2>${esc(p.name)}</h2><p class="hint">${corpLine(p) || 'Corporation unavailable'}</p></div><span class="pill ${p.private || viaWing(p) ? 'ok' : ''}">${p.private ? 'Connected' : viaWing(p) ? 'Shared with the wing' : p.shared ? 'Shared' : 'Public'}</span></div>${extra}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}${wingNote(p)}`;
 }
 export function trainingAlert(p) {
   const state = queueState(p.queue);
@@ -59,6 +69,10 @@ export function pilotsOrEmpty(render) {
 }
 // One private ESI field of a connected pilot, with the reason when it's missing.
 export function field(p, key, render) {
+  if (!p.private && viaWing(p)) {
+    const f = opsOf(p)[key];
+    return f ? render(f.value) : `<p class="hint">${esc(p.name)} keeps this on their own device. Connect ${esc(p.name)} in this browser too to see it here.</p>`;
+  }
   if (!p.private) return '<p class="hint">Connect this pilot to load this data.</p>';
   const f = p.ops?.[key];
   if (!f) return '<p class="hint">Not synced yet. Press Refresh.</p>';
