@@ -153,7 +153,7 @@ test('importing an older backup keeps newer edits, and Replace everything restor
  page.once('dialog',d=>{expect(d.message()).toContain('can\'t be undone');d.dismiss();});await drawer.getByRole('button',{name:'Replace everything…'}).click();
  await expect(drawer).toBeVisible();await expect(page.locator('.entry')).toHaveCount(3);
  page.once('dialog',d=>d.accept());await drawer.getByRole('button',{name:'Replace everything…'}).click();await expect(drawer).toBeHidden();
- await expect(page.locator('.entry')).toHaveCount(2);await expect(page.locator('#entries')).toContainText('Decxus found a connection.');await expect(page.locator('#entries')).not.toContainText('A careful journey home.');
+ await expect(page.locator('.entry')).toHaveCount(2);await expect(page.locator('#entries')).toContainText('Decxus found a connection.');await expect(page.locator('#entries')).not.toContainText('Edited after the backup.');await expect(page.locator('#entries')).not.toContainText('A first flight');
  expect(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY)).toEqual({...backup,goals:[]});
  expect(errors).toEqual([]);
 });
