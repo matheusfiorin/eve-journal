@@ -2,10 +2,12 @@
 // cleared site data or Safari's 7-day clearing loses nothing. This browser's copy stays the working copy and syncs on
 // load, when the tab comes back, every few minutes, and shortly after each change. Goals go to the wing; an entry goes
 // to the pilot it's written for when that pilot is connected here, else to the pilot flying here (see syncplan.js).
-import {validateBackup} from '../model.js';
+// The pilot flying here also syncs this browser's scanned systems and haul plan (ui/prefs.js), merged rather than copied.
+import {validateBackup, validatePref} from '../model.js';
 import {S} from './state.js';
 import {$, plural} from './shared.js';
-import {emptyMeta, changesFor, markApplied, applyRemote, handOver, pendingCount} from './syncplan.js';
+import {emptyMeta, changesFor, markApplied, applyRemote, handOver, pendingCount, prefStep} from './syncplan.js';
+import {PREFS, readPref, writePref} from './prefs.js';
 
 const SYNC = 'eve-journal-sync:v1', CHUNK = 40, EVERY = 5 * 60000, DEBOUNCE = 1500;
 let state = read(), running = null, again = false, lastError = null, lastAt = 0, copies = 0, timer;
@@ -30,7 +32,8 @@ function ownerOf(list) {
 // Drop anything the server sends that this browser wouldn't accept from a backup file.
 function valid(records) {
   return records.filter(r => {
-    if (r.record === null) return true;
+    if (r.record === null) return r.kind !== 'pref';
+    if (r.kind === 'pref') { try { return validatePref(r.record).id === r.id; } catch { return false; } }
     try { validateBackup({version:1, goals:r.kind === 'goal' ? [r.record] : [], entries:r.kind === 'entry' ? [r.record] : []}); return r.record.id === r.id; } catch { return false; }
   });
 }
@@ -61,6 +64,7 @@ async function run() {
     remote.push([p.id, records]); cursor[p.id] = since;
   }
   fold({remote, cursor});
+  await prefs(list);
   // Send what changed here.
   for (const [i, p] of list.entries()) {
     const changes = changesFor(S.data, state, p.id, {goals:i === 0, ownerOf:owner});
@@ -71,6 +75,32 @@ async function run() {
   }
   lastError = null; lastAt = Date.now();
 }
+
+// Merge this browser's prefs with the copies sync last agreed on for this pilot, save what changed here, and return
+// what to send.
+function stepPrefs(pilotId, meta, save) {
+  const changes = [];
+  for (const name of Object.keys(PREFS)) {
+    const {save:merged, change} = prefStep(name, readPref(name), meta, pilotId);
+    if (merged && save) writePref(name, merged, true);
+    if (change) changes.push(change);
+  }
+  return changes;
+}
+// Prefs belong to the pilot flying here, so they go only with that pilot's session (none if they aren't connected).
+// A conflict means another device sent first: its copy is now the known one, so merge again and resend.
+const prefPilot = list => list[0]?.name === S.me ? list[0].id : null;
+async function prefs(list) {
+  const id = prefPilot(list);
+  for (let pass = 0; id && pass < 3; pass++) {
+    const changes = stepPrefs(id, read(), true);
+    if (!changes.length) return;
+    const reply = await S.backend.journalPush(id, changes);
+    fold({applied:[[id, reply.applied, new Map(changes.map(c => [`${c.kind}:${c.id}`, c]))]], remote:[[id, reply.conflicts]], denied:reply.denied});
+    if (!reply.conflicts.length) return;
+  }
+}
+const pending = list => pendingCount(S.data, state, list.map(p => p.id), ownerOf(list)) + (prefPilot(list) ? stepPrefs(prefPilot(list), state, false).length : 0);
 
 export function sync() {
   if (!state.on || !S.backend || !S.store || S.store.locked) { render(); return Promise.resolve(); }
@@ -88,12 +118,12 @@ export function render(busy = false) {
   const box = $('#journal-sync'), status = $('#journal-sync-status');
   if (!box || !status) return;
   box.checked = state.on; box.disabled = Boolean(S.store?.locked);
-  const list = pilots(), pending = state.on && S.store && !S.store.locked ? pendingCount(S.data, state, list.map(p => p.id), ownerOf(list)) : 0;
+  const list = pilots(), waiting = state.on && S.store && !S.store.locked ? pending(list) : 0;
   status.classList.toggle('error', Boolean(state.on && lastError));
-  status.textContent = !state.on ? 'Off: goals and entries stay only in this browser.'
+  status.textContent = !state.on ? 'Off: goals, entries, scanned systems and the haul plan stay only in this browser.'
     : busy ? 'Syncing…'
     : lastError ? `Not synced: ${lastError} Changes stay here and go out on the next sync.`
-    : lastAt ? `Synced at ${new Date(lastAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}.${pending ? ` ${plural(pending, 'change')} waiting.` : ''}${copies ? ` ${plural(copies, 'record')} edited on two devices at once ${copies === 1 ? 'was' : 'were'} kept as a “(conflict copy)”.` : ''}`
+    : lastAt ? `Synced at ${new Date(lastAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}.${waiting ? ` ${plural(waiting, 'change')} waiting.` : ''}${copies ? ` ${plural(copies, 'record')} edited on two devices at once ${copies === 1 ? 'was' : 'were'} kept as a “(conflict copy)”.` : ''}`
     : 'On. Waiting for the first sync…';
 }
 // Sync is on and the last attempt didn't fail: the Backup card can stop nagging about exports.
@@ -101,7 +131,7 @@ export const synced = () => state.on && !lastError;
 
 function schedule() {
   clearTimeout(timer);
-  if (state.on) timer = setTimeout(() => { const list = pilots(); if (pendingCount(S.data, state, list.map(p => p.id), ownerOf(list))) sync(); else render(); }, DEBOUNCE);
+  if (state.on) timer = setTimeout(() => { if (pending(pilots())) sync(); else render(); }, DEBOUNCE);
 }
 export function wire() {
   $('#journal-sync').onchange = event => {
@@ -110,6 +140,7 @@ export function wire() {
     document.dispatchEvent(new Event('data-change'));
   };
   document.addEventListener('data-change', schedule);
+  document.addEventListener('pref-change', event => { if (!event.detail.remote) schedule(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - lastAt > 30000) sync(); });
   setInterval(() => { if (!document.hidden) sync(); }, EVERY);
   window.addEventListener('storage', event => { if (event.key === SYNC) { state = read(); render(); } });

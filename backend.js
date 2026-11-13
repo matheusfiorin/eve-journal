@@ -66,7 +66,8 @@ export class BackendClient {
  async market(){const id=[...this.sessions.keys()].find(id=>this.has(id));return this.call('/api/market',id?{id}:{});}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  // Journal sync: records after a rev, and changes sent against the rev each was based on (see worker/index.js).
- async journalPull(id,since){const data=await this.call(`/api/journal?since=${encodeURIComponent(since)}`,{id});if(!Array.isArray(data.records)||!Number.isSafeInteger(data.rev))throw new Error('Backend returned an invalid journal.');return data;}
+ // prefs=1: this client understands pilot preferences; older clients aren't sent them, as they'd take them for entries.
+ async journalPull(id,since){const data=await this.call(`/api/journal?since=${encodeURIComponent(since)}&prefs=1`,{id});if(!Array.isArray(data.records)||!Number.isSafeInteger(data.rev))throw new Error('Backend returned an invalid journal.');return data;}
  async journalPush(id,changes){const data=await this.call('/api/journal',{id,method:'POST',body:{changes}});if(![data.applied,data.conflicts,data.denied].every(Array.isArray))throw new Error('Backend returned an invalid journal reply.');return data;}
  async disconnect(id){const token=this.sessions.get(id)?.token;await this.call('/api/disconnect',{id,method:'POST'});this.drop(id,token);}
  expire(){this.reload();const ids=[...this.sessions].filter(([,s])=>s.expires<=Date.now()).map(([id])=>id);for(const id of ids)this.change(id,s=>s&&s.expires<=Date.now()?null:s);return ids;}

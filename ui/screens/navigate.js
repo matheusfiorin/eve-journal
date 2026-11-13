@@ -7,6 +7,7 @@ import {name, resolveNames} from '../esi.js';
 import {regionKills, gateTargets} from '../killfeed.js';
 import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go} from '../shared.js';
 import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
+import {haulSaved, haulSave} from '../prefs.js';
 import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
 export {renderMap};
 
@@ -35,10 +36,8 @@ export const markup = {
 };
 
 // ── Haul plan: risk-weighted routes through any number of stops, using live zKillboard kills along the way. ──
-const HAUL_KEY = 'eve-haul:v1';
-let haulMode = 'balanced', haulPlans = null;
-function haulSaved() { try { return JSON.parse(localStorage.getItem(HAUL_KEY)) || {}; } catch { return {}; } }
-function haulSave(state) { try { localStorage.setItem(HAUL_KEY, JSON.stringify(state)); } catch { /* Not remembered in this browser. */ } }
+// The plan is saved in ui/prefs.js; touched says a person changed the form since it was last filled from the saved plan.
+let haulMode = 'balanced', haulPlans = null, touched = false;
 function haulRow(value = '') {
   const row = document.createElement('div');
   row.className = 'stop-row';
@@ -62,7 +61,7 @@ export async function renderHauling() {
   const avoid = new Set(avoidNames.map(n => byName.get(n.toLowerCase())).filter(Boolean));
   const value = Math.max(0, Number($('#haul-value').value) || 0), volume = Math.max(0, Number($('#haul-volume').value) || 0);
   const hull = $('#haul-hull').value || suggestHull(volume, value);
-  haulSave({stops:names, value:$('#haul-value').value, volume:$('#haul-volume').value, avoid:$('#haul-avoid').value});
+  haulSave({stops:names, value:$('#haul-value').value, volume:$('#haul-volume').value, avoid:$('#haul-avoid').value}, touched);
   if (unknown.length || stops.length < 2) {
     status.textContent = unknown.length ? `Unknown system: ${unknown.join(', ')}` : 'Add at least two stops.';
     content.innerHTML = ''; return;
@@ -131,7 +130,7 @@ function ensureRows() {
   const saved = haulSaved(), here = mine()?.ops?.location?.value?.solar_system_id;
   for (const v of saved.stops?.length >= 2 ? saved.stops : [mapGraph()?.systems.get(here)?.name || 'Jita', 'Amarr']) rows.append(haulRow(v));
   for (const key of ['value', 'volume', 'avoid']) if (saved[key] !== undefined) $(`#haul-${key}`).value = saved[key];
-  haulNumber();
+  haulNumber(); touched = false;
   return rows;
 }
 // "Haul here" makes a system the destination (the old destination stays on as a stop), "Haul from" the start,
@@ -143,7 +142,7 @@ function haulWith(kind, name) {
     else rows.append(haulRow(name));
   } else if (kind === 'from') input(first).value = name;
   else if (![...rows.querySelectorAll('input')].some(i => i.value.trim().toLowerCase() === name.toLowerCase())) rows.insertBefore(haulRow(name), last);
-  haulNumber();
+  haulNumber(); touched = true;
 }
 export function wire() {
   wireMap();
@@ -157,7 +156,15 @@ export function wire() {
     haulWith(kind, target.name);
     go('hauling');
   });
-  $('#haul-add').onclick = () => { const rows = $('#haul-stops'); rows.insertBefore(haulRow(), rows.lastElementChild); haulNumber(); rows.children[rows.children.length - 2].querySelector('input').focus(); };
+  // Typing, picking an option, adding, moving or removing a stop: the plan saved next is this person's newest.
+  for (const type of ['input', 'change']) $('#haul-form').addEventListener(type, () => { touched = true; });
+  // A newer plan from another tab or device refills the form, unless someone is typing in it.
+  document.addEventListener('pref-change', event => {
+    if (!event.detail.remote || event.detail.name !== 'haul' || $('#haul-form').contains(document.activeElement)) return;
+    $('#haul-stops').replaceChildren();
+    if (!$('#hauling').hidden) renderHauling();
+  });
+  $('#haul-add').onclick = () => { touched = true; const rows = $('#haul-stops'); rows.insertBefore(haulRow(), rows.lastElementChild); haulNumber(); rows.children[rows.children.length - 2].querySelector('input').focus(); };
   $('#haul-stops').onclick = event => {
     const row = event.target.closest('.stop-row'), rows = $('#haul-stops');
     if (!row) return;
@@ -165,6 +172,7 @@ export function wire() {
     const move = Number(event.target.dataset.move || 0);
     if (move < 0 && row.previousElementSibling) rows.insertBefore(row, row.previousElementSibling);
     if (move > 0 && row.nextElementSibling) rows.insertBefore(row.nextElementSibling, row);
+    if (event.target.closest('button')) touched = true;
     haulNumber();
   };
   $('#haul-form').onsubmit = event => { event.preventDefault(); renderHauling(); };

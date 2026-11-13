@@ -11,6 +11,7 @@ import {facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from
 import {S, ROMAN, mine, wingmate, summary} from '../state.js';
 import {esi, json, name} from '../esi.js';
 import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton} from '../shared.js';
+import {explored, markExplored} from '../prefs.js';
 import {mapGraph, route, routeCache, routeIds, sendable, autopilotButton, legHtml, systemOptions, regionName} from '../routes.js';
 
 // ── Shared building blocks ──
@@ -455,10 +456,8 @@ export async function renderMining() {
 }
 
 // ── Explore: the quietest systems within reach, a scanning loop through them, and how to get better at it. ──
-const EXPLORED_KEY = 'eve-explored:v1';
+// Scanned marks live in ui/prefs.js (they sync with the journal when that's on).
 let scoutData = null, scout = {state:'loading', list:[]};
-function explored() { try { return JSON.parse(localStorage.getItem(EXPLORED_KEY)) || {}; } catch { return {}; } }
-function markExplored(id) { const m = explored(); m[id] = Date.now(); try { localStorage.setItem(EXPLORED_KEY, JSON.stringify(m)); } catch { /* Not remembered in this browser. */ } }
 async function eveScout() {
   if (scoutData && Date.now() - scoutData.at < 300000) return scoutData.list;
   const list = await json('https://api.eve-scout.com/v2/public/signatures', {headers:{Accept:'application/json'}});
@@ -605,5 +604,7 @@ export function wire() {
     toast(`Marked ${mapGraph()?.systems.get(id)?.name || 'the system'} as scanned. It sinks in the list for a while.`, 'ok');
     renderExploration();
   });
+  // Marks from another tab or device: re-rank if Explore is on screen (it re-reads them on every render anyway).
+  document.addEventListener('pref-change', event => { if (event.detail.remote && event.detail.name === 'explored' && !$('#exploration').hidden) renderExploration(); });
   $('#drawer').addEventListener('close', () => document.querySelectorAll('.earn [data-row][aria-selected]').forEach(r => r.removeAttribute('aria-selected')));
 }

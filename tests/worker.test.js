@@ -7,7 +7,7 @@ import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474;
@@ -297,4 +297,42 @@ test('journal sync keeps fields a newer build added and edit times, within the s
  const body=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(JSON.stringify({changes:[],pad:'z'.repeat(2000001)})));c.close();}});
  const res=await app.request('/api/journal',{method:'POST',headers:{Authorization:`Bearer ${a}`,'Content-Type':'application/json'},body,duplex:'half'});
  assert.equal(res.status,413);
+});
+const explored={id:`explored:${id}`,marks:{30000142:1762000000000,30003504:1762100000000}};
+const haul={id:`haul:${id}`,stops:['Jita','Amarr'],value:'100000000',volume:'5000',avoid:'Uedama',updatedAt:1762000000000};
+test('journal sync: a pilot\'s prefs reach only that pilot, only clients that ask, and only the pilot named in the id can write them',async()=>{
+ const {app,a,b,call}=await wingApp();
+ const put=await call(a,'POST',{changes:[{kind:'pref',id:explored.id,base:0,record:explored},{kind:'pref',id:haul.id,base:0,record:haul},{kind:'goal',id:'g1',base:0,record:goal}]});
+ assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.id,x.rev]),[[explored.id,1],[haul.id,2],['g1',3]]);
+ const mine=await call(a,'GET',null,'?since=0&prefs=1');assert.deepEqual(mine.body.records.map(r=>r.id),[explored.id,haul.id,'g1']);assert.deepEqual(mine.body.records[1].record,haul);
+ const old=await call(a,'GET',null,'?since=0');assert.deepEqual(old.body.records.map(r=>r.id),['g1'],'an older client never sees prefs');assert.equal(old.body.rev,3);
+ assert.deepEqual((await call(b,'GET',null,'?since=0&prefs=1')).body.records.map(r=>r.id),['g1']);
+ assert.doesNotMatch(JSON.stringify(app.env.DB.raw.prepare("SELECT data FROM journal WHERE kind = 'pref'").all()),/Uedama|30003504/);
+ // B can't write A's prefs, even with a fresh id.
+ assert.equal((await call(b,'POST',{changes:[{kind:'pref',id:haul.id,base:2,record:{...haul,stops:['Rens','Hek']}}]})).status,403);
+ assert.equal((await call(b,'POST',{changes:[{kind:'pref',id:'haul:999',base:0,record:{...haul,id:'haul:999'}}]})).status,403);
+ // A stale base returns the stored copy for the browser to merge.
+ const stale=await call(a,'POST',{changes:[{kind:'pref',id:haul.id,base:0,record:{...haul,updatedAt:5}}]});assert.equal(stale.body.conflicts[0].rev,2);assert.deepEqual(stale.body.conflicts[0].record,haul);
+ const next=await call(a,'POST',{changes:[{kind:'pref',id:haul.id,base:2,record:{...haul,stops:['Rens','Hek'],extra:'dropped'}}]});assert.deepEqual(next.body.applied,[{kind:'pref',id:haul.id,rev:4}]);
+ assert.equal((await call(a,'GET',null,'?since=3&prefs=1')).body.records[0].record.extra,undefined,'unknown fields are not stored');
+});
+test('journal sync: prefs are validated per kind with size caps, and never deleted',async()=>{
+ const {call,a}=await wingApp();const send=async(record,extra={})=>(await call(a,'POST',{changes:[{kind:'pref',id:record?.id??explored.id,base:0,record,...extra}]})).status;
+ assert.equal(await send(null),400);
+ assert.equal(await send({...explored,marks:{Jita:1}}),400);assert.equal(await send({...explored,marks:{30000142:-1}}),400);assert.equal(await send({...explored,marks:[1]}),400);
+ assert.equal(await send({...explored,marks:Object.fromEntries(Array.from({length:1001},(_,i)=>[30000000+i,1]))}),400,'at most 1000 marks');
+ assert.equal(await send({...haul,updatedAt:undefined}),400);assert.equal(await send({...haul,stops:Array(51).fill('Jita')}),400);assert.equal(await send({...haul,avoid:'x'.repeat(2001)}),400);
+ assert.equal(await send({id:`notes:${id}`,text:'x'}),400,'unknown pref names are refused');
+ assert.equal(await send({...explored,id:`explored:${id}`},{id:`haul:${id}`}),400,'the record id must match');
+ assert.equal(await send(explored),200);
+});
+test('migration 0005 widens the journal kinds and keeps every row and rev',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(sql.split('-- Journal kind \'pref\'')[0]);
+ db.prepare("INSERT INTO journal VALUES ('entry','e1',?,'cipher',7,1,?)").run(id,id);
+ assert.throws(()=>db.prepare("INSERT INTO journal VALUES ('pref','haul:1',1,'x',8,1,1)").run(),/CHECK/);
+ db.exec(await readFile(new URL('../worker/migrations/0005_journal_prefs.sql',import.meta.url),'utf8'));
+ assert.deepEqual({...db.prepare('SELECT * FROM journal').get()},{kind:'entry',id:'e1',owner:id,data:'cipher',rev:7,updated_at:1,updated_by:id});
+ db.prepare("INSERT INTO journal VALUES ('pref','haul:1',1,'x',8,1,1)").run();
+ assert.throws(()=>db.prepare("INSERT INTO journal VALUES ('note','n',1,'x',9,1,1)").run(),/CHECK/);
+ assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'journal_rev'").get(),'the rev index is back');
 });

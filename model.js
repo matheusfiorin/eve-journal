@@ -71,6 +71,26 @@ function pick(mine, theirs) {
   for (const r of theirs) if (newer(r, out.get(r.id))) out.set(r.id, r);
   return [...out.values()];
 }
+// A pilot's synced preference (journal kind 'pref'): id '<name>:<characterId>'. Checked the same in the browser and the
+// Worker, so neither side stores what the other would refuse. Returns the record with only the known fields.
+export const PREF_MARKS = 1000, PREF_BYTES = 64000;
+export function validatePref(record) {
+  const [name, owner] = typeof record?.id === 'string' ? record.id.split(':') : [];
+  if (!/^\d{1,12}$/.test(owner || '')) throw new Error('Invalid preference id.');
+  const text = (v, max) => typeof v === 'string' && v.length <= max, when = v => Number.isSafeInteger(v) && v >= 0;
+  let out;
+  if (name === 'explored') {
+    const marks = record.marks;
+    if (!marks || typeof marks !== 'object' || Array.isArray(marks) || Object.keys(marks).length > PREF_MARKS || Object.entries(marks).some(([k, v]) => !/^\d{8}$/.test(k) || !when(v))) throw new Error('Invalid scanned systems.');
+    out = {id:record.id, marks:{...marks}};
+  } else if (name === 'haul') {
+    const {stops = [], value = '', volume = '', avoid = '', updatedAt} = record;
+    if (!Array.isArray(stops) || stops.length > 50 || stops.some(s => !text(s, 100)) || ![value, volume].every(v => (typeof v === 'number' && Number.isFinite(v)) || text(v, 30)) || !text(avoid, 2000) || !when(updatedAt)) throw new Error('Invalid haul plan.');
+    out = {id:record.id, stops:[...stops], value:String(value), volume:String(volume), avoid, updatedAt};
+  } else throw new Error('Unknown preference.');
+  if (JSON.stringify(out).length > PREF_BYTES) throw new Error('Preference is too large.');
+  return out;
+}
 export function mergeBackups(current, incoming) {
   const a=validateBackup(current), b=validateBackup(incoming);
   return validateBackup({version:1, goals:pick(a.goals,b.goals), entries:pick(a.entries,b.entries)});

@@ -112,13 +112,15 @@ export async function mockApp(page,options={}) {
   if(path==='/api/market')return state.noMarket?json({meta:null,regions:[]}):json(MARKET);
   if(path==='/api/waypoints'){state.waypoints=JSON.parse(req.postData()).systems;return json({waypoints:state.waypoints.length});}
   if(path==='/api/journal'){
-   // A small stand-in for the Worker's journal: one rev counter, goals for the wing, entries for their pilot.
+   // A small stand-in for the Worker's journal: one rev counter, goals for the wing, entries and prefs for their pilot
+   // (prefs only for clients that ask, and only under the writer's own id).
    const j=state.journal||(state.journal={rows:new Map(),rev:0,posts:[]});
    const who=IDS.find(id=>req.headers().authorization===`Bearer ${opaque.slice(0,42)}${IDS.indexOf(id)}`);
    if(!who)return json({error:'Connect this pilot.'},401);
    const out=r=>({kind:r.kind,id:r.id,rev:r.rev,record:r.record});
-   if(req.method()==='GET'){const since=Number(new URL(req.url()).searchParams.get('since'))||0;return json({rev:j.rev,more:false,records:[...j.rows.values()].filter(r=>r.rev>since&&(r.owner===0||r.owner===who)).sort((a,b)=>a.rev-b.rev).map(out)});}
+   if(req.method()==='GET'){const q=new URL(req.url()).searchParams,since=Number(q.get('since'))||0;return json({rev:j.rev,more:false,records:[...j.rows.values()].filter(r=>r.rev>since&&(r.owner===0||r.owner===who)&&(r.kind!=='pref'||q.get('prefs')==='1')).sort((a,b)=>a.rev-b.rev).map(out)});}
    const {changes}=JSON.parse(req.postData());j.posts.push({who,changes});const applied=[],conflicts=[],denied=[];
+   if(changes.some(c=>c.kind==='pref'&&(c.record===null||c.id!==`${c.id.split(':')[0]}:${who}`)))return json({error:'A pilot can only set their own preferences.'},403);
    for(const c of changes){const k=`${c.kind}:${c.id}`,row=j.rows.get(k),owner=c.kind==='goal'?0:who;
     if(row&&row.owner!==owner){denied.push({kind:c.kind,id:c.id});continue;}
     if((row?.rev||0)!==c.base){conflicts.push(out(row));continue;}

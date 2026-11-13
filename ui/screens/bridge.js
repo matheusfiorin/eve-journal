@@ -11,6 +11,7 @@ import {name} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
 import {$, esc, isk, when, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert} from '../shared.js';
 import {mapGraph, route} from '../routes.js';
+import {haulSaved} from '../prefs.js';
 
 export const markup = {bridge:'<div id="pilots"></div>'};
 const keyOf = p => p.name.toLowerCase();
@@ -90,7 +91,6 @@ export function crewInput(onReady) {
 }
 
 // ── Next up: alerts first, then one passive pick, the best active picks, then training, jobs, haul and goal steps. ──
-function haulSaved() { try { return JSON.parse(localStorage.getItem('eve-haul:v1')) || {}; } catch { return {}; } }
 function nextUp(p, crew) {
   const o = crew.opportunities, steps = [], me = keyOf(p);
   const q = queueState(p.queue);
@@ -192,3 +192,5 @@ export function render() {
   </section>
   <p class="freshness hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : S.backend ? 'Connect to share training and see private data.' : ''}</p>`;
 }
+// Next up names the saved haul: redraw when another tab or device changes it.
+export function wire() { document.addEventListener('pref-change', event => { if (event.detail.remote && event.detail.name === 'haul' && !$('#bridge').hidden) render(); }); }

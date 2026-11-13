@@ -1,5 +1,5 @@
 import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} from '../auth.js';
-import {validateBackup} from '../model.js';
+import {validateBackup,validatePref} from '../model.js';
 
 const EVE='https://login.eveonline.com';
 const ESI='https://esi.evetech.net/latest';
@@ -129,9 +129,14 @@ async function freshCredentials(row,env,fetchImpl,lockUntil){
 // Journal sync (migration 0004). The browser keeps the journal and sends what changed since the last rev it saw for
 // each record (base). A change applies only if the stored rev still equals base; otherwise the stored copy comes back
 // as a conflict and the browser keeps both. Records are validated like a backup file and encrypted at rest.
+// Kind 'pref' (migration 0005) is a pilot's own setting, id '<name>:<characterId>' (scanned systems, the haul plan):
+// only that pilot may write it, and the browser merges conflicts instead of copying. Only clients that ask (prefs=1)
+// are sent prefs, since older ones would take them for entries.
+const JOURNAL_KINDS=['goal','entry','pref'];
 export const JOURNAL_PAGE=500,JOURNAL_CHANGES=40;
 const NEXT_REV='(SELECT COALESCE(MAX(rev),0)+1 FROM journal)';
 function journalRecord(kind,record){
+ if(kind==='pref'){try{return validatePref(record);}catch(error){throw new ServiceError(`Invalid preference: ${error.message}`);}}
  try{const data=validateBackup({version:1,goals:kind==='goal'?[record]:[],entries:kind==='entry'?[record]:[]});return (kind==='goal'?data.goals:data.entries)[0];}
  catch(error){throw new ServiceError(`Invalid ${kind}: ${error.message}`);}
 }
@@ -144,7 +149,8 @@ async function journal(request,url,env){
   const since=Math.max(0,Math.floor(Number(url.searchParams.get('since')))||0);
   // Read the top rev first: a row written between the two queries is picked up next time instead of skipped.
   const top=(await env.DB.prepare('SELECT COALESCE(MAX(rev),0) AS rev FROM journal').first()).rev;
-  const rows=(await env.DB.prepare('SELECT * FROM journal WHERE rev > ? AND rev <= ? AND owner IN (0, ?) ORDER BY rev LIMIT ?').bind(since,top,me,JOURNAL_PAGE+1).all()).results;
+  const kinds=url.searchParams.get('prefs')==='1'?"":" AND kind != 'pref'";
+  const rows=(await env.DB.prepare(`SELECT * FROM journal WHERE rev > ? AND rev <= ? AND owner IN (0, ?)${kinds} ORDER BY rev LIMIT ?`).bind(since,top,me,JOURNAL_PAGE+1).all()).results;
   const more=rows.length>JOURNAL_PAGE;if(more)rows.length=JOURNAL_PAGE;
   return response({rev:more?rows.at(-1).rev:Math.max(since,top),more,records:await Promise.all(rows.map(r=>journalOut(r,env)))});
  }
@@ -157,13 +163,16 @@ async function journal(request,url,env){
  const changes=body?.changes;
  if(!Array.isArray(changes)||!changes.length||changes.length>JOURNAL_CHANGES)throw new ServiceError(`Send between 1 and ${JOURNAL_CHANGES} journal changes.`);
  for(const c of changes){
-  if(!['goal','entry'].includes(c?.kind)||typeof c.id!=='string'||!c.id||c.id.length>100||!Number.isSafeInteger(c.base)||c.base<0)throw new ServiceError('Invalid journal change.');
+  if(!JOURNAL_KINDS.includes(c?.kind)||typeof c.id!=='string'||!c.id||c.id.length>100||!Number.isSafeInteger(c.base)||c.base<0)throw new ServiceError('Invalid journal change.');
+  // A pref is never deleted (a cleared setting is an empty one), and its id names the only pilot who may write it.
+  if(c.kind==='pref'&&c.record===null)throw new ServiceError('Invalid journal change.');
+  if(c.kind==='pref'&&c.id!==`${c.id.split(':')[0]}:${me}`)throw new ServiceError('A pilot can only set their own preferences.',403);
   if(c.record!==null){c.record=journalRecord(c.kind,c.record);if(c.record.id!==c.id)throw new ServiceError('Invalid journal change.');}
  }
  const key=c=>`${c.kind}:${c.id}`;
  if(new Set(changes.map(key)).size!==changes.length)throw new ServiceError('Duplicate journal changes.');
  const existing=new Map();
- for(const kind of ['goal','entry']){
+ for(const kind of JOURNAL_KINDS){
   const ids=changes.filter(c=>c.kind===kind).map(c=>c.id);
   if(ids.length)for(const row of (await env.DB.prepare(`SELECT * FROM journal WHERE kind = ? AND id IN (${ids.map(()=>'?').join(',')})`).bind(kind,...ids).all()).results)existing.set(key(row),row);
  }

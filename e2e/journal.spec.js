@@ -157,3 +157,29 @@ test('importing an older backup keeps newer edits, and Replace everything restor
  expect(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY)).toEqual({...backup,goals:[]});
  expect(errors).toEqual([]);
 });
+test('with sync on, systems marked scanned and the haul plan follow the pilot to another device',async({browser})=>{
+ test.setTimeout(90000);
+ const journal={rows:new Map(),rev:0,posts:[]},IDS=[2124810474];
+ const laptop=await (await browser.newContext()).newPage(),phone=await (await browser.newContext()).newPage();
+ const a=await mockApp(laptop,{connected:'first',journal});await openApp(laptop);
+ await tab(laptop,'journal');await laptop.getByLabel('Sync goals and entries with the wing backend').check();await expect(laptop.locator('#journal-sync-status')).toContainText('Synced');
+ expect(journal.rows.size).toBe(0,'nothing marked and an untouched plan send nothing');
+ await tab(laptop,'exploration');const rows=laptop.locator('#exploration .rows__row');
+ await rows.filter({hasText:'Amarr'}).getByRole('button',{name:'Mark scanned'}).click();await expect(rows.filter({hasText:'Amarr'})).toContainText('Visited under an hour ago');
+ await expect.poll(()=>Object.keys(journal.rows.get(`pref:explored:${IDS[0]}`)?.record.marks||{})).toEqual(['30002187']);
+ await tab(laptop,'hauling');await laptop.locator('#haul-stops .stop-row input').last().fill('Niarja');await laptop.locator('#haul-plan').click();
+ await expect.poll(()=>journal.rows.get(`pref:haul:${IDS[0]}`)?.record.stops).toEqual(['Jita','Niarja']);
+ // The phone: fresh storage, the same pilot, its own mark made before sync was on.
+ await mockApp(phone,{connected:'first',journal});await openApp(phone);
+ await tab(phone,'exploration');const prow=phone.locator('#exploration .rows__row');await expect(prow.filter({hasText:'Amarr'})).not.toContainText('Visited');
+ await prow.filter({hasText:'Niarja'}).getByRole('button',{name:'Mark scanned'}).click();
+ await tab(phone,'journal');await phone.getByLabel('Sync goals and entries with the wing backend').check();await expect(phone.locator('#journal-sync-status')).toContainText('Synced');
+ await tab(phone,'exploration');await expect(prow.filter({hasText:'Amarr'})).toContainText('Visited under an hour ago');await expect(prow.filter({hasText:'Niarja'})).toContainText('Visited under an hour ago');
+ await tab(phone,'hauling');await expect(phone.locator('#haul-stops .stop-row input').last()).toHaveValue('Niarja','the newer plan beats the phone\'s defaults');
+ await expect.poll(()=>Object.keys(journal.rows.get(`pref:explored:${IDS[0]}`).record.marks).sort()).toEqual(['30002187','30003504']);
+ expect(journal.posts.flatMap(p=>p.changes).filter(c=>c.kind==='pref').every(c=>c.id.endsWith(`:${IDS[0]}`))).toBe(true);
+ // The laptop's next sync brings the phone's mark onto its Explore list without a reload.
+ await tab(laptop,'exploration');await expect(rows.filter({hasText:'Niarja'})).not.toContainText('Visited');
+ await laptop.evaluate(()=>import('./ui/journalsync.js').then(m=>m.sync()));await expect(rows.filter({hasText:'Niarja'})).toContainText('Visited under an hour ago');
+ expect(a.errors).toEqual([]);
+});
