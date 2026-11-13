@@ -3,6 +3,7 @@ import {validateBackup,validatePref} from '../model.js';
 
 const EVE='https://login.eveonline.com';
 const ESI='https://esi.evetech.net/latest';
+const UA='Echelon wing console (Cloudflare Worker)';
 const ALLOWED=new Map([[2124810474,'Fiofka'],[2124815118,'Decxus']]);
 // The pipeline's trade hubs (scripts/market-pipeline.mjs HUBS). Any other market region is where a pilot is flying.
 export const HUB_REGIONS=new Set([10000002,10000043,10000032,10000030,10000042]);
@@ -68,7 +69,8 @@ export function retryAt(header,now=Date.now()){
  return Number.isFinite(at)&&at>now?Math.min(at,now+3600000):0;
 }
 async function fetchOk(url,options,fetchImpl){
- const r=await fetchImpl(url,{...options,signal:AbortSignal.timeout(20000)});
+ // ESI asks every client to identify itself; Workers send no User-Agent of their own.
+ const r=await fetchImpl(url,{...options,headers:{'User-Agent':UA,...options?.headers},signal:AbortSignal.timeout(20000)});
  // The token endpoint answers a revoked or expired refresh token (or a reused code) with 400 invalid_grant: only reconnecting helps.
  if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError(REVOKED,502,{revoked:true});
  if(r.status===429)throw new ServiceError(LIMITED,502,{retryAt:retryAt(r.headers.get('Retry-After'))});
@@ -422,10 +424,12 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  let front;try{front=frontend(env);}catch{return response({error:'Backend configuration is incomplete.'},503);}
  if(origin&&origin!==front.origin&&!isSameOrigin(request,url))return response({error:'Origin is not allowed.'},403);
  const cors=origin===front.origin?{'Access-Control-Allow-Origin':front.origin,Vary:'Origin','Access-Control-Allow-Headers':'Authorization,Content-Type','Access-Control-Allow-Methods':'GET,POST,OPTIONS'}:{};
- if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
+ if(request.method==='OPTIONS')return new Response(null,{status:204,headers:{...cors,...(Object.keys(cors).length?{'Access-Control-Max-Age':'7200'}:{})}});
  let result;
  try{result=await route(request,env,ctx,fetchImpl);}catch(error){result=response({error:error instanceof ServiceError?error.message:'Backend request failed. Try again later.'},error instanceof ServiceError?error.status:500);}
- const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))headers.set(key,value);
+ // Append Vary rather than replace it: /api/market varies by Authorization too, and a cached signed-in copy must not
+ // be reused once the session is gone. Preflights are cached for two hours instead of preceding every request.
+ const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))key==='Vary'?headers.append(key,value):headers.set(key,value);
  return new Response(result.body,{status:result.status,headers});
 }
 // One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,

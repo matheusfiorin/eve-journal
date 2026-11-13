@@ -242,7 +242,7 @@ async function main() {
     if (map?.systems[system]) return map.systems[system][2];
     const s = (await esi(`/universe/systems/${system}/`)).body;
     return (await esi(`/universe/constellations/${s.constellation_id}/`)).body.region_id;
-  }).map(lookup => lookup.catch(error => { console.log(`::warning title=Pilot region::${error.message}`); return null; })))).filter(Number.isSafeInteger);
+  }).map(lookup => lookup.catch(() => { console.log('::warning title=Pilot region::A pilot region lookup failed.'); return null; })))).filter(Number.isSafeInteger);
   // Keep only blueprints an NPC actually sells in high-sec. The survey is too big for one run under ESI's
   // market rate limit, so it is incremental: each run refreshes the stalest regions within a time budget.
   // shortcut: a blueprint new to the candidate list is only checked in a region at that region's next refresh.
@@ -310,6 +310,8 @@ async function main() {
 
   for (const region of regions) {
     const name = (await esi(`/universe/regions/${region}/`)).body.name;
+    // Actions logs of this public repo are public: name only hubs there, or the logs would say where the pilots fly.
+    const label = HUBS.includes(region) ? name : 'A pilot region';
     if (HUBS.includes(region)) meta.regions[region] = name; // meta is public; pilot regions would say where pilots fly
     const types = {}, stations = new Map();
     await pool(scan, 24, async id => {
@@ -321,16 +323,16 @@ async function main() {
         const result = aggregate(orders, history);
         for (const [loc, system] of result.systems) stations.set(loc, system);
         if (result.s.length || result.b.length) types[id] = {d:result.d, p:result.p, s:result.s, b:result.b};
-      } catch (error) { console.warn(`${name} ${id}: ${error.message}`); }
+      } catch (error) { console.warn(`${label} ${id}: ${HUBS.includes(region) ? error.message : error.message.replaceAll(String(region), '…')}`); }
     });
     const names = new Map();
     const locs = [...stations.keys()];
     for (let i = 0; i < locs.length; i += 1000) (await esi('/universe/names/', {method:'POST', body:JSON.stringify(locs.slice(i, i + 1000))})).body.forEach(r => names.set(r.id, r.name));
     const data = {name, generatedAt:new Date().toISOString(), types, stations:Object.fromEntries(locs.map(loc => [loc, [stations.get(loc), names.get(loc) || `Station ${loc}`]]))};
     const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region, data})});
-    if (!stored.ok) throw new Error(`Upload for ${name} failed: HTTP ${stored.status} ${await stored.text()}`);
-    report.push(`${name} ${Object.keys(types).length} items/${locs.length} stations`);
-    console.log(`${name}: ${Object.keys(types).length} items across ${locs.length} stations.`);
+    if (!stored.ok) throw new Error(`Upload for ${label} failed: HTTP ${stored.status} ${await stored.text()}`);
+    report.push(`${label} ${Object.keys(types).length} items/${locs.length} stations`);
+    console.log(`${label}: ${Object.keys(types).length} items across ${locs.length} stations.`);
   }
   if (map) {
     const names = new Map();

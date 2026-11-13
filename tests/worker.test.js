@@ -407,3 +407,10 @@ test('migration 0005 widens the journal kinds and keeps every row and rev',async
  assert.throws(()=>db.prepare("INSERT INTO journal VALUES ('note','n',1,'x',9,1,1)").run(),/CHECK/);
  assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'journal_rev'").get(),'the rev index is back');
 });
+test('responses to the app keep Vary: Authorization next to Origin, preflights are cached, and ESI calls identify the app',async()=>{
+ const app=setup();await connect(app);
+ const res=await app.request('/api/market',{headers:{Origin:'https://matheusfiorin.github.io'}});
+ assert.match(res.headers.get('Vary'),/Authorization/);assert.match(res.headers.get('Vary'),/Origin/);
+ const pre=await app.request('/api/journal',{method:'OPTIONS',headers:{Origin:'https://matheusfiorin.github.io'}});assert.equal(pre.headers.get('Access-Control-Max-Age'),'7200');
+ const esi=app.calls.find(c=>c.url.includes('esi.evetech.net'));assert.match(esi.init.headers['User-Agent'],/Echelon/);
+});

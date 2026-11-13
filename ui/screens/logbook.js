@@ -56,7 +56,6 @@ function readEntry(id) {
 }
 // When this browser last exported a backup, so the Backup card can say how much is at risk.
 const EXPORTED = 'eve-journal-exported:v1', NUDGE_DAYS = 14;
-let nudged = false;
 function exportedAt() { try { return Number(localStorage.getItem(EXPORTED)) || 0; } catch { return 0; } }
 function renderBackupAge() {
   const records = S.data.goals.length + S.data.entries.length, at = exportedAt(), days = at ? Math.floor((Date.now() - at) / 86400000) : null;
@@ -65,7 +64,6 @@ function renderBackupAge() {
   $('#backup-age').textContent = !records ? '' : synced() && days === null ? 'Kept on the wing backend by sync. Export a file too if you want an offline copy.' : days === null ? `Never exported from this browser. A new device, clearing site data, or Safari after a week without a visit loses everything here.${kept}`
     : `Last exported ${days ? plural(days, 'day', 'days') + ' ago' : 'today'}.${stale ? ' Export again to keep recent changes safe.' : ''}${kept}`;
   $('#backup-age').classList.toggle('error', Boolean(stale));
-  if (stale && !nudged && !S.store.locked) { nudged = true; try { if (sessionStorage.getItem('eve.backup.nudged')) return; sessionStorage.setItem('eve.backup.nudged', '1'); } catch { /* Nudge this page. */ } toast(days === null ? 'Your goals and Logbook live only in this browser. Export a backup from the Logbook.' : `Your last journal backup is ${plural(days, 'day', 'days')} old. Export a new one from the Logbook.`, 'info', 8000); }
 }
 export function render() { authorFilter(); renderEntries(); renderBackupAge(); }
 function saveDraft() {
