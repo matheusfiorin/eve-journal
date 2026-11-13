@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,decayRisk,combatTypes,decayTraffic,history} from '../scripts/market-pipeline.mjs';
+import {aggregate,recipes,starters,universe,npcSellers,highsecRegions,surveyQueue,mergeRegion,ores,combatTypes} from '../scripts/market-pipeline.mjs';
+import {decayRisk,decayTraffic,history} from '../worker/activity.js';
 import {pipelineToken} from '../worker/index.js';
 const day=n=>new Date(Date.now()-n*86400000).toISOString().slice(0,10);
 const order=(location_id,price,volume_remain,is_buy_order=false)=>({location_id,system_id:30000142,price,volume_remain,is_buy_order});
@@ -126,4 +127,8 @@ test('missing ESI activity carries the previous kill and traffic sums forward',(
  const next=history(previous,[{system_id:1,ship_kills:1}],[{system_id:1,ship_jumps:10}],t0+3600000);
  assert.equal(next.risk.since,t0-86400000);assert.equal(next.traffic.since,t0-86400000);
  assert.deepEqual(history(null,[],[],t0),{risk:{at:t0,since:t0,s:{}},traffic:{at:t0,since:t0,s:{}}},'no meta yet starts fresh');
+});
+test('the pipeline and the Worker pin the same ESI compatibility date',async()=>{
+ const {ESI_COMPAT:pipeline}=await import('../scripts/market-pipeline.mjs'),{ESI_COMPAT:worker}=await import('../worker/index.js');
+ assert.equal(pipeline,worker);
 });

@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,retryAt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -16,8 +16,9 @@ function token(character=id,scopes=REQUESTED_SCOPES){
  const body=`${enc({alg:'RS256',kid:jwk.kid})}.${enc({iss:'https://login.eveonline.com',aud:['test-client','EVE Online'],azp:'test-client',sub:`CHARACTER:EVE:${character}`,name:'Fiofka',exp:Math.floor(Date.now()/1000)+1200,scp:scopes})}`;
  return `${body}.${sign('RSA-SHA256',Buffer.from(body),pair.privateKey).toString('base64url')}`;
 }
-function database(){
- const db=new DatabaseSync(':memory:');db.exec(sql);
+// A D1 stand-in over SQLite: a fresh database with every migration, or the one given.
+function database(db){
+ if(!db){db=new DatabaseSync(':memory:');db.exec(sql);}
  return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{if(/\bRETURNING\b/i.test(sql)){const results=statement.all(...values);return {results,meta:{changes:results.length}};}const r=statement.run(...values);return {results:[],meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
 }
 function setup(options={}){
@@ -28,7 +29,29 @@ function setup(options={}){
   if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.limited&&String(init.body).includes('grant_type=refresh_token'))return new Response('{}',{status:429,headers:{'Retry-After':String(options.limited)}});if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
   if(path.endsWith('/oauth/jwks'))return options.jwksDown?json({},503):json({keys:[jwk]});
   if(path.endsWith('/oauth/revoke'))return new Response(null,{status:200});
+  // ESI's public hourly feeds: options.feeds = {kills, jumps, modified, expires, fail} (a feed missing is a 503).
+  if(path==='/universe/system_kills/'||path==='/universe/system_jumps/'){
+   const f=options.feeds||{},key=path.includes('kills')?'kills':'jumps',rows=f[key];
+   if(f.fail===key)return new Response('{}',{status:429,headers:{'Retry-After':'600'}});
+   if(!rows)return json({},503);
+   const tag=`"${key}-${f.modified}"`,headers={'Content-Type':'application/json',ETag:tag,'Last-Modified':new Date(f.modified).toUTCString(),Expires:new Date(f.expires).toUTCString()};
+   if(init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
+   return new Response(JSON.stringify(rows),{headers});
+  }
   assert.match(init.headers.Authorization,/^Bearer /);
+  const res=await character(url,path,init);
+  // options.cache = {ttl(path) -> ms until Expires, unchanged: answer 304 to a matching ETag}; options.limitPath answers
+  // that path with a 429; options.remaining sets X-Ratelimit-Remaining on every answer.
+  const headers=new Headers(res.headers);
+  if(options.remaining!==undefined)headers.set('X-Ratelimit-Remaining',String(options.remaining));
+  if(options.limitPath&&path.endsWith(options.limitPath))return new Response('{}',{status:429,headers:{'Retry-After':'120'}});
+  if(!options.cache)return new Response(res.body,{status:res.status,headers});
+  const tag=`"${path}"`;headers.set('ETag',tag);headers.set('Expires',new Date(Date.now()+options.cache.ttl(path)).toUTCString());headers.set('Last-Modified','Fri, 13 Nov 2026 10:00:00 GMT');
+  if(options.cache.unchanged&&init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
+  return new Response(res.body,{status:res.status,headers});
+ };
+ const character=async(url,path)=>{
+  const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
@@ -40,6 +63,7 @@ function setup(options={}){
   if(path.endsWith('/attributes/'))return json({charisma:19,intelligence:20,memory:20,perception:20,willpower:20,bonus_remaps:2});
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
+  if(path.endsWith('/mining/'))return json([{date:'2026-11-01',solar_system_id:30000142,type_id:1230,quantity:100}]);
   if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true}]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':'2'}});}
   if(path.endsWith('/ui/autopilot/waypoint/'))return new Response(null,{status:options.gameOffline?404:204});
   throw new Error(`Unexpected request ${path}`);
@@ -47,6 +71,8 @@ function setup(options={}){
  const request=(path,init={})=>handleRequest(new Request(`https://api.example${path}`,init),env,{},fetchImpl);
  return {env,calls,request,fetchImpl};
 }
+// The hourly kills sample is not due, so a cron run goes to a pilot sync (see the sampling tests for the other case).
+const sampled=(app,turns=0)=>app.env.DB.raw.prepare("INSERT INTO market_docs (name, data, updated_at, expires_at, turns) VALUES ('activity', '{}', ?, ?, ?) ON CONFLICT(name) DO UPDATE SET expires_at = excluded.expires_at, turns = excluded.turns").run(Date.now(),Date.now()+3600000,turns);
 async function consent(app,{wing=true,character=id}={}){
  const page=await app.request(`/auth/start?pilot=${character}`);assert.equal(page.status,200);
  const body=await page.text(),csrf=body.match(/name="csrf" value="([^"]+)"/)[1];
@@ -124,7 +150,7 @@ test('disconnect removes enrollment, all sessions and public snapshot and reques
  const app=setup();const {bearer}=await connect(app);const disconnected=await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}});assert.equal(disconnected.status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,0);assert.ok(app.calls.some(call=>call.url.endsWith('/oauth/revoke')));assert.deepEqual((await(await app.request('/api/public/pilots')).json()).pilots,[]);
 });
 test('scheduler removes expired transient state and does not duplicate recent syncs',async()=>{
- const app=setup();await connect(app);const before=app.calls.length;await scheduledSync(app.env,app.fetchImpl);assert.equal(app.calls.length,before);
+ const app=setup();await connect(app);sampled(app);const before=app.calls.length;await scheduledSync(app.env,app.fetchImpl);assert.equal(app.calls.length,before);
 });
 test('encryption rejects altered ciphertext and uses a fresh IV',async()=>{
  const secret=Buffer.alloc(32,9).toString('base64');const a=await encrypt({token:'private'},secret,P),b=await encrypt({token:'private'},secret,P);assert.notEqual(a,b);assert.deepEqual(await decrypt(a,secret,P),{token:'private'});const changed=JSON.parse(a);changed.data=(changed.data[0]==='A'?'B':'A')+changed.data.slice(1);await assert.rejects(decrypt(JSON.stringify(changed),secret,P));
@@ -167,7 +193,7 @@ test('journal records are bound to kind and id; v:1 rows are still served and be
  const upgraded=app.env.DB.raw.prepare("SELECT data FROM journal WHERE id = 'g1'").get().data;assert.equal(JSON.parse(upgraded).v,2);assert.equal((await decrypt(upgraded,key,'goal:g1')).done,true);
 });
 test('after EVE refuses the refresh token, syncs stop asking EVE until the pilot reconnects',async()=>{
- const options={revoked:true},app=setup(options);await connect(app);await expireCredentials(app);
+ const options={revoked:true},app=setup(options);await connect(app);await expireCredentials(app);sampled(app);
  const tokenCalls=()=>app.calls.filter(c=>c.url.endsWith('/oauth/token')).length,before=tokenCalls();
  const failed=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(failed.last_error,/revoked.*Reconnect/);assert.ok(failed.grant_revoked_at>0);assert.equal(tokenCalls(),before+1);
  const again=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(again.last_error,/revoked.*Reconnect/);assert.equal(tokenCalls(),before+1,'a request does not try again');
@@ -225,7 +251,7 @@ test('consent records the wingmate choice',async()=>{
  const app=setup();await connect(app,{wing:true});assert.equal(app.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,2);
 });
 test('each scheduled run syncs one pilot, taking turns, to stay within the per-invocation subrequest limit',async()=>{
- const app=setup();await connect(app);const other=2124815118;
+ const app=setup();await connect(app);const other=2124815118;sampled(app);
  app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, snapshot, share_training) SELECT ?, 'Decxus', credentials, snapshot, 1 FROM pilots WHERE character_id = ?").run(other,id);
  // Credentials are bound to their pilot, so the copy is sealed again for Decxus.
  const key=app.env.TOKEN_ENCRYPTION_KEY,copy=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots WHERE character_id = ?').get(id).credentials,key,P);
@@ -413,4 +439,204 @@ test('responses to the app keep Vary: Authorization next to Origin, preflights a
  assert.match(res.headers.get('Vary'),/Authorization/);assert.match(res.headers.get('Vary'),/Origin/);
  const pre=await app.request('/api/journal',{method:'OPTIONS',headers:{Origin:'https://matheusfiorin.github.io'}});assert.equal(pre.headers.get('Access-Control-Max-Age'),'7200');
  const esi=app.calls.find(c=>c.url.includes('esi.evetech.net'));assert.match(esi.init.headers['User-Agent'],/Echelon/);
+});
+// ESI caching in the pilot sync.
+const characterCalls=(app,from)=>app.calls.slice(from).filter(c=>/\/characters\/\d+\//.test(c.url));
+const snap=app=>JSON.parse(app.env.DB.raw.prepare('SELECT snapshot FROM pilots WHERE character_id = ?').get(id).snapshot);
+test('ESI calls use unversioned routes with a pinned compatibility date and a user agent',async()=>{
+ const app=setup();await connect(app);
+ const esi=app.calls.filter(c=>c.url.startsWith('https://esi.evetech.net/'));assert.ok(esi.length>=13);
+ for(const c of esi){assert.doesNotMatch(c.url,/\/latest\//);assert.equal(c.init.headers['X-Compatibility-Date'],ESI_COMPAT);assert.match(c.init.headers['User-Agent'],/Echelon/);}
+ assert.match(ESI_COMPAT,/^\d{4}-\d\d-\d\d$/);
+});
+test('a sync skips endpoints whose Expires has not passed and keeps their stored data',async()=>{
+ const options={cache:{ttl:path=>/\/(location|ship)\/$/.test(path)?-1000:3600000}},app=setup(options);await connect(app);
+ const first=snap(app);assert.ok(first.esi.wallet.expires>Date.now()+3000000);assert.equal(first.esi.wallet.etag,'"/characters/2124810474/wallet/"');
+ const before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.deepEqual(characterCalls(app,before).map(c=>new URL(c.url).pathname.split('/').at(-2)).sort(),['location','ship'],'only the expired endpoints are asked');
+ const second=snap(app);
+ assert.deepEqual(second.operations.assets,first.operations.assets);assert.equal(second.operations.wallet.value,12345678.25);assert.deepEqual(second.skills,first.skills);assert.equal(second.operations.journal.value.length,50);
+ const res=await app.request('/api/session',{headers:{Authorization:`Bearer ${(await connect(app)).bearer}`}});assert.equal((await res.json()).esi,undefined,'cache hints are not sent to the browser');
+});
+test('after Expires a sync sends If-None-Match and reuses stored data on 304, without reading asset pages again',async()=>{
+ const options={cache:{ttl:()=>-1000}},app=setup(options);await connect(app);
+ const first=snap(app);options.cache.unchanged=true;
+ const before=app.calls.length;const row=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(row.last_error,null);
+ const calls=characterCalls(app,before);assert.equal(calls.length,13);
+ for(const c of calls)assert.equal(c.init.headers['If-None-Match'],`"${new URL(c.url).pathname}"`);
+ assert.ok(!calls.some(c=>c.url.includes('page=2')),'an unchanged first page means unchanged assets');
+ const second=snap(app);
+ for(const key of ['wallet','assets','journal','mining','clones'])assert.deepEqual(second.operations[key].value,first.operations[key].value,key);
+ assert.deepEqual(second.queue,first.queue);assert.deepEqual(second.skills,first.skills);assert.equal(second.esi.wallet.etag,first.esi.wallet.etag);
+});
+test('a 429 from ESI keeps the last good data and holds the pilot\'s ESI calls until Retry-After',async()=>{
+ const options={},app=setup(options);await connect(app);const first=snap(app);
+ options.limitPath='/wallet/';const started=Date.now();
+ const row=await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.ok(row.esi_after>=started+120000&&row.esi_after<=Date.now()+120000,'held for Retry-After');
+ const second=snap(app);assert.equal(second.operations.wallet.value,first.operations.wallet.value,'the last wallet stays');assert.match(second.operations.wallet.error,/rate limit/);
+ const before=app.calls.length;options.limitPath=null;
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});await syncPilot(id,app.env,app.fetchImpl);
+ assert.equal(app.calls.length,before,'nothing is asked of EVE meanwhile, not even a token');
+ app.env.DB.raw.prepare('UPDATE pilots SET esi_after = ?').run(Date.now()-1);
+ const back=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(back.esi_after,0);assert.equal(snap(app).operations.wallet.error,undefined);
+});
+test('a 420 error limit backs off for X-ESI-Error-Limit-Reset, and a low remaining budget stops the sync early',async()=>{
+ const options={},app=setup(options);await connect(app);const first=snap(app);
+ const limited=(url,init)=>new URL(url).pathname.endsWith('/skills/')?Promise.resolve(new Response('{}',{status:420,headers:{'X-ESI-Error-Limit-Remain':'0','X-ESI-Error-Limit-Reset':'30'}})):app.fetchImpl(url,init);
+ const t=Date.now(),row=await syncPilot(id,app.env,limited,{force:true});
+ assert.ok(row.esi_after>=t+30000&&row.esi_after<=Date.now()+30000);assert.deepEqual(snap(app).skills,first.skills,'skills kept');
+ app.env.DB.raw.prepare('UPDATE pilots SET esi_after = 0').run();
+ options.remaining=ESI_FLOOR-1;const before=app.calls.length;
+ const low=await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ const asked=characterCalls(app,before).length;assert.ok(asked<=4,`stopped after the first answers (${asked} asked)`);
+ assert.equal(low.esi_after,0,'a low budget is not a hold');
+ const kept=snap(app);for(const key of ['wallet','assets','journal','clones'])assert.deepEqual(kept.operations[key].value,first.operations[key].value,key);
+});
+test('assets are not mixed from two copies: a page newer than page 1 keeps the previous summary',async()=>{
+ const app=setup();await connect(app);const first=snap(app).operations.assets.value;
+ let n=0;const shifting=async(url,init)=>{const r=await app.fetchImpl(url,init);if(!new URL(url).pathname.endsWith('/assets/'))return r;const h=new Headers(r.headers);h.set('Last-Modified',new Date(Date.UTC(2026,10,13,10,n++)).toUTCString());return new Response(r.body,{status:r.status,headers:h});};
+ await syncPilot(id,app.env,shifting,{force:true});const assets=snap(app).operations.assets;
+ assert.deepEqual(assets.value,first);assert.match(assets.error,/changed while/);
+});
+// The cron's kills and jumps sample (item: the pipeline no longer keeps this history).
+const H=3600000,T0=Date.UTC(2026,10,13,12,0,0);
+const feeds=(modified,kills=[{system_id:30000142,ship_kills:3,pod_kills:1,npc_kills:5},{system_id:30002813,ship_kills:2,pod_kills:0,npc_kills:0}],jumps=[{system_id:30000142,ship_jumps:900},{system_id:30002813,ship_jumps:40}])=>({kills,jumps,modified,expires:modified+H});
+const activityDoc=app=>app.env.DB.raw.prepare("SELECT * FROM market_docs WHERE name = 'activity'").get();
+test('the cron samples ESI kills and jumps into decayed 24 h / 7 day history, once per new hour',async()=>{
+ const options={feeds:feeds(T0)},app=setup(options);
+ const map={systems:{30000142:['Jita',0.946,10000002,[],0],30002813:['Tama',0.3,10000002,[],0],30004000:['Null',-0.4,10000060,[],0]}};
+ app.env.DB.raw.prepare('INSERT INTO market_snapshots VALUES (1, ?, 1)').run(JSON.stringify(map));
+ options.feeds.kills.push({system_id:30004000,ship_kills:9,pod_kills:0,npc_kills:0});
+ const first=await sampleActivity(app.env,app.fetchImpl,T0+60000);assert.equal(first.sampled,true);assert.equal(first.expires,T0+H,'next when ESI has a new hour');
+ let d=JSON.parse(activityDoc(app).data);
+ assert.deepEqual(d.risk.s,{30000142:[3,3],30002813:[2,2],30004000:[9,9]});assert.deepEqual(d.traffic.s,{30000142:900,30002813:40});
+ assert.deepEqual(d.activity,{30000142:[4,5,900],30002813:[2,0,40]},'last hour only for high- and low-sec, as the pipeline did');
+ // Same hour again: ESI answers 304 to the ETag, nothing is counted twice.
+ const calls=app.calls.length,again=await sampleActivity(app.env,app.fetchImpl,T0+120000);assert.equal(again.sampled,false);
+ assert.ok(app.calls.slice(calls).every(c=>c.init.headers['If-None-Match']));assert.deepEqual(JSON.parse(activityDoc(app).data),d);
+ // An hour later: the old sums decay and the new hour is added.
+ options.feeds=feeds(T0+H,[{system_id:30000142,ship_kills:1,pod_kills:0,npc_kills:0}],[{system_id:30000142,ship_jumps:100}]);
+ await sampleActivity(app.env,app.fetchImpl,T0+H+60000);d=JSON.parse(activityDoc(app).data);
+ assert.ok(Math.abs(d.risk.s[30000142][0]-Math.round((3*Math.exp(-1/24)+1)*100)/100)<0.011);assert.ok(Math.abs(d.risk.s[30000142][1]-Math.round((3*Math.exp(-1/168)+1)*100)/100)<0.011);
+ assert.equal(d.traffic.s[30000142],Math.round(900*Math.exp(-1/24)+100));assert.equal(d.risk.since,T0+60000);
+ assert.deepEqual(d.activity,{30000142:[1,0,100]});
+});
+test('a failed feed keeps its history and is asked again after Retry-After; the other feed still counts',async()=>{
+ const options={feeds:{...feeds(T0),fail:'kills'}},app=setup(options);
+ const r=await sampleActivity(app.env,app.fetchImpl,T0);assert.equal(r.sampled,true);assert.ok(r.expires>=Date.now()+590000,'Retry-After 600 s');
+ const d=JSON.parse(activityDoc(app).data);assert.equal(d.risk,undefined);assert.deepEqual(d.traffic.s,{30000142:900,30002813:40});
+ options.feeds={...feeds(T0)};await sampleActivity(app.env,app.fetchImpl,T0+600000);
+ const e=JSON.parse(activityDoc(app).data);assert.deepEqual(e.risk.s[30000142],[3,3]);assert.deepEqual(e.traffic,d.traffic,'the jumps hour is not counted twice');
+});
+test('a cron run that samples syncs no pilot, and the pilot whose turn it took goes next',async()=>{
+ const options={feeds:feeds(Date.now()-60000)},app=setup(options);await connect(app);const other=2124815118;
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, snapshot, share_training) SELECT ?, 'Decxus', credentials, snapshot, 1 FROM pilots WHERE character_id = ?").run(other,id);
+ const key=app.env.TOKEN_ENCRYPTION_KEY,copy=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots WHERE character_id = ?').get(id).credentials,key,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ?').run(await encrypt(copy,key,`pilot:${other}`),other);
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0').run();
+ let before=app.calls.length;const synced=()=>[...new Set(app.calls.slice(before).map(c=>Number(c.url.match(/characters\/(\d+)\//)?.[1])).filter(Boolean))];
+ const tick=n=>n*SYNC_EVERY;
+ await scheduledSync(app.env,app.fetchImpl,tick(100));
+ assert.deepEqual(synced(),[],'no pilot this run');assert.deepEqual(app.calls.slice(before).map(c=>new URL(c.url).pathname).sort(),['/universe/system_jumps/','/universe/system_kills/']);
+ assert.equal(activityDoc(app).turns,1);assert.ok(activityDoc(app).expires_at>=Date.now()+SAMPLE_EVERY-1000);
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(101));assert.deepEqual(synced(),[id],'Fiofka had tick 100, so she goes at 101');
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0').run();
+ before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,tick(102));assert.deepEqual(synced(),[other]);
+});
+// Migration 0007 moves the pipeline's history and static meta without losing either.
+const LEGACY_META={generatedAt:'2026-11-13T10:00:00Z',types:{34:{n:'Tritanium',v:0.01}},recipes:{},regions:{10000002:'The Forge'},starters:[{type:587}],skillNames:{3327:'Spaceship Command'},
+ ores:[{n:'Veldspar',ore:1230}],combat:{sb:[1],dictor:[2]},skills:{industry:3380},activity:{30000142:[1,2,3]},risk:{at:T0,since:T0-86400000,s:{30000142:[4,9]}},traffic:{at:T0,since:T0-86400000,s:{30000142:500}}};
+const MAP={systems:{30000142:['Jita',0.946,10000002,[30000144],0]},stations:[],regions:{10000002:'The Forge'},constellations:{}};
+function legacyDb(){
+ const db=new DatabaseSync(':memory:');db.exec(sql.split('-- Market documents the Worker keeps')[0]);
+ db.prepare('INSERT INTO market_snapshots VALUES (0, ?, ?)').run(JSON.stringify(LEGACY_META),T0+5);db.prepare('INSERT INTO market_snapshots VALUES (1, ?, ?)').run(JSON.stringify(MAP),T0+4);
+ db.prepare('INSERT INTO market_snapshots VALUES (10000002, ?, ?)').run(JSON.stringify({name:'The Forge',types:{}}),Date.now());
+ return db;
+}
+test('migration 0007 moves the pipeline\'s kill and jump history and static meta into documents, and old clients see the same market',async()=>{
+ const db=legacyDb();const before={meta:LEGACY_META,universe:MAP};
+ db.exec(await readFile(new URL('../worker/migrations/0007_market_docs.sql',import.meta.url),'utf8'));
+ const live=JSON.parse(db.prepare("SELECT data FROM market_docs WHERE name = 'activity'").get().data);
+ assert.deepEqual(live,{risk:LEGACY_META.risk,traffic:LEGACY_META.traffic,activity:LEGACY_META.activity});
+ const fixed=db.prepare("SELECT version, data FROM market_docs WHERE name = 'universe'").get();assert.deepEqual(JSON.parse(fixed.data),{ores:LEGACY_META.ores,combat:LEGACY_META.combat,skills:LEGACY_META.skills});assert.ok(fixed.version);
+ assert.deepEqual(Object.keys(JSON.parse(db.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data)).sort(),['generatedAt','recipes','regions','skillNames','starters','types']);
+ // The new Worker on the migrated rows: an old client's /api/market is what the old Worker served.
+ const app=setup();app.env.DB=database(db);
+ const old=await(await app.request('/api/market')).json();
+ assert.deepEqual(old.meta.data,before.meta);assert.deepEqual(old.universe,before.universe);assert.equal(old.meta.updatedAt,T0+5);
+ // And the cron's first sample builds on the pipeline's history rather than starting over.
+ const options={feeds:feeds(T0+H)};const sampler=setup(options);
+ await sampleActivity(app.env,sampler.fetchImpl,T0+H);
+ const next=JSON.parse(db.prepare("SELECT data FROM market_docs WHERE name = 'activity'").get().data);
+ assert.equal(next.risk.since,T0-86400000);assert.ok(next.risk.s[30000142][1]>9);assert.equal(next.traffic.s[30000142],Math.round(500*Math.exp(-1/24)+900));
+});
+test('a pipeline still sending kill history only replaces the cron\'s copy when it is newer, and the sampler adopts a newer pipeline copy',async()=>{
+ const app=setup(),token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const ingest=body=>app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+ app.env.DB.raw.prepare("INSERT INTO market_docs (name, data, updated_at) VALUES ('activity', ?, 1)").run(JSON.stringify({risk:{at:T0,since:T0,s:{1:[5,5]}},traffic:{at:T0,since:T0,s:{}}}));
+ await ingest({region:0,data:{types:{},risk:{at:T0-H,since:T0-H,s:{1:[1,1]}}}});
+ assert.deepEqual(JSON.parse(activityDoc(app).data).risk.s,{1:[5,5]},'an older copy is ignored');
+ assert.equal(JSON.parse(app.env.DB.raw.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data).risk,undefined,'and never stored with the meta');
+ await ingest({region:0,data:{types:{},risk:{at:T0+H,since:T0,s:{1:[7,7]}},traffic:{at:T0+H,since:T0,s:{1:3}},activity:{1:[1,0,3]}}});
+ assert.deepEqual(JSON.parse(activityDoc(app).data),{risk:{at:T0+H,since:T0,s:{1:[7,7]}},traffic:{at:T0+H,since:T0,s:{1:3}},activity:{1:[1,0,3]}});
+ // An old Worker wrote a newer pipeline copy straight into the meta row during the deploy: the next sample uses it.
+ app.env.DB.raw.prepare('UPDATE market_snapshots SET data = ? WHERE region_id = 0').run(JSON.stringify({types:{},risk:{at:T0+2*H,since:T0,s:{1:[9,9]}}}));
+ const options={feeds:feeds(T0+3*H,[],[])};await sampleActivity(app.env,setup(options).fetchImpl,T0+3*H);
+ assert.ok(Math.abs(JSON.parse(activityDoc(app).data).risk.s[1][0]-Math.round(9*Math.exp(-1/24)*100)/100)<0.011);
+});
+// /api/market: ETag and 304, and the versioned universe document.
+async function marketApp(){
+ const app=setup();const {bearer}=await connect(app);const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const ingest=body=>app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+ for(const body of [{region:1,data:MAP},{region:0,data:LEGACY_META},{region:10000002,data:{name:'The Forge',types:{}}},{region:10000020,data:{name:'Tash-Murkon',types:{}}}])assert.equal((await ingest(structuredClone(body))).status,200);
+ return {app,bearer,ingest};
+}
+test('/api/market sends an ETag and answers a matching If-None-Match with 304 before reading the big rows',async()=>{
+ const {app,bearer,ingest}=await marketApp();
+ const first=await app.request('/api/market?v=2');assert.equal(first.status,200);const tag=first.headers.get('ETag');assert.match(tag,/^W\/".+"$/);
+ const queries=[],prepare=app.env.DB.prepare;app.env.DB.prepare=q=>{queries.push(q);return prepare.call(app.env.DB,q);};
+ const again=await app.request('/api/market?v=2',{headers:{'If-None-Match':tag,Origin:'https://matheusfiorin.github.io'}});
+ assert.equal(again.status,304);assert.equal(await again.text(),'');assert.equal(again.headers.get('ETag'),tag);assert.match(again.headers.get('Cache-Control'),/^public/);
+ assert.equal(again.headers.get('Access-Control-Allow-Origin'),'https://matheusfiorin.github.io');
+ assert.ok(!queries.some(q=>/SELECT[^]*\bdata\b[^]*FROM market_snapshots/.test(q)),'no stored data was read');
+ app.env.DB.prepare=prepare;
+ const signed=await app.request('/api/market?v=2',{headers:{Authorization:`Bearer ${bearer}`,'If-None-Match':tag}});assert.equal(signed.status,200,'the signed-in view has its own ETag');assert.notEqual(signed.headers.get('ETag'),tag);
+ assert.notEqual((await app.request('/api/market')).headers.get('ETag'),tag,'old clients\' full view too');
+ await ingest({region:10000002,data:{name:'The Forge',types:{34:{d:1,s:[]}}}});
+ const changed=await app.request('/api/market?v=2',{headers:{'If-None-Match':tag}});assert.equal(changed.status,200);assert.notEqual(changed.headers.get('ETag'),tag);
+ const fresh=changed.headers.get('ETag');app.env.DB.raw.prepare("UPDATE market_docs SET updated_at = updated_at + 1 WHERE name = 'activity'").run();
+ assert.equal((await app.request('/api/market?v=2',{headers:{'If-None-Match':fresh}})).status,200,'a new kills sample is a new view');
+});
+test('the split market response leaves the universe to a versioned document, and old clients still get everything inline',async()=>{
+ const {app,bearer}=await marketApp();
+ const split=await(await app.request('/api/market?v=2')).json();
+ assert.equal(split.universe,null);assert.match(split.universeVersion,/^[\w-]{16}$/);
+ for(const key of STATIC_META)assert.equal(split.meta.data[key],undefined,`${key} is in the universe document`);
+ assert.deepEqual(split.meta.data.risk,LEGACY_META.risk);assert.deepEqual(split.meta.data.starters,LEGACY_META.starters);assert.deepEqual(split.regions.map(r=>r.region),[10000002]);
+ const doc=await app.request(`/api/market/universe?v=${split.universeVersion}`);assert.equal(doc.status,200);
+ assert.match(doc.headers.get('Cache-Control'),/max-age=31536000, immutable/);assert.equal(doc.headers.get('Vary'),null);
+ const universe=await doc.json();assert.equal(universe.version,split.universeVersion);assert.deepEqual(universe.universe,MAP);assert.deepEqual(universe.meta,{ores:LEGACY_META.ores,combat:LEGACY_META.combat,skills:LEGACY_META.skills});
+ assert.equal((await app.request(`/api/market/universe?v=${split.universeVersion}`,{headers:{'If-None-Match':doc.headers.get('ETag')}})).status,304);
+ assert.match((await app.request('/api/market/universe?v=old')).headers.get('Cache-Control'),/max-age=300/,'an unknown version is not cached for long');
+ // Merged, the split view is exactly what an old client gets.
+ const old=await(await app.request('/api/market')).json();
+ const {universeVersion,...rest}=split;
+ assert.deepEqual(old,{...rest,universe:universe.universe,meta:{...split.meta,data:{...universe.meta,...split.meta.data}}});
+ const privateOld=await(await app.request('/api/market',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.deepEqual(privateOld.regions.map(r=>r.region),[10000002,10000020]);
+ assert.ok(!JSON.stringify(universe).includes('Tash-Murkon'),'the public universe document holds no pilot region');
+});
+test('the universe version changes only when the map or the static meta changes; a run without static data keeps the last',async()=>{
+ const {app,ingest}=await marketApp();const version=async()=>(await(await app.request('/api/market?v=2')).json()).universeVersion;
+ const v1=await version();
+ await ingest(structuredClone({region:1,data:MAP}));await ingest(structuredClone({region:0,data:{...LEGACY_META,generatedAt:'later',types:{}}}));
+ assert.equal(await version(),v1,'same content, same version');
+ await ingest({region:0,data:{types:{},recipesError:'Blueprint data unavailable'}});assert.equal(await version(),v1);
+ assert.deepEqual((await(await app.request('/api/market')).json()).meta.data.ores,LEGACY_META.ores,'the last ores stay');
+ await ingest({region:1,data:{...MAP,regions:{10000002:'The Forge',10000043:'Domain'}}});const v2=await version();assert.notEqual(v2,v1);
+ await ingest({region:0,data:{types:{},ores:[{n:'Scordite',ore:1228}]}});const v3=await version();assert.notEqual(v3,v2);
+ assert.deepEqual((await(await app.request(`/api/market/universe?v=${v3}`)).json()).meta.ores,[{n:'Scordite',ore:1228}]);
+});
+test('joinObjects splices JSON objects without parsing them',()=>{
+ assert.deepEqual(JSON.parse(joinObjects('{"a":1}',null,'{}',' {"b":[1,2]} ','{"a":3}')),{a:3,b:[1,2]});assert.equal(joinObjects(),'{}');
 });
