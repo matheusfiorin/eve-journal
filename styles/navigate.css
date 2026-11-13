@@ -90,6 +90,9 @@
    tab bar and snaps to half or nearly full height; zoom, Fit and Locate float as a 44 px stack. */
 @media (max-width:720px){
   #map{--peek:112px;--tabbar-h:calc(61px + env(safe-area-inset-bottom))}
+  /* The sheet is position:fixed inside #map, and a transformed ancestor becomes its containing block: view-in's
+     translateY would pin it to the view (halfway up the screen) until the animation ends. Fade the map in instead. */
+  #map.view--enter{animation-name:fade}
   .map-controls-home .map-toolbar{display:none}
   #drawer .map-toolbar{display:grid;gap:12px}#drawer .map-selects{display:grid;margin:0}#drawer .map-crumbs{order:-1}
   .map-status{margin:0 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
