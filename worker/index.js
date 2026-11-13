@@ -10,7 +10,7 @@ export const HUB_REGIONS=new Set([10000002,10000043,10000032,10000030,10000042])
 const SESSION_MS=30*24*60*60*1000;
 const encoder=new TextEncoder();
 class ServiceError extends Error {
-  constructor(message,status=400){super(message);this.status=status;}
+  constructor(message,status=400,extra={}){super(message);this.status=status;Object.assign(this,extra);}
 }
 function cookie(request,name){return request.headers.get('Cookie')?.split(';').map(v=>v.trim()).find(v=>v.startsWith(`${name}=`))?.slice(name.length+1)||'';}
 // True when the browser says the request came from this worker's own origin.
@@ -42,25 +42,36 @@ function html(body,status=200,headers={}){
  // 'same-origin' (not 'no-referrer') so the consent form's POST carries a real Origin header; nothing leaks cross-origin.
  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EVE Pilot Console</title><style>body{background:#0a1019;color:#edf2f6;font:16px system-ui;max-width:620px;margin:60px auto;padding:24px;line-height:1.7}h1{line-height:1.2}button,a{color:#b9ee8d}button{background:#172b21;border:1px solid #b9ee8d;padding:14px;cursor:pointer;font:inherit}p,li{color:#b6c3d0}label{display:block;margin:20px 0}</style>${body}</html>`,{status,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://login.eveonline.com; frame-ancestors 'none'; base-uri 'none'",...headers}});
 }
-export async function encrypt(value,secret){
+// context names the row a blob belongs to (pilot:<id>, goal:<id>, entry:<id>, state:<hash>) and is bound in as
+// AES-GCM additional data (v:2), so a blob copied into another row no longer decrypts. v:1 blobs, written before
+// that, still decrypt without it and are rewritten as v:2 the next time their row is saved.
+export async function encrypt(value,secret,context){
  const bytes=unbase64(secret);
  if(bytes.length!==32)throw new ServiceError('Backend encryption is not configured.',503);
+ if(typeof context!=='string'||!context)throw new ServiceError('Backend encryption needs a context.',500);
  const key=await crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['encrypt']);
  const iv=crypto.getRandomValues(new Uint8Array(12));
- const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoder.encode(JSON.stringify(value)));
- return JSON.stringify({v:1,iv:base64url(iv),data:base64url(new Uint8Array(ciphertext))});
+ const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode(context)},key,encoder.encode(JSON.stringify(value)));
+ return JSON.stringify({v:2,iv:base64url(iv),data:base64url(new Uint8Array(ciphertext))});
 }
 function unbase64(value){return Uint8Array.from(atob(value.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));}
-export async function decrypt(value,secret){
- const item=JSON.parse(value);if(item.v!==1)throw new ServiceError('Stored authorization could not be read.',503);
+export async function decrypt(value,secret,context){
+ const item=JSON.parse(value);if(item.v!==1&&!(item.v===2&&typeof context==='string'&&context))throw new ServiceError('Stored authorization could not be read.',503);
  const key=await crypto.subtle.importKey('raw',unbase64(secret),'AES-GCM',false,['decrypt']);
- const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:unbase64(item.iv)},key,unbase64(item.data));
+ const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:unbase64(item.iv),...(item.v===2?{additionalData:encoder.encode(context)}:{})},key,unbase64(item.data));
  return JSON.parse(new TextDecoder().decode(bytes));
+}
+const REVOKED='EVE authorization expired or was revoked. Reconnect the pilot.',LIMITED='EVE rate limit reached. Try again later.';
+// Retry-After is seconds or an HTTP date; returns when to try again, capped at an hour, or 0 if absent or garbled.
+export function retryAt(header,now=Date.now()){
+ if(!header)return 0;const s=Number(header),at=Number.isFinite(s)?now+s*1000:Date.parse(header);
+ return Number.isFinite(at)&&at>now?Math.min(at,now+3600000):0;
 }
 async function fetchOk(url,options,fetchImpl){
  const r=await fetchImpl(url,{...options,signal:AbortSignal.timeout(20000)});
  // The token endpoint answers a revoked or expired refresh token (or a reused code) with 400 invalid_grant: only reconnecting helps.
- if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError('EVE authorization expired or was revoked. Reconnect the pilot.',502);
+ if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError(REVOKED,502,{revoked:true});
+ if(r.status===429)throw new ServiceError(LIMITED,502,{retryAt:retryAt(r.headers.get('Retry-After'))});
  if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':r.status===429||r.status===420?'EVE rate limit reached. Try again later.':'EVE service is temporarily unavailable.',502);
  return r;
 }
@@ -111,13 +122,25 @@ function privatePayload(row,sessionRow){
 }
 // Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
 async function freshCredentials(row,env,fetchImpl,lockUntil){
- let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY);
+ const context=`pilot:${row.character_id}`;
+ let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY,context);
  if(credentials.expires<Date.now()+60000){
-  const refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);
+  // A refresh token EVE refused stays refused, and asking again every cycle only spends EVE's patience: wait for the
+  // pilot to reconnect (the callback clears both holds). The same for a 429 until its Retry-After has passed.
+  if(row.grant_revoked_at)throw new ServiceError(REVOKED,502);
+  if(row.refresh_after>Date.now())throw new ServiceError(LIMITED,502);
+  let refreshed;
+  try{refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);}
+  catch(error){
+   // Bound to the lock: a reconnect meanwhile resets it, and its fresh grant must not be marked refused.
+   if(error.revoked)await env.DB.prepare('UPDATE pilots SET grant_revoked_at = ? WHERE character_id = ? AND sync_lock_until = ?').bind(Date.now(),row.character_id,lockUntil).run();
+   if(error.retryAt)await env.DB.prepare('UPDATE pilots SET refresh_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(error.retryAt,row.character_id,lockUntil).run();
+   throw error;
+  }
   // EVE has rotated the refresh token: the old one is dead from here on. Save the new one before anything else can
   // fail (checking the access token fetches EVE's keys), or one failed check would leave the pilot needing a reconnect.
   // If the lock was lost (another request reset it), the rotated token was not stored: stop rather than carry on with it.
-  const save=async c=>{const r=await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(c,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();if(r?.meta?.changes===0)throw new ServiceError('This pilot changed while syncing. Try again in a moment.',409);};
+  const save=async c=>{const r=await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(c,env.TOKEN_ENCRYPTION_KEY,context),row.character_id,lockUntil).run();if(r?.meta?.changes===0)throw new ServiceError('This pilot changed while syncing. Try again in a moment.',409);};
   credentials={...credentials,accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:0};
   await save(credentials);
   const identity=await verify(refreshed.access_token,env,row.character_id,fetchImpl);
@@ -141,7 +164,7 @@ function journalRecord(kind,record){
  catch(error){throw new ServiceError(`Invalid ${kind}: ${error.message}`);}
 }
 async function journalOut(row,env){
- return {kind:row.kind,id:row.id,rev:row.rev,updatedAt:row.updated_at,record:row.data===null?null:await decrypt(row.data,env.TOKEN_ENCRYPTION_KEY)};
+ return {kind:row.kind,id:row.id,rev:row.rev,updatedAt:row.updated_at,record:row.data===null?null:await decrypt(row.data,env.TOKEN_ENCRYPTION_KEY,`${row.kind}:${row.id}`)};
 }
 async function journal(request,url,env){
  const s=await session(request,env),me=s.character_id;
@@ -184,7 +207,7 @@ async function journal(request,url,env){
   // No row although the device saw one (purged tombstone, reset database): a delete is done, a record is created anew.
   if(row&&row.rev!==c.base){conflicts.push(row);continue;}
   if(!row&&c.record===null){applied.push({kind:c.kind,id:c.id,rev:0});continue;}
-  const data=c.record===null?null:await encrypt(c.record,env.TOKEN_ENCRYPTION_KEY);
+  const data=c.record===null?null:await encrypt(c.record,env.TOKEN_ENCRYPTION_KEY,`${c.kind}:${c.id}`);
   pending.push([c,row?env.DB.prepare(`UPDATE journal SET data = ?, rev = ${NEXT_REV}, updated_at = ?, updated_by = ? WHERE kind = ? AND id = ? AND rev = ? RETURNING rev`).bind(data,now,me,c.kind,c.id,c.base)
    :env.DB.prepare(`INSERT INTO journal (kind, id, owner, data, rev, updated_at, updated_by) VALUES (?, ?, ?, ?, ${NEXT_REV}, ?, ?) ON CONFLICT DO NOTHING RETURNING rev`).bind(c.kind,c.id,owner,data,now,me)]);
  }
@@ -274,8 +297,8 @@ async function route(request,env,ctx,fetchImpl){
   const fields=new URLSearchParams(await request.text());
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
-  const state=random(),verifier=random();
-  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(await hash(state),await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'},env.TOKEN_ENCRYPTION_KEY),Date.now()+300000).run();
+  const state=random(),verifier=random(),stateHash=await hash(state);
+  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(stateHash,await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'},env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`),Date.now()+300000).run();
   const login=new URL(`${EVE}/v2/oauth/authorize/`);
   login.search=new URLSearchParams({response_type:'code',client_id:env.EVE_CLIENT_ID,redirect_uri:`${url.origin}/auth/callback`,scope:REQUESTED_SCOPES.join(' '),state,code_challenge:await challenge(verifier),code_challenge_method:'S256'});
   return new Response(null,{status:303,headers:{Location:login.href,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state',state,600),'Referrer-Policy':'no-referrer'}});
@@ -283,16 +306,17 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/auth/callback'&&request.method==='GET'){
   const state=url.searchParams.get('state');
   if(!state||state!==cookie(request,'__Host-eve_state'))throw new ServiceError('EVE login state did not match. Start again.',403);
-  const pending=await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash = ? AND expires_at > ? RETURNING payload').bind(await hash(state),Date.now()).first();
+  const stateHash=await hash(state);
+  const pending=await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash = ? AND expires_at > ? RETURNING payload').bind(stateHash,Date.now()).first();
   if(!pending)throw new ServiceError('EVE login expired or was already used. Start again.',403);
   if(url.searchParams.has('error'))throw new ServiceError('EVE login was cancelled or declined.');
   const code=url.searchParams.get('code');if(!code)throw new ServiceError('EVE did not return an authorization code.');
-  const payload=await decrypt(pending.payload,env.TOKEN_ENCRYPTION_KEY);
+  const payload=await decrypt(pending.payload,env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`);
   const tokens=await exchange(env,{grant_type:'authorization_code',code,redirect_uri:`${url.origin}/auth/callback`,code_verifier:payload.verifier},fetchImpl);
   if(!tokens.refresh_token)throw new ServiceError('EVE did not return a refresh token. Reconnect the pilot.',502);
   const identity=await verify(tokens.access_token,env,payload.id,fetchImpl);
-  const encrypted=await encrypt({accessToken:tokens.access_token,refreshToken:tokens.refresh_token,expires:identity.expires,scopes:identity.scopes},env.TOKEN_ENCRYPTION_KEY);
-  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?2:0).run();
+  const encrypted=await encrypt({accessToken:tokens.access_token,refreshToken:tokens.refresh_token,expires:identity.expires,scopes:identity.scopes},env.TOKEN_ENCRYPTION_KEY,`pilot:${payload.id}`);
+  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0, grant_revoked_at = NULL, refresh_after = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?2:0).run();
   const bearer=random(),expires=Date.now()+SESSION_MS;
   await env.DB.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').bind(await hash(bearer),payload.id,expires).run();
   await syncPilot(payload.id,env,fetchImpl,{force:true});
@@ -355,6 +379,14 @@ async function route(request,env,ctx,fetchImpl){
   return response(await setWaypoints(s.character_id,body?.systems,env,fetchImpl));
  }
  if(url.pathname==='/api/journal')return journal(request,url,env);
+ // Ends the presented session and nothing else: a browser that reconnected a pilot hands in the token it replaced,
+ // so the pilot's sessions on other devices stay. Only the token's holder can end it; an unknown one is a no-op.
+ if(url.pathname==='/api/session/revoke'&&request.method==='POST'){
+  const token=request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+  if(!token)throw new ServiceError('Send the session to end.',401);
+  const r=await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await hash(token)).run();
+  return response({revoked:(r?.meta?.changes||0)>0});
+ }
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){
   if(url.pathname==='/api/session'&&request.method!=='GET')throw new ServiceError('Method not allowed.',405);
   if(url.pathname!=='/api/session'&&request.method!=='POST')throw new ServiceError('Method not allowed.',405);
@@ -372,7 +404,7 @@ async function route(request,env,ctx,fetchImpl){
    if(!locked)throw new ServiceError('This pilot is syncing. Try Disconnect again in a moment.',409);
    let revoked=false;
    try{
-    const credentials=await decrypt(locked.credentials,env.TOKEN_ENCRYPTION_KEY);
+    const credentials=await decrypt(locked.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${locked.character_id}`);
     const res=await fetchImpl(`${EVE}/v2/oauth/revoke`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams({token:credentials.refreshToken,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(15000)});
     revoked=res.ok;
    }catch{ /* Local deletion still removes access and shared snapshots. */ }
@@ -399,14 +431,15 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
 // One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,
 // and the free plan allows 50 subrequests per invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs),
 // so with two pilots each one refreshes every 10 minutes, about as often as ESI's own caches turn over. Turns follow the clock rather than the last sync, so a
-// pilot whose sync keeps failing cannot starve the other.
+// pilot whose sync keeps failing cannot starve the other. A pilot whose grant EVE refused gets no turn until they
+// reconnect: it could not reach EVE anyway.
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now()),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
   env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(Date.now()-180*86400000)]);
- const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
+ const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
  if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
 }
 export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env,fetch,event.scheduledTime));}};

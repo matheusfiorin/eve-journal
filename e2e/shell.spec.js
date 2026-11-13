@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {mockApp,openApp,isMobile} from './fixtures.js';
+import {mockApp,openApp,isMobile,API,IDS,opaque,reconnected} from './fixtures.js';
 const hash=page=>new URL(page.url()).hash;
 test('the rail moves between destinations and remembers each one’s last view',async({page})=>{
  test.skip(isMobile(page),'the rail is a desktop control');
@@ -32,6 +32,32 @@ test('the pilot picker keeps focus inside itself until a pilot is chosen',async(
  for(let i=0;i<4;i++){await page.keyboard.press('Tab');expect(await page.evaluate(()=>document.activeElement.closest('#hero')!==null||document.activeElement===document.body)).toBe(true);}
  await hero.getByRole('button',{name:/Decxus/}).click();await expect(hero).toBeHidden();
  expect(await page.locator('.shell__main').evaluate(el=>el.inert)).toBe(false);await expect(page.locator('#bridge .screen-title')).toBeFocused();
+});
+test('picking a pilot in one tab switches the other tabs to them',async({page,context})=>{
+ await mockApp(page);await openApp(page);
+ const other=await context.newPage();const {errors}=await mockApp(other);await openApp(other);
+ await expect(other.locator('#switch-pilot')).toHaveAttribute('data-pilot','fiofka');
+ await page.locator('#switch-pilot').click();await page.locator('#hero').getByRole('button',{name:/Decxus/}).click();
+ await expect(other.locator('#switch-pilot')).toHaveAttribute('data-pilot','decxus');await expect(other.locator('body')).toHaveAttribute('data-pilot','decxus');
+ await expect(other.locator('#switch-pilot')).toHaveAttribute('aria-label','Switch pilot (Decxus flying)');
+ // A picker open in the other tab closes: the choice was made elsewhere.
+ await other.locator('#switch-pilot').click();await expect(other.locator('#hero')).toBeVisible();
+ await page.locator('#switch-pilot').click();await page.locator('#hero').getByRole('button',{name:/Fiofka/}).click();
+ await expect(other.locator('#hero')).toBeHidden();await expect(other.locator('#switch-pilot')).toHaveAttribute('data-pilot','fiofka');
+ expect(await other.locator('.shell__main').evaluate(el=>el.inert)).toBe(false);
+ expect(errors).toEqual([]);
+});
+test('Reconnect is accepted when EVE answers in another tab, and the replaced session is ended',async({page,context})=>{
+ await mockApp(page,{connected:'first'});await openApp(page);
+ await page.locator('.me-banner [data-connect]').click();await expect(page).toHaveURL(`${API}/auth/start?pilot=${IDS[0]}`);
+ // On a phone the EVE login often comes back in a fresh tab.
+ const other=await context.newPage();const {errors,calls}=await mockApp(other,{connected:'first'});
+ await other.goto(`/#backend_session=${reconnected.slice(0,42)}0&pilot=${IDS[0]}&expires=${Date.now()+3600000}`);await expect(other.locator('#sync-status')).toContainText('Synced');
+ await expect(other.locator('#notice')).toContainText('Pilot connected');await expect(other.locator('#notice')).not.toContainText('already connected');
+ expect(await other.evaluate(key=>JSON.parse(localStorage.getItem(key))[0][1].token,`eve-backend-sessions:${API}`)).toBe(`${reconnected.slice(0,42)}0`);
+ await expect.poll(()=>calls.filter(c=>c.path==='/api/session/revoke').map(c=>c.authorization)).toEqual([`Bearer ${opaque.slice(0,42)}0`]);
+ await expect(other.locator('#bridge')).toContainText('12,500,000.25 ISK');
+ expect(errors).toEqual([]);
 });
 test('the command palette opens with Control+K and jumps to screens and systems',async({page})=>{
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);

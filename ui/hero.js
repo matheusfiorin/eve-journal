@@ -2,7 +2,7 @@
 import {S, ME, reduced, counters, mine, summary} from './state.js';
 import {$, esc, portrait} from './shared.js';
 
-let starsFrame = 0, warp = false, onChoose = () => {};
+let starsFrame = 0, warp = false, onChoose = () => {}, onAdopt = () => {};
 export function renderMe() {
   const p = mine(), b = $('#switch-pilot');
   b.dataset.pilot = p ? p.name.toLowerCase() : '';
@@ -48,17 +48,29 @@ export function openHero() {
   document.body.classList.add('picking'); renderHero(); startStars();
   $('#hero-pilots button')?.focus();
 }
+function closeHero(delay) {
+  behind().forEach(el => { el.inert = false; });
+  setTimeout(() => { $('#hero').hidden = true; document.body.classList.remove('picking'); cancelAnimationFrame(starsFrame); }, delay);
+}
 function choosePilot(pilot) {
   S.me = pilot;
   try { localStorage.setItem(ME, pilot); } catch { /* Choice lasts for this visit. */ }
   warp = true; $('#hero').classList.add('warp');
-  behind().forEach(el => { el.inert = false; });
-  setTimeout(() => { $('#hero').hidden = true; document.body.classList.remove('picking'); cancelAnimationFrame(starsFrame); }, reduced ? 0 : 900);
+  closeHero(reduced ? 0 : 900);
   counters.clear(); onChoose();
 }
-// choose() runs after a pick: app.js sends the pilot to the Bridge and redraws.
-export function wire(choose) {
-  onChoose = choose;
+// Another tab picked a pilot (storage events reach only the other tabs): fly the same one here. This tab is in the
+// background, so it redraws in place rather than jumping to the Bridge, and a picker open here simply closes.
+function adoptPilot(event) {
+  if (event.key !== ME || event.newValue === S.me || !S.config.pilots.includes(event.newValue)) return;
+  S.me = event.newValue;
+  if (!$('#hero').hidden) closeHero(0);
+  counters.clear(); onAdopt();
+}
+// choose() runs after a pick: app.js sends the pilot to the Bridge and redraws. adopt() redraws after another tab's pick.
+export function wire(choose, adopt = choose) {
+  onChoose = choose; onAdopt = adopt;
+  window.addEventListener('storage', adoptPilot);
   document.addEventListener('click', event => { const b = event.target.closest('[data-me]'); if (b) choosePilot(b.dataset.me); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#hero').hidden && S.me) choosePilot(S.me); });
 }

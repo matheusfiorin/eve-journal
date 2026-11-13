@@ -51,6 +51,9 @@ function wingRecord(id,state){
  if(level<2)delete r.jobs;
  return r;
 }
+// The mocked sessions: `opaque` with the pilot's index as its last character, or `reconnected` after a Reconnect.
+export const reconnected='c'.repeat(43);
+const pilotOf=auth=>IDS.find((id,i)=>[opaque,reconnected].some(t=>auth===`Bearer ${t.slice(0,42)}${i}`));
 // Every test runs against a mocked backend; the browser itself must never call private ESI endpoints.
 export async function mockApp(page,options={}) {
  const state={fail:false,missing:false,...options};
@@ -104,10 +107,11 @@ export async function mockApp(page,options={}) {
   if(path==='/api/public/pilots')return json({pilots:state.unshared?[]:IDS.map(sharedRecord)});
   if(path==='/api/session'||path==='/api/sync'){
    if(state.expired)return json({error:'Backend session expired.'},401);
-   const id=IDS.find(id=>req.headers().authorization===`Bearer ${opaque.slice(0,42)}${IDS.indexOf(id)}`);
+   const id=pilotOf(req.headers().authorization);
    return json(privateRecord(id,state));
   }
   if(path==='/api/disconnect')return json({disconnected:true});
+  if(path==='/api/session/revoke')return json({revoked:true});
   if(path==='/api/wing'){if(state.expired)return json({error:'Backend session expired.'},401);return json({pilots:IDS.map(id=>wingRecord(id,state)).filter(r=>r.characterId===IDS[0]||!state.wingPrivate).map(r=>r.characterId===IDS[1]&&state.wingPrivate?{...r,sharing:false}:r)});}
   if(path==='/api/market')return state.noMarket?json({meta:null,regions:[]}):json(MARKET);
   if(path==='/api/waypoints'){state.waypoints=JSON.parse(req.postData()).systems;return json({waypoints:state.waypoints.length});}
@@ -115,7 +119,7 @@ export async function mockApp(page,options={}) {
    // A small stand-in for the Worker's journal: one rev counter, goals for the wing, entries and prefs for their pilot
    // (prefs only for clients that ask, and only under the writer's own id).
    const j=state.journal||(state.journal={rows:new Map(),rev:0,posts:[]});
-   const who=IDS.find(id=>req.headers().authorization===`Bearer ${opaque.slice(0,42)}${IDS.indexOf(id)}`);
+   const who=pilotOf(req.headers().authorization);
    if(!who)return json({error:'Connect this pilot.'},401);
    const out=r=>({kind:r.kind,id:r.id,rev:r.rev,record:r.record});
    if(req.method()==='GET'){const q=new URL(req.url()).searchParams,since=Number(q.get('since'))||0;return json({rev:j.rev,more:false,records:[...j.rows.values()].filter(r=>r.rev>since&&(r.owner===0||r.owner===who)&&(r.kind!=='pref'||q.get('prefs')==='1')).sort((a,b)=>a.rev-b.rev).map(out)});}

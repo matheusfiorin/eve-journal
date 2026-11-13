@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,retryAt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
-const id=2124810474;
+const id=2124810474,P=`pilot:${id}`;
 function token(character=id,scopes=REQUESTED_SCOPES){
  const enc=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
  const body=`${enc({alg:'RS256',kid:jwk.kid})}.${enc({iss:'https://login.eveonline.com',aud:['test-client','EVE Online'],azp:'test-client',sub:`CHARACTER:EVE:${character}`,name:'Fiofka',exp:Math.floor(Date.now()/1000)+1200,scp:scopes})}`;
@@ -25,7 +25,7 @@ function setup(options={}){
  const calls=[];const fetchImpl=async(url,init={})=>{
   calls.push({url:String(url),init});const path=new URL(url).pathname;
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
-  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
+  if(path.endsWith('/oauth/token')){assert.match(init.headers.Authorization,/^Basic /);if(options.limited&&String(init.body).includes('grant_type=refresh_token'))return new Response('{}',{status:429,headers:{'Retry-After':String(options.limited)}});if(options.revoked&&String(init.body).includes('grant_type=refresh_token'))return json({error:'invalid_grant',error_description:'Invalid refresh token. Token missing/expired.'},400);return json({access_token:token(options.character||id,options.scopes||REQUESTED_SCOPES),refresh_token:'private-rotating-refresh-token'});}
   if(path.endsWith('/oauth/jwks'))return options.jwksDown?json({},503):json({keys:[jwk]});
   if(path.endsWith('/oauth/revoke'))return new Response(null,{status:200});
   assert.match(init.headers.Authorization,/^Bearer /);
@@ -72,7 +72,7 @@ test('unknown pilots cannot enroll and arbitrary redirect parameters are ignored
 test('callback stores encrypted credentials, hashes the session and exposes only an opaque fragment token',async()=>{
  const app=setup();const {callback,bearer}=await connect(app);assert.equal(callback.status,303);assert.equal(bearer.length,43);
  const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();assert.ok(!row.credentials.includes('private-rotating-refresh-token'));assert.ok(!row.credentials.includes('eyJ'));
- assert.equal((await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY)).refreshToken,'private-rotating-refresh-token');
+ assert.equal((await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P)).refreshToken,'private-rotating-refresh-token');
  const saved=app.env.DB.raw.prepare('SELECT * FROM sessions').get();assert.notEqual(saved.token_hash,bearer);assert.equal(saved.token_hash.length,43);
  const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(payload.characterId,id);assert.equal(payload.operations.wallet.value,12345678.25);assert.ok(!JSON.stringify(payload).includes('private-rotating-refresh-token'));
 });
@@ -101,22 +101,22 @@ test('training-only consent does not fetch optional private endpoints',async()=>
  const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets|mining)\//.test(call.url)));
 });
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
- const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
- const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);assert.equal((await decrypt(synced.credentials,app.env.TOKEN_ENCRYPTION_KEY)).refreshToken,'private-rotating-refresh-token');assert.ok(app.calls.some(call=>call.url.includes('/oauth/token')&&String(call.init.body).includes('grant_type=refresh_token')));
+ const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P));
+ const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);assert.equal((await decrypt(synced.credentials,app.env.TOKEN_ENCRYPTION_KEY,P)).refreshToken,'private-rotating-refresh-token');assert.ok(app.calls.some(call=>call.url.includes('/oauth/token')&&String(call.init.body).includes('grant_type=refresh_token')));
 });
 test('a failed key check after a refresh keeps the rotated refresh token, so the next sync recovers without a reconnect',async()=>{
  const options={},app=setup(options);await connect(app);
- const expire=async()=>{const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));};
+ const expire=async()=>{const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P));};
  await expire();resetJwks();options.jwksDown=true;
  const failed=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(failed.last_error,/temporarily unavailable/);
- const stored=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY);
+ const stored=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
  assert.equal(stored.refreshToken,'private-rotating-refresh-token','EVE already rotated the token, so the new one must be kept');assert.equal(stored.expires,0,'and the next sync refreshes again');
  options.jwksDown=false;const recovered=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(recovered.last_error,null);
  // The keys are cached: another refresh within the hour doesn't fetch them again.
  const jwksCalls=()=>app.calls.filter(c=>c.url.endsWith('/oauth/jwks')).length,before=jwksCalls();await expire();await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(jwksCalls(),before);
 });
 test('a revoked refresh token asks the pilot to reconnect instead of blaming EVE',async()=>{
- const app=setup({revoked:true});const {bearer}=await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY));
+ const app=setup({revoked:true});const {bearer}=await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P));
  const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(synced.last_error,/authorization expired or was revoked.*Reconnect/);
  const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.match(payload.lastError,/Reconnect/);
 });
@@ -127,7 +127,75 @@ test('scheduler removes expired transient state and does not duplicate recent sy
  const app=setup();await connect(app);const before=app.calls.length;await scheduledSync(app.env,app.fetchImpl);assert.equal(app.calls.length,before);
 });
 test('encryption rejects altered ciphertext and uses a fresh IV',async()=>{
- const secret=Buffer.alloc(32,9).toString('base64');const a=await encrypt({token:'private'},secret),b=await encrypt({token:'private'},secret);assert.notEqual(a,b);assert.deepEqual(await decrypt(a,secret),{token:'private'});const changed=JSON.parse(a);changed.data=(changed.data[0]==='A'?'B':'A')+changed.data.slice(1);await assert.rejects(decrypt(JSON.stringify(changed),secret));
+ const secret=Buffer.alloc(32,9).toString('base64');const a=await encrypt({token:'private'},secret,P),b=await encrypt({token:'private'},secret,P);assert.notEqual(a,b);assert.deepEqual(await decrypt(a,secret,P),{token:'private'});const changed=JSON.parse(a);changed.data=(changed.data[0]==='A'?'B':'A')+changed.data.slice(1);await assert.rejects(decrypt(JSON.stringify(changed),secret,P));
+});
+// What encrypt() wrote before blobs were bound to their row: v:1, no additional data.
+async function legacy(value,secret){
+ const key=await crypto.subtle.importKey('raw',Buffer.from(secret,'base64'),'AES-GCM',false,['encrypt']),iv=crypto.getRandomValues(new Uint8Array(12));
+ const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(value)));
+ return JSON.stringify({v:1,iv:Buffer.from(iv).toString('base64url'),data:Buffer.from(data).toString('base64url')});
+}
+async function expireCredentials(app,write=c=>encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P)){
+ const c=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots WHERE character_id = ?').get(id).credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0 WHERE character_id = ?').run(await write(c),id);
+}
+test('a blob is bound to its row: v:2 decrypts only with the same context, v:1 still decrypts without one',async()=>{
+ const secret=Buffer.alloc(32,9).toString('base64'),v2=await encrypt({token:'private'},secret,'pilot:1');
+ assert.equal(JSON.parse(v2).v,2);await assert.rejects(decrypt(v2,secret,'pilot:2'));await assert.rejects(decrypt(v2,secret),/could not be read/);
+ await assert.rejects(encrypt({token:'private'},secret),/needs a context/,'every new write names its row');
+ const v1=await legacy({token:'old'},secret);assert.deepEqual(await decrypt(v1,secret,'pilot:1'),{token:'old'});assert.deepEqual(await decrypt(v1,secret),{token:'old'});
+});
+test('v:1 credentials keep working and are rewritten as v:2 on the next refresh; credentials moved to another pilot do not decrypt',async()=>{
+ const app=setup();await connect(app);const key=app.env.TOKEN_ENCRYPTION_KEY;
+ assert.equal(JSON.parse(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials).v,2,'the callback writes v:2');
+ await expireCredentials(app,c=>legacy(c,key));
+ const synced=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(synced.last_error,null);
+ assert.equal(JSON.parse(synced.credentials).v,2);assert.equal((await decrypt(synced.credentials,key,P)).refreshToken,'private-rotating-refresh-token');
+ // Someone with write access to the table copies Fiofka's grant into Decxus's row.
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, share_training) SELECT 2124815118, 'Decxus', credentials, 1 FROM pilots WHERE character_id = ?").run(id);
+ const before=app.calls.length,moved=await syncPilot(2124815118,app.env,app.fetchImpl,{force:true});
+ assert.match(moved.last_error,/Synchronization failed/);assert.equal(app.calls.length,before,'no EVE call is made with it');
+});
+test('journal records are bound to kind and id; v:1 rows are still served and become v:2 when next written',async()=>{
+ const {app,a,call}=await wingApp(),key=app.env.TOKEN_ENCRYPTION_KEY;
+ await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:entry}]});
+ const stored=app.env.DB.raw.prepare("SELECT data FROM journal WHERE id = 'e1'").get().data;
+ assert.deepEqual(await decrypt(stored,key,'entry:e1'),entry);await assert.rejects(decrypt(stored,key,'entry:e2'));await assert.rejects(decrypt(stored,key,'goal:e1'));
+ app.env.DB.raw.prepare("INSERT INTO journal (kind, id, owner, data, rev, updated_at, updated_by) VALUES ('goal', 'g1', 0, ?, 7, 0, ?)").run(await legacy(goal,key),id);
+ const pulled=await call(a,'GET',null,'?since=1');assert.deepEqual(pulled.body.records.map(r=>[r.id,r.record]),[['g1',goal]]);
+ await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:7,record:{...goal,done:true}}]});
+ const upgraded=app.env.DB.raw.prepare("SELECT data FROM journal WHERE id = 'g1'").get().data;assert.equal(JSON.parse(upgraded).v,2);assert.equal((await decrypt(upgraded,key,'goal:g1')).done,true);
+});
+test('after EVE refuses the refresh token, syncs stop asking EVE until the pilot reconnects',async()=>{
+ const options={revoked:true},app=setup(options);await connect(app);await expireCredentials(app);
+ const tokenCalls=()=>app.calls.filter(c=>c.url.endsWith('/oauth/token')).length,before=tokenCalls();
+ const failed=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(failed.last_error,/revoked.*Reconnect/);assert.ok(failed.grant_revoked_at>0);assert.equal(tokenCalls(),before+1);
+ const again=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.match(again.last_error,/revoked.*Reconnect/);assert.equal(tokenCalls(),before+1,'a request does not try again');
+ const calls=app.calls.length;await scheduledSync(app.env,app.fetchImpl,0);assert.equal(app.calls.length,calls,'nor does the cron: the pilot gets no turn');
+ options.revoked=false;await connect(app);
+ const back=app.env.DB.raw.prepare('SELECT grant_revoked_at, last_error FROM pilots').get();assert.equal(back.grant_revoked_at,null);assert.equal(back.last_error,null);
+ await expireCredentials(app);assert.equal((await syncPilot(id,app.env,app.fetchImpl,{force:true})).last_error,null);assert.equal(tokenCalls(),before+3,'the callback and the refresh after it');
+});
+test('a 429 from EVE login holds refreshes until Retry-After has passed',async()=>{
+ const options={limited:120},app=setup(options);await connect(app);await expireCredentials(app);
+ const tokenCalls=()=>app.calls.filter(c=>c.url.endsWith('/oauth/token')).length,before=tokenCalls();
+ const started=Date.now(),limited=await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.match(limited.last_error,/rate limit/);assert.ok(limited.refresh_after>=started+120000&&limited.refresh_after<=Date.now()+120000);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(tokenCalls(),before+1,'held');
+ options.limited=0;app.env.DB.raw.prepare('UPDATE pilots SET refresh_after = ?').run(Date.now()-1);
+ assert.equal((await syncPilot(id,app.env,app.fetchImpl,{force:true})).last_error,null);assert.equal(tokenCalls(),before+2);
+ assert.equal(retryAt('30',1000),31000);assert.equal(retryAt(new Date(61000).toUTCString(),1000),61000);assert.equal(retryAt('86400',0),3600000,'at most an hour');
+ for(const bad of [null,'','soon','-5'])assert.equal(retryAt(bad,1000),0);
+});
+test('a browser can end the one session it holds, leaving the pilot’s other devices signed in',async()=>{
+ const app=setup();const phone=(await connect(app)).bearer,laptop=(await connect(app)).bearer;
+ const revoke=auth=>app.request('/api/session/revoke',{method:'POST',headers:{Origin:'https://matheusfiorin.github.io',...(auth?{Authorization:`Bearer ${auth}`}:{})}});
+ const ended=await revoke(phone);assert.equal(ended.status,200);assert.deepEqual(await ended.json(),{revoked:true});assert.equal(ended.headers.get('Access-Control-Allow-Origin'),'https://matheusfiorin.github.io');
+ assert.equal((await app.request('/api/session',{headers:{Authorization:`Bearer ${phone}`}})).status,401);
+ assert.equal((await app.request('/api/session',{headers:{Authorization:`Bearer ${laptop}`}})).status,200);
+ assert.deepEqual(await(await revoke(phone)).json(),{revoked:false},'ending it twice is harmless');
+ assert.equal((await revoke(null)).status,401);assert.equal((await app.request('/api/session/revoke',{headers:{Authorization:`Bearer ${laptop}`}})).status,404,'POST only');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,1,'the pilot stays connected');
 });
 test('wallet history is trimmed to the latest 50 rows and clone data is stored privately',async()=>{
  const app=setup();const {bearer}=await connect(app);const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
@@ -159,6 +227,9 @@ test('consent records the wingmate choice',async()=>{
 test('each scheduled run syncs one pilot, taking turns, to stay within the per-invocation subrequest limit',async()=>{
  const app=setup();await connect(app);const other=2124815118;
  app.env.DB.raw.prepare("INSERT INTO pilots (character_id, name, credentials, snapshot, share_training) SELECT ?, 'Decxus', credentials, snapshot, 1 FROM pilots WHERE character_id = ?").run(other,id);
+ // Credentials are bound to their pilot, so the copy is sealed again for Decxus.
+ const key=app.env.TOKEN_ENCRYPTION_KEY,copy=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots WHERE character_id = ?').get(id).credentials,key,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ?').run(await encrypt(copy,key,`pilot:${other}`),other);
  app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0, last_error = ?').run('still failing');
  let before;const synced=()=>[...new Set(app.calls.slice(before).map(c=>Number(c.url.match(/characters\/(\d+)\//)?.[1])).filter(Boolean))];
  const tick=n=>n*SYNC_EVERY;

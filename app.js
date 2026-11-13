@@ -125,7 +125,7 @@ async function init() {
     } catch (error) { if (location.hash.includes('backend_session')) history.replaceState(null, '', home); notice(error.message); }
   }
   for (const module of [routes, mapmodal, shell, journalsync, installhint, ...SCREENS]) module.wire?.();
-  hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); });
+  hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); }, () => { renderAll(); shell.boot(); });
   // Populate selects before restoring an existing author in a draft.
   S.pilots = S.config.pilots.map(n => ({name:n})); pilotOptions(); logbook.resetEntry(true);
   try { S.me = localStorage.getItem(ME); } catch { /* Ask again. */ }

@@ -1,10 +1,12 @@
-const MAX_SESSION=31*86400000;
+const MAX_SESSION=31*86400000,MARK_MS=1800000,PILOTS=[2124810474,2124815118];
 export class BackendClient {
  constructor(url,storage=globalThis.localStorage,fetchImpl=globalThis.fetch){
   const parsed=new URL(url);if(parsed.protocol!=='https:')throw new Error('The backend URL must use HTTPS.');
   this.url=parsed.origin;this.storage=storage;this.fetch=(...args)=>fetchImpl(...args);this.key=`eve-backend-sessions:${this.url}`;this.connectKey=`eve-backend-connect:${this.url}`;
   // Sessions used to live in sessionStorage and died with the tab; carry an open tab's session over once.
   try{const legacy=globalThis.sessionStorage?.getItem(this.key);if(legacy&&!storage.getItem(this.key))storage.setItem(this.key,legacy);globalThis.sessionStorage?.removeItem(this.key);}catch{/* Start fresh. */}
+  // Marks from logins nobody finished, and the per-tab mark this replaced, go too.
+  try{globalThis.sessionStorage?.removeItem(this.connectKey);for(const id of PILOTS){const at=JSON.parse(storage.getItem(this.markKey(id)))?.at;if(at!==undefined&&!(Date.now()-at<MARK_MS))storage.removeItem(this.markKey(id));}}catch{/* Marks expire on use. */}
   this.sessions=new Map();this.expire(); // Sessions that ran out while no page was open go quietly.
  }
  // Every tab of this browser shares the stored sessions. Read them fresh before each change and touch only the pilot
@@ -29,18 +31,26 @@ export class BackendClient {
  acceptRedirect(hash){
   const params=new URLSearchParams(hash.replace(/^#/,''));if(!params.has('backend_session'))return false;
   const token=params.get('backend_session'),id=Number(params.get('pilot')),expires=Number(params.get('expires'));
-  if(![2124810474,2124815118].includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+MAX_SESSION)throw new Error('Backend session response was invalid. Connect the pilot again.');
+  if(!PILOTS.includes(id)||!token||!/^[\w-]{43}$/.test(token)||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+MAX_SESSION)throw new Error('Backend session response was invalid. Connect the pilot again.');
   // A link carrying someone else's session must not silently replace a working one (login CSRF): a pilot who is
-  // already connected here is replaced only by a redirect this tab asked for with connect().
-  const mark=this.tab(t=>{const v=t.getItem(this.connectKey);t.removeItem(this.connectKey);return v;});
-  let asked=null;try{asked=JSON.parse(mark);}catch{/* No mark. */}
-  this.reload();
-  if(this.has(id)&&!(asked?.id===id&&Date.now()-asked.at<1800000))throw new Error('This pilot is already connected in this browser; ignored a connection link it did not start. Use Reconnect to replace the session.');
-  this.change(id,()=>({token,expires}));return true;
+  // already connected here is replaced only by a redirect this browser asked for with connect(), in any of its tabs.
+  const asked=this.takeMark(id);
+  this.reload();const old=this.sessions.get(id);
+  if(this.has(id)&&!asked)throw new Error('This pilot is already connected in this browser; ignored a connection link it did not start. Use Reconnect to replace the session.');
+  this.change(id,()=>({token,expires}));
+  // The replaced session would otherwise live on at the Worker for 30 days. Only a holder of a token can end it, so
+  // this never touches the pilot's sessions on other devices.
+  if(old&&old.token!==token)this.revoke(old.token);
+  return true;
  }
- tab(fn){try{return globalThis.sessionStorage?fn(globalThis.sessionStorage):null;}catch{return null;}}
- // The EVE login URL for a pilot; remembers in this tab that a redirect back for them is expected.
- connect(id){this.tab(t=>t.setItem(this.connectKey,JSON.stringify({id,at:Date.now()})));return this.authURL(id);}
+ // connect() leaves a mark in localStorage rather than sessionStorage: on a phone the EVE login often returns in
+ // another tab (app switching), and that tab must still know this browser asked. Per pilot, used once, 30 minutes.
+ markKey(id){return `${this.connectKey}:${id}`;}
+ takeMark(id){try{const at=JSON.parse(this.storage.getItem(this.markKey(id)))?.at;this.storage.removeItem(this.markKey(id));return Number.isFinite(at)&&at<=Date.now()&&Date.now()-at<MARK_MS;}catch{return false;}}
+ // The EVE login URL for a pilot; remembers in this browser that a redirect back for them is expected.
+ connect(id){try{this.storage.setItem(this.markKey(id),JSON.stringify({at:Date.now()}));}catch{/* A reconnect then needs Disconnect first. */}return this.authURL(id);}
+ // Ends one session at the Worker. Best effort: an unreachable Worker leaves it to expire on its own.
+ revoke(token){return Promise.resolve().then(()=>this.fetch(`${this.url}/api/session/revoke`,{method:'POST',headers:{Accept:'application/json',Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(30000)})).then(r=>r.ok,()=>false);}
  async call(path,{id,method='GET',body}={}){
   const headers={Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})};const token=id?this.sessions.get(id)?.token:undefined;if(id){if(!this.has(id))throw new Error('Connect this pilot again.');headers.Authorization=`Bearer ${token}`;}
   const response=await this.fetch(`${this.url}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});

@@ -53,17 +53,42 @@ test('an HTML or empty error page reports the HTTP status, not a JSON parse erro
  const garbled=client(async()=>new Response('<html>',{status:200,headers:{'Content-Type':'text/html'}}));
  await assert.rejects(garbled.publicPilots(),{message:'Backend returned an unreadable response.'});
 });
-test('a connection link this tab did not start cannot replace a pilot’s valid session',()=>{
- globalThis.sessionStorage=storage();
- try{
-  const c=client();auth(c);
-  const link=token=>`#backend_session=${token.repeat(43)}&pilot=${id}&expires=${Date.now()+3600000}`;
-  assert.throws(()=>c.acceptRedirect(link('z')),/already connected/);assert.equal(c.sessions.get(id).token,'a'.repeat(43));
-  assert.equal(c.connect(id),`https://api.example/auth/start?pilot=${id}`,'Reconnect marks this tab as expecting the redirect');
-  assert.equal(new BackendClient('https://api.example',c.storage).acceptRedirect(link('z')),true,'the redirect lands on a fresh page load');
-  const after=new BackendClient('https://api.example',c.storage);assert.equal(after.sessions.get(id).token,'z'.repeat(43));
-  assert.throws(()=>after.acceptRedirect(link('y')),/already connected/,'the mark is used once');
- }finally{delete globalThis.sessionStorage;}
+const link=(token,pilot=id)=>`#backend_session=${token.repeat(43)}&pilot=${pilot}&expires=${Date.now()+3600000}`;
+const tick=()=>new Promise(r=>setTimeout(r));
+test('a connection link this browser did not start cannot replace a pilot’s valid session',()=>{
+ const c=client();auth(c);
+ assert.throws(()=>c.acceptRedirect(link('z')),/already connected/);assert.equal(c.sessions.get(id).token,'a'.repeat(43));
+ c.connect(2124815118);assert.throws(()=>c.acceptRedirect(link('z')),/already connected/,'a mark for the other pilot does not count');
+ c.storage.setItem(`${c.connectKey}:${id}`,JSON.stringify({at:Date.now()-31*60000}));
+ assert.throws(()=>c.acceptRedirect(link('z')),/already connected/,'a mark older than 30 minutes does not count');
+ c.storage.setItem(`${c.connectKey}:${id}`,'{broken');assert.throws(()=>c.acceptRedirect(link('z')),/already connected/);
+ assert.equal(c.sessions.get(id).token,'a'.repeat(43));
+});
+test('Reconnect in one tab is accepted when EVE returns in another tab of the browser, once',()=>{
+ const s=storage(),first=new BackendClient('https://api.example',s,async()=>Response.json({}));
+ first.acceptRedirect(link('a'));
+ assert.equal(first.connect(id),`https://api.example/auth/start?pilot=${id}`,'Reconnect leaves a mark for this pilot');
+ // The login comes back in a new tab: it shares localStorage with the first tab but not sessionStorage.
+ const other=new BackendClient('https://api.example',s,async()=>Response.json({}));
+ assert.equal(other.acceptRedirect(link('z')),true);assert.equal(new BackendClient('https://api.example',s).sessions.get(id).token,'z'.repeat(43));
+ assert.equal(s.getItem(`${first.connectKey}:${id}`),null,'the mark is used up');
+ assert.throws(()=>new BackendClient('https://api.example',s).acceptRedirect(link('y')),/already connected/,'so a second link is refused');
+});
+test('unfinished logins’ marks are cleared once they expire',()=>{
+ const s=storage(),key=`eve-backend-connect:https://api.example:${id}`;
+ s.setItem(key,JSON.stringify({at:Date.now()-31*60000}));new BackendClient('https://api.example',s);assert.equal(s.getItem(key),null);
+ s.setItem(key,JSON.stringify({at:Date.now()}));new BackendClient('https://api.example',s);assert.notEqual(s.getItem(key),null,'a live mark stays');
+});
+test('a reconnect ends the session it replaced at the Worker, and only that one',async()=>{
+ const calls=[],fetchImpl=async(url,options)=>{calls.push({url,auth:options.headers.Authorization,method:options.method});return Response.json({revoked:true});};
+ const c=new BackendClient('https://api.example',storage(),fetchImpl);
+ c.acceptRedirect(link('a'));await tick();assert.deepEqual(calls,[],'a first connection has nothing to end');
+ c.connect(id);c.acceptRedirect(link('z'));await tick();
+ assert.deepEqual(calls,[{url:'https://api.example/api/session/revoke',auth:`Bearer ${'a'.repeat(43)}`,method:'POST'}]);
+ c.connect(id);c.acceptRedirect(link('z'));await tick();assert.equal(calls.length,1,'the same token coming back is not ended');
+ const down=new BackendClient('https://api.example',storage(),async()=>{throw new TypeError('offline');});
+ down.acceptRedirect(link('a'));down.connect(id);assert.equal(down.acceptRedirect(link('b')),true,'an unreachable Worker does not block the reconnect');
+ assert.equal(await down.revoke('a'.repeat(43)),false);
 });
 test('a tab opened before the other pilot connected does not erase that pilot when it saves',async()=>{
  const s=storage(),other=2124815118,later=Date.now()+30*86400000;
