@@ -1,5 +1,6 @@
 // Navigate → Star map: region maps, 3D views and a List view with live overlays, jump range, layers (routes, pins,
 // trails, rings), the system panel (a bottom sheet on phones), keyboard moves and an address that names the view.
+import {OVERLAYS} from './starmap-markup.js';
 import {secColor, secBand, ownerColor, inRange, JUMP_SHIPS, strengths, lightYears} from '../../map.js';
 import {secLight, regionSvg, StarMap} from '../../mapview.js';
 import {secShown} from '../../route.js';
@@ -15,53 +16,7 @@ import {attach, zoomBox, panBox, fitBox, svgScale, toMap} from '../gestures.js';
 import {parseMapHash, serializeMapHash, loadPrefs, savePrefs, removeLayer, neighbourByAngle, lod, sortRows, DEFAULTS} from '../mapstate.js';
 import {hashQueries, currentView} from '../shell.js';
 
-// Overlays: label, halo colour (sovereignty is coloured per owner), and which live feed it needs.
-const OVERLAYS = {
-  security:{label:'Security'},
-  danger:{label:'Danger to haulers', color:'#FF4D4D', feed:'risk'},
-  shipKills:{label:'Ship kills (last hour)', color:'#FF7E70', feed:'kills'},
-  podKills:{label:'Pod kills (last hour)', color:'#FFA26B', feed:'kills'},
-  npcKills:{label:'NPC kills (last hour)', color:'#F4C55A', feed:'kills'},
-  jumps:{label:'Jumps (last hour)', color:'#5CD3DE', feed:'jumps'},
-  kills24:{label:'Ship kills (~24 h)', color:'#FF5C8A', feed:'risk'},
-  kills7:{label:'Ship kills (~7 days)', color:'#E0457B', feed:'risk'},
-  jumps24:{label:'Jumps (~24 h)', color:'#3FB8C9', feed:'traffic'},
-  sov:{label:'Sovereignty', color:'#C3B9FF', feed:'sov'},
-  fw:{label:'Faction warfare', color:'#B8E05A', feed:'fw'},
-  incursion:{label:'Incursions', color:'#FF4FD8', feed:'incursions'},
-  industry:{label:'Manufacturing index', color:'#8FB2FF', feed:'industry'},
-  belts:{label:'Asteroid belts', color:'#E8956A'},
-  stations:{label:'NPC stations', color:'#62D99B'}
-};
 const FEED_NAMES = {kills:'Kills feed', jumps:'Jumps feed', sov:'Sovereignty feed', fw:'Faction warfare feed', incursions:'Incursions feed', risk:'Kill history', traffic:'Traffic history', industry:'Industry indices'};
-const VIEW_OPTIONS = [['region', 'Region map'], ['region3d', 'Region in 3D'], ['universe', 'New Eden in 3D'], ['list', 'List']];
-const JUMP_OPTIONS = [['', 'Off'], ...Object.entries({blops:'Black Ops · 8 ly', jf:'Jump freighter · 10 ly', capital:'Carrier, Dread, FAX · 7 ly', super:'Super, Titan · 6 ly'})];
-const options = list => list.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-const icon = n => `<svg class="ico" aria-hidden="true"><use href="#i-${n}"/></svg>`;
-
-export const markup = `<div id="map-controls-home" class="map-controls-home"><div id="map-controls" class="map-toolbar">
-   <nav id="map-crumbs" class="map-crumbs" aria-label="Map location"></nav>
-   <div class="map-selects">
-    <label>Region<select id="map-region"></select></label>
-    <label>View<select id="map-view">${options(VIEW_OPTIONS)}</select></label>
-    <label>Overlay<select id="map-overlay">${options(Object.entries(OVERLAYS).map(([k, v]) => [k, v.label]))}</select></label>
-    <label>Jump range<select id="map-jump">${options(JUMP_OPTIONS)}</select></label>
-   </div>
-  </div></div>
- <p id="map-status" class="hint map-status" role="status">Loading the map…</p>
- <div class="map-layout">
-  <div id="map-stage" class="map-stage">
-   <form id="map-find" class="map-find" role="search"><label><span class="sr-only">Find system</span><input id="map-search" list="systems" data-filter placeholder="Find a system" autocomplete="off" enterkeyhint="go"></label><button class="secondary small" aria-label="Go to system">Go</button></form>
-   <button type="button" id="map-layers-open" class="secondary map-layers-btn" aria-haspopup="dialog">${icon('navigate')}Layers</button>
-   <div id="map-route" class="map-route" hidden></div>
-   <div id="map-canvas-wrap" class="map-canvas-wrap"></div>
-   <div class="map-zoom" role="group" aria-label="Zoom"><button type="button" class="secondary" data-zoom="0.75" aria-label="Zoom in">+</button><button type="button" class="secondary" data-zoom="1.33" aria-label="Zoom out">−</button><button type="button" class="secondary" data-zoom="0" aria-label="Fit the whole region">Fit</button><button type="button" class="secondary" data-locate aria-label="Show my location">◎</button></div>
-   <div id="map-tip" class="map-tip" role="tooltip" hidden></div>
-   <div id="map-legend" class="map-legend"></div>
-  </div>
-  <aside id="map-panel" class="map-panel" aria-label="System details" data-snap="peek"><button type="button" class="sheet-handle" id="map-sheet-handle" aria-label="Expand the details sheet" aria-expanded="false"></button><div id="map-panel-body" class="map-panel-body"></div></aside>
- </div>`;
-
 const M = S.map;
 const EMPTY = {kills:{}, jumps:{}, sov:{}, fw:{}, incursions:new Map(), failed:[]};
 const live = () => mapLiveData() || EMPTY;
@@ -116,21 +71,51 @@ function wantCamps(region) {
   regionKills(region).then(() => { if (M.overlay === 'danger' && currentView() === 'map') paint(); }, () => {});
 }
 const passing = (meta, id) => meta.activity?.[id]?.[2] ?? (meta.traffic?.s?.[id] || 0) / 24;
+// An overlay's value per system, rebuilt only when what it reads changes (live feeds, market snapshot, cost indices, the
+// gate camps in view), not on every paint: that was a pass over all 5,400 systems each time a system was selected.
+let valuesMemo = null;
+const tags = new WeakMap();
+let tagged = 0;
+const tag = o => { if (!tags.has(o)) tags.set(o, ++tagged); return tags.get(o); };
 function overlayValues(g, overlay) {
-  const L = live(), meta = S.marketData?.meta?.data || {}, out = {};
-  if (overlay === 'danger') {
-    const history = meta.risk?.s || {}, camp = liveCamps(Object.keys(g.regions).map(Number));
+  const L = live(), meta = S.marketData?.meta?.data || {};
+  const camp = overlay === 'danger' ? liveCamps(Object.keys(g.regions).map(Number)) : null;
+  const key = [tag(g), overlay, tag(L), tag(S.marketData || EMPTY), tag(S.costIndices || EMPTY), camp ? [...camps.values()].map(c => tag(c.kills)).join() : ''].join('|');
+  if (valuesMemo?.key === key) return valuesMemo.values;
+  const out = {};
+  if (camp) {
+    const history = meta.risk?.s || {};
     for (const sys of g.systems.values()) out[sys.id] = systemRisk(sys, {history, traffic:{[sys.id]:passing(meta, sys.id)}, live:camp, ...DANGER}).p;
-    return out;
+  } else {
+    const get = {
+      shipKills:id => L.kills[id]?.ship_kills, podKills:id => L.kills[id]?.pod_kills, npcKills:id => L.kills[id]?.npc_kills, jumps:id => L.jumps[id],
+      kills24:id => meta.risk?.s?.[id]?.[0], kills7:id => meta.risk?.s?.[id]?.[1], jumps24:id => meta.traffic?.s?.[id], belts:(id, sys) => sys.belts,
+      sov:id => L.sov[id] ? 1 : 0, fw:id => L.fw[id] ? (L.fw[id].contested === 'uncontested' ? 0.3 : 0.6 + 0.4 * (L.fw[id].victory_points / (L.fw[id].victory_points_threshold || 1))) : 0,
+      incursion:id => L.incursions.has(id) ? 1 : 0, industry:id => S.costIndices?.get(id)?.manufacturing, stations:() => 0
+    }[overlay] || (() => undefined);
+    for (const sys of g.systems.values()) out[sys.id] = get(sys.id, sys);
+    if (overlay === 'stations') for (const st of g.stations.values()) out[st.system] = (out[st.system] || 0) + 1;
   }
-  for (const sys of g.systems.values()) {
-    const id = sys.id, k = L.kills[id];
-    out[id] = {shipKills:k?.ship_kills, podKills:k?.pod_kills, npcKills:k?.npc_kills, jumps:L.jumps[id], kills24:meta.risk?.s?.[id]?.[0], kills7:meta.risk?.s?.[id]?.[1], jumps24:meta.traffic?.s?.[id], belts:sys.belts,
-      sov:L.sov[id] ? 1 : 0, fw:L.fw[id] ? (L.fw[id].contested === 'uncontested' ? 0.3 : 0.6 + 0.4 * (L.fw[id].victory_points / (L.fw[id].victory_points_threshold || 1))) : 0,
-      incursion:L.incursions.has(id) ? 1 : 0, industry:S.costIndices?.get(id)?.manufacturing, stations:0}[overlay];
-  }
-  if (overlay === 'stations') for (const st of g.stations.values()) out[st.system] = (out[st.system] || 0) + 1;
+  valuesMemo = {key, values:out};
   return out;
+}
+// Systems grouped by region, and each system's stations, worked out once per graph.
+const grouped = new WeakMap();
+function groups(g) {
+  if (!grouped.has(g)) {
+    const regions = new Map(), stations = new Map();
+    for (const s of g.systems.values()) { if (!regions.has(s.region)) regions.set(s.region, []); regions.get(s.region).push(s); }
+    for (const st of g.stations.values()) { if (!stations.has(st.system)) stations.set(st.system, []); stations.get(st.system).push(st); }
+    grouped.set(g, {regions, stations, ids:new Map(), all:[...g.systems.keys()]});
+  }
+  return grouped.get(g);
+}
+const regionSystems = (g, region) => groups(g).regions.get(region) || [];
+function scopeIds(g) {
+  const gr = groups(g);
+  if (M.view === 'universe') return gr.all;
+  if (!gr.ids.has(M.region)) gr.ids.set(M.region, regionSystems(g, M.region).map(s => s.id));
+  return gr.ids.get(M.region);
 }
 const pct = p => `${p < 0.001 ? '<0.1' : (p * 100).toFixed(p < 0.1 ? 1 : 0)}%`;
 function valueText(overlay, id, v) {
@@ -160,11 +145,15 @@ function feedDown(overlay) {
 }
 
 // ── One frame of map state: everything a draw needs, computed once. ──
+// The halo strengths are cached too: the same values over the same scope give the same function.
+let strengthMemo = null;
 function frameOf(g) {
-  const overlay = M.overlay, values = overlayValues(g, overlay);
-  const scope = M.view === 'universe' ? [...g.systems.keys()] : [...g.systems.values()].filter(s => s.region === M.region).map(s => s.id);
-  const scoped = Object.fromEntries(scope.map(id => [id, values[id]]));
-  const k = overlay === 'security' ? () => 0 : strengths(scoped);
+  const overlay = M.overlay, values = overlayValues(g, overlay), scope = scopeIds(g);
+  if (strengthMemo?.values !== values || strengthMemo.scope !== scope) {
+    const scoped = Object.fromEntries(scope.map(id => [id, values[id]]));
+    strengthMemo = {values, scope, scoped, k:overlay === 'security' ? () => 0 : strengths(scoped)};
+  }
+  const {scoped, k} = strengthMemo;
   const range = M.jump && M.selected && g.systems.get(M.selected)?.pos ? inRange(g, M.selected, JUMP_SHIPS[M.jump].ly) : [];
   return {g, overlay, values, scope, scoped, k, range, rangeIds:new Set(range.map(r => r.system.id))};
 }
@@ -344,7 +333,7 @@ function draw3d(f, wrap) {
   }
   wrap.$frame = f;
   const universeView = M.view === 'universe';
-  const inRegion = [...g.systems.values()].filter(x => x.region === M.region);
+  const inRegion = regionSystems(g, M.region);
   const routeIds = M.layers.flatMap(l => l.ids);
   const focus = universeView ? null : new Set([...inRegion.map(x => x.id), ...routeIds, ...f.rangeIds]);
   const all = starMap.systemsRef?.length && starMap.graph === g ? starMap.systemsRef : [...g.systems.values()].filter(x => x.pos);
@@ -364,9 +353,8 @@ const COLUMNS = [['name', 'System'], ['sec', 'Security'], ['shipKills', 'Kills 1
 function drawList(f, wrap) {
   const {g} = f, L = live(), meta = S.marketData?.meta?.data || {};
   starMap?.destroy?.(); starMap = null; region?.detach(); region = null; delete wrap.dataset.framed;
-  const stations = new Map();
-  for (const st of g.stations.values()) stations.set(st.system, [...(stations.get(st.system) || []), st]);
-  const rows = [...g.systems.values()].filter(s => s.region === M.region).map(s => {
+  const stations = groups(g).stations;
+  const rows = regionSystems(g, M.region).map(s => {
     const st = stations.get(s.id) || [], fw = L.fw[s.id], inc = L.incursions.get(s.id);
     return {id:s.id, name:s.name, sec:s.sec, shipKills:L.kills[s.id]?.ship_kills ?? 0, kills24:meta.risk?.s?.[s.id]?.[0], kills7:meta.risk?.s?.[s.id]?.[1], jumps:L.jumps[s.id] ?? 0, belts:s.belts || 0, stations:st.length,
       services:SERVICES.filter(([bit]) => st.some(x => x.flags & bit)).map(([, l]) => l).join(', '), industry:S.costIndices?.get(s.id)?.manufacturing,
@@ -398,10 +386,11 @@ function layerBar() {
 }
 function panel(f) {
   const body = $('#map-panel-body');
-  body.innerHTML = M.selected ? systemPanel(M.selected) : `<h3>${esc(regionName(M.region))}</h3><p class="hint">Select a system for details.</p>`;
+  let html = M.selected ? systemPanel(M.selected) : `<h3>${esc(regionName(M.region))}</h3><p class="hint">Select a system for details.</p>`;
   const camp = f.overlay === 'danger' && M.selected && [...camps.values()].map(c => c.intel.get(M.selected)).find(Boolean);
-  if (camp?.kills) body.innerHTML += `<p class="alert ${camp.gateKills ? 'danger' : 'warn'}">${plural(camp.kills, 'kill')} here in the last hour${camp.gateKills ? `, ${camp.gateKills} on a gate` : ''}${camp.sb ? ' · smartbombs' : ''}${camp.dictor ? ' · interdictors' : ''}. A T1 industrial with 100M ISK: ${pct(f.values[M.selected])} chance of loss passing through.</p>`;
-  if (f.range.length) body.innerHTML += `<h4>In jump range (${f.range.length})</h4><ul class="plain">${f.range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
+  if (camp?.kills) html += `<p class="alert ${camp.gateKills ? 'danger' : 'warn'}">${plural(camp.kills, 'kill')} here in the last hour${camp.gateKills ? `, ${camp.gateKills} on a gate` : ''}${camp.sb ? ' · smartbombs' : ''}${camp.dictor ? ' · interdictors' : ''}. A T1 industrial with 100M ISK: ${pct(f.values[M.selected])} chance of loss passing through.</p>`;
+  if (f.range.length) html += `<h4>In jump range (${f.range.length})</h4><ul class="plain">${f.range.slice(0, 12).map(r => `<li><button type="button" class="link-btn" data-system="${r.system.id}">${secLight(r.system.sec)} ${esc(r.system.name)}</button><small>${r.ly.toFixed(2)} ly · ${esc(regionName(r.system.region))}</small></li>`).join('')}</ul>`;
+  body.innerHTML = html;
 }
 // Phone bottom sheet: peek (a strip of the panel), half or full; the handle drags or cycles.
 const SNAPS = ['peek', 'half', 'full'];
@@ -419,13 +408,19 @@ function sheetCover() {
   const s = $('#map-stage').getBoundingClientRect(), p = $('#map-panel').getBoundingClientRect();
   return Math.max(0, s.bottom - p.top);
 }
+// Where the stage starts (for the CSS height) and the tab bar's height. Reads layout once and writes only what changed, so
+// a paint doesn't dirty the style (and force layout again for the next read) when nothing moved.
 function measure() {
   const stage = $('#map-stage'), view = $('#map');
   if (!stage || view.hidden) return;
-  view.style.setProperty('--map-top', `${Math.round(stage.getBoundingClientRect().top + scrollY)}px`);
-  const bar = $('#tabbar');
-  if (phone() && bar?.offsetHeight) view.style.setProperty('--tabbar-h', `${bar.offsetHeight}px`);
+  const set = (name, value) => { if (view.style.getPropertyValue(name) !== value) view.style.setProperty(name, value); };
+  const top = `${Math.round(stage.getBoundingClientRect().top + scrollY)}px`, bar = $('#tabbar'), barHeight = phone() && bar?.offsetHeight;
+  set('--map-top', top);
+  if (barHeight) set('--tabbar-h', `${barHeight}px`);
 }
+// After a paint's DOM writes, measure once in the next frame instead of reading layout again straight away.
+let measuring = 0;
+const measureSoon = () => { if (!measuring) measuring = requestAnimationFrame(() => { measuring = 0; if (currentView() === 'map') measure(); }); };
 
 // ── Draw ──
 function paint() {
@@ -446,7 +441,7 @@ function paint() {
   else draw3d(f, wrap);
   panel(f);
   $('#map-status').textContent = statusText(g);
-  measure();
+  measureSoon();
 }
 export async function renderMap() {
   const my = ++gen, status = $('#map-status');

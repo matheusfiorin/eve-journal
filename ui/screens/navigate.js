@@ -9,32 +9,8 @@ import {regionKills, gateTargets} from '../killfeed.js';
 import {$, esc, format, plural, mapButton, routeAttrs, tabReady, skeleton, go} from '../shared.js';
 import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
 import {haulSaved, haulSave} from '../prefs.js';
-import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
+import {renderMap, wire as wireMap} from './starmap.js';
 export {renderMap};
-
-export const markup = {
-  map:mapMarkup,
-  hauling:`<form id="haul-form" class="card market-controls">
-  <div class="card-head"><div><h2>Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
-  <div id="haul-stops" class="stops"></div>
-  <div class="actions"><button type="button" id="haul-add" class="secondary small">+ Add stop</button></div>
-  <div class="row">
-   <label>Cargo value (ISK)<input id="haul-value" type="number" min="0" step="1000000" value="100000000"></label>
-   <label>Cargo volume (m³)<input id="haul-volume" type="number" min="0" step="100" value="5000"></label>
-   <label>Ship<select id="haul-hull"><option value="">Suggest from cargo</option><option value="br">Blockade runner</option><option value="t1">T1 industrial</option><option value="dst">Deep space transport</option><option value="freighter">Freighter</option></select></label>
-  </div>
-  <div class="row">
-   <label>Avoid systems<input id="haul-avoid" placeholder="Uedama, Sivala"></label>
-   <label>Stop order<select id="haul-end"><option value="fixed">Keep the last stop last</option><option value="free">Any order</option><option value="return">Return to start</option></select></label>
-  </div>
-  <div class="row">
-   <label class="check"><input id="haul-optimize" type="checkbox"> Find the best stop order</label>
-   <label class="check"><input id="haul-lowsec" type="checkbox"> Allow low-sec</label>
-   <button id="haul-plan">Plan route</button>
-  </div>
- </form>
- <div id="haul-content"></div>`
-};
 
 // ── Haul plan: risk-weighted routes through any number of stops, using live zKillboard kills along the way. ──
 // The plan is saved in ui/prefs.js; touched says a person changed the form since it was last filled from the saved plan.

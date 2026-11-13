@@ -31,6 +31,20 @@ test('Pages artifact includes every browser module and stylesheet and excludes j
   assert.ok(!copyLine.includes('*.json'),'only explicit public configuration is packaged');
   assert.ok(copyLine.includes('config.json'));
 });
+test('index.html preloads exactly the modules app.js imports statically, and Earn and Navigate stay lazy',async()=>{
+  const html=await read('index.html');
+  const preloaded=new Set([...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m=>m[1]));
+  const seen=new Set(),queue=['app.js'];
+  while(queue.length){
+    const path=queue.shift();if(seen.has(path))continue;seen.add(path);
+    for(const m of (await read(path)).matchAll(/^\s*(?:import|export)\b[^'"\n]*?\bfrom\s*['"](\.{1,2}\/[^'"]+)['"]|^\s*import\s*['"](\.{1,2}\/[^'"]+)['"]/gm))queue.push(posix.normalize(posix.join(posix.dirname(path),m[1]||m[2])));
+  }
+  seen.delete('app.js');
+  assert.deepEqual([...preloaded].sort(),[...seen].sort(),'modulepreload links match the static import graph of app.js');
+  for(const lazy of ['ui/screens/earn.js','ui/screens/navigate.js','ui/screens/starmap.js','mapview.js','ui/gestures.js','hauling.js'])assert.ok(!seen.has(lazy),`${lazy} is not part of the boot graph`);
+  assert.match(await read('app.js'),/import\('\.\/ui\/screens\/earn\.js'\)/);
+  assert.match(await read('app.js'),/import\('\.\/ui\/screens\/navigate\.js'\)/);
+});
 test('the web app manifest and its icons are linked and packaged',async()=>{
   const [workflow,html]=await Promise.all(['.github/workflows/pages.yml','index.html'].map(read));
   const copyLine=workflow.split('\n').find(l=>l.includes('cp index.html'));

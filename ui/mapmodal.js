@@ -1,7 +1,6 @@
 // The map modal (a route or one system in 3D), the system panel it shares with the Star map, live ESI overlays,
 // and the page-wide map hooks: [data-map-route], [data-system], [data-destination] and route hover previews.
-import {lightYears, secColor, frame} from '../map.js';
-import {secLight, routeSketch, StarMap} from '../mapview.js';
+import {lightYears, secColor, secLight, frame} from '../map.js';
 import {dotlanSystem} from '../route.js';
 import {S, reduced, mine} from './state.js';
 import {esi, name} from './esi.js';
@@ -11,7 +10,7 @@ import {mapGraph, route, regionName} from './routes.js';
 import {addLayer} from './mapstate.js';
 
 const SERVICES = [[1, 'Factory'], [2, 'Lab'], [4, 'Market'], [8, 'Refinery'], [16, 'Clone bay']];
-let liveData = null, modalMap = null;
+let liveData = null, modalMap = null, sketcher = null;
 export const mapLiveData = () => liveData;
 // Public ESI feeds for the overlays, cached for 10 minutes (1 minute when a feed failed, so it's retried soon).
 // A failed feed is listed in `failed` so the map can say so instead of showing an empty overlay.
@@ -52,7 +51,9 @@ export function systemPanel(id, {compact = false} = {}) {
 }
 // A route (3D view plus hop strip) or one system (panel plus its neighbourhood).
 export async function openMap({route:ids0 = [], system = null, label = ''} = {}) {
-  try { await loadMarket(); } catch { return; }
+  // The 3D drawing code (mapview.js) loads the first time a map opens, not with the page.
+  let StarMap;
+  try { [{StarMap}] = await Promise.all([import('../mapview.js'), loadMarket()]); } catch { return; }
   const g = mapGraph(), dialog = $('#map-modal');
   if (!g) return;
   mapLive().then(() => { if (dialog.open && system) $('#map-modal-body .sys-panel')?.replaceWith(Object.assign(document.createElement('div'), {innerHTML:systemPanel(system, {compact:true})}).firstElementChild); }).catch(() => {});
@@ -93,11 +94,13 @@ function routePop(target, event) {
   if (!target || !g) { pop.hidden = true; return; }
   const ids = target.dataset.route.split(',').map(Number).filter(id => g.systems.has(id));
   if (ids.length < 2) { pop.hidden = true; return; }
-  const key = `${target.dataset.route}|${target.dataset.label}`;
+  // The sketch comes from mapview.js, fetched on the first hover; until it arrives the preview has no picture.
+  if (!sketcher) import('../mapview.js').then(m => { sketcher = m.routeSketch; }, () => {});
+  const key = `${target.dataset.route}|${target.dataset.label}|${sketcher ? 1 : 0}`;
   if (pop.dataset.key !== key) {
     pop.dataset.key = key;
     const low = ids.filter(id => g.systems.get(id).sec < 0.45).length;
-    pop.innerHTML = `<b>${esc(target.dataset.label || 'Route')}</b><small>${ids.length - 1} jumps${low ? ` · <span class="neg">${low} outside high-sec</span>` : ''}</small>${routeSketch(g, ids)}<small class="hint">Press 3D view for the full map</small>`;
+    pop.innerHTML = `<b>${esc(target.dataset.label || 'Route')}</b><small>${ids.length - 1} jumps${low ? ` · <span class="neg">${low} outside high-sec</span>` : ''}</small>${sketcher?.(g, ids) || ''}<small class="hint">Press 3D view for the full map</small>`;
   }
   pop.hidden = false;
   const x = Math.min(event.clientX + 16, innerWidth - 270), y = event.clientY + 16 + 200 > innerHeight ? event.clientY - 210 : event.clientY + 16;

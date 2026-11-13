@@ -21,6 +21,41 @@
 <link rel="stylesheet" href="styles/jobs.css">
 <link rel="stylesheet" href="styles/navigate.css">
 <link rel="stylesheet" href="styles/ledger.css">
+<!-- The modules app.js loads at boot, fetched in parallel instead of one import level at a time. Earn and Navigate load later. -->
+<link rel="modulepreload" href="backend.js">
+<link rel="modulepreload" href="storage.js">
+<link rel="modulepreload" href="ui/state.js">
+<link rel="modulepreload" href="ui/esi.js">
+<link rel="modulepreload" href="ui/shared.js">
+<link rel="modulepreload" href="ui/pilots.js">
+<link rel="modulepreload" href="ui/routes.js">
+<link rel="modulepreload" href="ui/mapmodal.js">
+<link rel="modulepreload" href="ui/hero.js">
+<link rel="modulepreload" href="ui/installhint.js">
+<link rel="modulepreload" href="ui/shell.js">
+<link rel="modulepreload" href="ui/journalsync.js">
+<link rel="modulepreload" href="ui/screens/bridge.js">
+<link rel="modulepreload" href="ui/screens/wing.js">
+<link rel="modulepreload" href="ui/screens/pilot.js">
+<link rel="modulepreload" href="ui/screens/earn-markup.js">
+<link rel="modulepreload" href="ui/screens/jobs.js">
+<link rel="modulepreload" href="ui/screens/starmap-markup.js">
+<link rel="modulepreload" href="ui/screens/navigate-markup.js">
+<link rel="modulepreload" href="ui/screens/ledger.js">
+<link rel="modulepreload" href="ui/screens/logbook.js">
+<link rel="modulepreload" href="model.js">
+<link rel="modulepreload" href="ui/marketdata.js">
+<link rel="modulepreload" href="route.js">
+<link rel="modulepreload" href="map.js">
+<link rel="modulepreload" href="ui/mapstate.js">
+<link rel="modulepreload" href="ui/syncplan.js">
+<link rel="modulepreload" href="ui/prefs.js">
+<link rel="modulepreload" href="market.js">
+<link rel="modulepreload" href="industry.js">
+<link rel="modulepreload" href="mining.js">
+<link rel="modulepreload" href="exploration.js">
+<link rel="modulepreload" href="capabilities.js">
+<link rel="modulepreload" href="jobs.js">
 </head>
 <body class="shell">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">

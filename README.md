@@ -71,7 +71,7 @@ npm start             # http://localhost:8000/
 
 Pushing to `main` runs the tests, deploys the Worker and Pages, then runs live smoke tests.
 
-The page is static ES modules with no build step. `app.js` boots the app and routes between views; `ui/` holds the shell and shared helpers, and each destination owns `ui/screens/<name>.js` (its markup, renderers and listeners) and `styles/<name>.css`. Design tokens live in `styles/tokens.css`. The pure planning modules (`model.js`, `market.js`, `industry.js`, `route.js`, …) stay at the root with their unit tests.
+The page is static ES modules with no build step. `app.js` boots the app and routes between views; `ui/` holds the shell and shared helpers, and each destination owns `ui/screens/<name>.js` (its markup, renderers and listeners) and `styles/<name>.css`. Design tokens live in `styles/tokens.css`. The pure planning modules (`model.js`, `market.js`, `industry.js`, `route.js`, …) stay at the root with their unit tests. Earn and Navigate (the planners, the Star map and its 3D drawing) load on the first visit to one of their views or when the page is idle; their markup is split into `ui/screens/*-markup.js` so the page can build every screen at boot, and `index.html` preloads the boot graph (`tests/package.test.js` keeps the two in step). The Haul plan's route searches run in a module Worker (`ui/haulworker.js`, driven by `ui/haulplan.js`) and fall back to the page if a Worker can't start. `tests/planners.test.js` checks the optimised planners against reference versions and carries time budgets on a 5,400-system payload.
 
 ## Staying signed in and keeping your data
 

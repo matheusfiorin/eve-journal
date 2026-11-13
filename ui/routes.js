@@ -28,9 +28,31 @@ export function autopilotButton(ids, out, short = '') {
   const pilot = mine(), can = pilot?.id && S.backend?.has(pilot.id), full = can ? `Send to ${esc(pilot.name)}’s autopilot` : '';
   return `${can && ids.length ? `<button type="button" data-waypoints="${ids.join(',')}" data-out="${out}"${short ? ` aria-label="${full}" title="${full}"` : ''}>${short ? esc(short) : full}</button>` : ''}<span id="${out}" class="hint" role="status"></span>`;
 }
+// System-name suggestions for the inputs that use <datalist id="systems">: the first 50 matches for what is typed, filled
+// on input. (All ~5,400 names as <option>s were two thirds of the page's elements.)
+const SUGGESTIONS = 50;
+let names = null, wired = false;
+function suggest(text) {
+  const q = text.trim().toLowerCase(), found = [];
+  if (names && q) {
+    const inside = [];
+    for (const n of names) {
+      const i = n.lower.indexOf(q);
+      if (i === 0) { found.push(n.name); if (found.length === SUGGESTIONS) break; } else if (i > 0 && inside.length < SUGGESTIONS) inside.push(n.name);
+    }
+    found.push(...inside.slice(0, SUGGESTIONS - found.length));
+  }
+  $('#systems').replaceChildren(...found.map(value => Object.assign(document.createElement('option'), {value})));
+}
 export function fillSystemList(g) {
-  const list = $('#systems');
-  if (!list.options.length) list.innerHTML = [...g.systems.values()].map(s => `<option value="${esc(s.name)}">`).join('');
+  if (names?.g !== g) {
+    names = [...g.systems.values()].map(s => ({name:s.name, lower:s.name.toLowerCase()})).sort((a, b) => a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : 0);
+    names.g = g;
+  }
+  if (!wired) {
+    wired = true;
+    for (const type of ['input', 'focusin']) document.addEventListener(type, event => { if (event.target.matches?.('input[list="systems"]')) suggest(event.target.value); });
+  }
 }
 export const hop = s => `<li class="sec-${secClass(s.sec)}" data-system="${s.id}" style="--c:${secColor(s.sec)}" title="${esc(s.name)} · security ${secShown(s.sec).toFixed(1)}"><span>${secShown(s.sec).toFixed(1)}</span>${esc(s.name)}</li>`;
 export function legHtml(title, place, r, extra = '') {
