@@ -23,7 +23,7 @@ Seven destinations sit in the left rail (a bottom bar on phones): **Bridge**, **
 - **Pilot → Skills** — the full skill sheet grouped by skill group, with levels, SP per skill and group, and search.
 - **Ledger** — balance, the latest 50 journal entries and market transactions, and current industry jobs.
 - **Pilot → Clones** — attributes and remaps, active implants, home station, jump clones and the next clone jump time.
-- **Wing → Goals** and **Logbook** — shared goals and a journal stored only in this browser, with export, import and draft recovery. A goal can carry an ISK target, the result so far (shown as progress, with “target reached”), a checklist of steps you tick off on the goal, and notes.
+- **Wing → Goals** and **Logbook** — shared goals and a journal kept in this browser, with optional sync through the wing backend (turn it on per browser in the Logbook's Backup card), export, import and draft recovery. A goal can carry an ISK target, the result so far (shown as progress, with “target reached”), a checklist of steps you tick off on the goal, and notes.
 
 Visitors without a session see public profiles plus each pilot's shared skill total and queue. Everything else needs that pilot's own session.
 
@@ -75,6 +75,8 @@ The page is static ES modules with no build step. `app.js` boots the app and rou
 
 ## Notes storage
 
-Goals and entries live in `localStorage` (`eve-flight-journal:v1`); the unsaved draft lives in `sessionStorage`. Unreadable saved data blocks writes and offers a raw recovery download. A change made in another tab blocks stale saves.
+Goals and entries live in `localStorage` (`eve-flight-journal:v1`); unsaved Logbook and goal drafts live in `sessionStorage`. Unreadable saved data blocks writes and offers a raw recovery download. A change made in another tab blocks stale saves. After the first save the app asks the browser to keep its site data, and the Backup card says when this browser last exported.
+
+Browsers can still clear site data (Safari does after 7 days without a visit), so the Backup card offers **Sync goals and entries with the wing backend**. With it on, the browser keeps working from its own copy and syncs on load, when the tab returns, every 5 minutes and shortly after each change (`ui/journalsync.js`, rules in `ui/syncplan.js`). Goals belong to the wing; an entry belongs to the pilot it's written for when that pilot is connected here, else to the pilot flying here, and only that pilot's sessions can read it. Records are encrypted in D1 and survive **Disconnect**. If a record was changed on two devices before they synced, the backend's version keeps its place and the other is kept as a “(conflict copy)”; a local edit beats a remote delete. Tabs with sync on adopt each other's saves instead of blocking.
 
 EVE Online and related imagery are property of CCP Games. This is an independent fan project, not affiliated with or endorsed by CCP Games.

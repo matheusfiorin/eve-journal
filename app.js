@@ -9,6 +9,7 @@ import * as routes from './ui/routes.js';
 import * as mapmodal from './ui/mapmodal.js';
 import * as hero from './ui/hero.js';
 import * as shell from './ui/shell.js';
+import * as journalsync from './ui/journalsync.js';
 import * as bridge from './ui/screens/bridge.js';
 import * as wing from './ui/screens/wing.js';
 import * as pilot from './ui/screens/pilot.js';
@@ -101,7 +102,7 @@ window.addEventListener('storage', event => {
   const before = JSON.stringify([...S.backend.sessions]);
   if (JSON.stringify([...S.backend.reload()]) === before) return;
   for (const p of S.pilots) if (p.id && p.private && !S.backend.has(p.id)) clearPrivate(p);
-  loadPilots(false, renderAll);
+  loadPilots(false, renderAll).then(() => journalsync.sync());
 });
 
 async function init() {
@@ -122,7 +123,7 @@ async function init() {
       if (S.backend.acceptRedirect(location.hash)) { history.replaceState(null, '', home); notice('Pilot connected. Training is shared and private data is now available.'); }
     } catch (error) { if (location.hash.includes('backend_session')) history.replaceState(null, '', home); notice(error.message); }
   }
-  for (const module of [routes, mapmodal, shell, ...SCREENS]) module.wire?.();
+  for (const module of [routes, mapmodal, shell, journalsync, ...SCREENS]) module.wire?.();
   hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); });
   // Populate selects before restoring an existing author in a draft.
   S.pilots = S.config.pilots.map(n => ({name:n})); pilotOptions(); logbook.resetEntry(true);
@@ -132,6 +133,6 @@ async function init() {
   selectTab(shell.resolve(location.hash.slice(1)) || 'bridge');
   logbook.restoreDraft();
   wing.restoreGoalDraft();
-  if (await loadPilots(false, renderAll)) await syncIfStale();
+  if (await loadPilots(false, renderAll)) { journalsync.sync(); await syncIfStale(); } else journalsync.render();
 }
 await init();

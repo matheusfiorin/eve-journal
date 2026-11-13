@@ -110,3 +110,30 @@ test('an unsaved goal survives a reload, and the Backup card says when the journ
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export backup'}).click();await download;
  await expect(page.locator('#backup-age')).toHaveText('Last exported today.');
 });
+test('with sync on, goals and entries written on one device appear on another, and a delete follows',async({browser})=>{
+ const journal={rows:new Map(),rev:0,posts:[]};
+ const laptop=await (await browser.newContext()).newPage(),phone=await (await browser.newContext()).newPage();
+ const a=await mockApp(laptop,{connected:'first',journal});await openApp(laptop);
+ await tab(laptop,'journal');await laptop.getByLabel('Sync goals and entries with the wing backend').check();
+ await expect(laptop.locator('#journal-sync-status')).toContainText('Synced');
+ await addEntry(laptop,{title:'Laptop entry',body:'SYNCED-NOTE-5521'});
+ await tab(laptop,'goals');await laptop.locator('#goal-form').getByLabel('Next milestone').fill('Fly a Heron');await laptop.locator('#goal-form').getByRole('button',{name:'Add goal'}).click();
+ await expect.poll(()=>journal.rows.size).toBe(2);
+ expect(journal.posts.every(p=>p.who===2124810474)).toBe(true);
+ // A second device: nothing stored locally, the same pilot connected, sync turned on.
+ await mockApp(phone,{connected:'first',journal});await openApp(phone);
+ await tab(phone,'journal');await expect(phone.locator('.entry')).toHaveCount(0);
+ await phone.getByLabel('Sync goals and entries with the wing backend').check();
+ await expect(phone.locator('#entries')).toContainText('Laptop entry');
+ await tab(phone,'goals');await expect(phone.locator('.goal')).toContainText('Fly a Heron');
+ // Deleting on the phone removes it on the laptop at its next sync.
+ phone.once('dialog',d=>d.accept());await phone.locator('.goal').getByRole('button',{name:/^Delete /}).click();
+ await expect.poll(()=>journal.rows.get(`goal:${[...journal.rows.values()].find(r=>r.kind==='goal').id}`).record).toBeNull();
+ await laptop.reload();await tab(laptop,'goals');await expect(laptop.locator('.goal')).toHaveCount(0);
+ await tab(laptop,'journal');await expect(laptop.locator('#entries')).toContainText('Laptop entry');
+ expect(a.errors).toEqual([]);
+});
+test('a pilot without sync keeps the old promise: nothing reaches the journal API',async({page})=>{
+ const {calls}=await mockApp(page,{connected:'first'});await openApp(page);await addEntry(page);await tab(page,'journal');
+ await expect(page.locator('#journal-sync-status')).toContainText('Off');expect(calls.some(c=>c.path==='/api/journal')).toBe(false);
+});

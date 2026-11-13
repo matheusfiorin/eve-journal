@@ -5,6 +5,7 @@ import {S, reduced, ordered, summary, assetCats} from '../state.js';
 import {name} from '../esi.js';
 import {$, esc, format, count, portrait, toast, persist, openDrawer, closeDrawer, go} from '../shared.js';
 import {crewInput} from './bridge.js';
+import {syncOn} from '../journalsync.js';
 
 export const markup = {
   strengths:`<h2 class="sr-only">Crew map</h2>
@@ -264,7 +265,7 @@ export function wire() {
     // Steps keep their ticks when the goal is edited and the line text is unchanged.
     const steps = fields.steps.split('\n').map(t => t.trim()).filter(Boolean).slice(0, 30).map(text => ({text:text.slice(0, 160), done:prior?.steps?.find(st => st.text === text.slice(0, 160))?.done || false}));
     const goal = {...fields, title:fields.title.trim(), notes:fields.notes.trim(), target:number(fields.target), result:number(fields.result), steps, id:editingGoal || crypto.randomUUID(), done:prior?.done || false};
-    if (persist({...S.data, goals:editingGoal ? S.data.goals.map(g => g.id === editingGoal ? goal : g) : [...S.data.goals, goal]})) { resetGoal(); toast('Goal saved in this browser.', 'ok'); }
+    if (persist({...S.data, goals:editingGoal ? S.data.goals.map(g => g.id === editingGoal ? goal : g) : [...S.data.goals, goal]})) { resetGoal(); toast(syncOn() ? 'Goal saved. It syncs to your wingmate.' : 'Goal saved in this browser.', 'ok'); }
   };
   $('#cancel-goal-edit').onclick = resetGoal;
   $('#goal-form').addEventListener('input', () => { clearTimeout(goalDraftTimer); goalDraftTimer = setTimeout(saveGoalDraft, 400); });
@@ -293,7 +294,7 @@ export function wire() {
       f.elements.target.value = g.target ?? ''; f.elements.result.value = g.result ?? ''; f.elements.steps.value = (g.steps || []).map(st => st.text).join('\n');
       saveGoalDraft(); $('#goal-submit').textContent = 'Save changes'; $('#cancel-goal-edit').hidden = false; f.scrollIntoView({behavior:reduced ? 'auto' : 'smooth'}); f.elements.title.focus();
     }
-    if (b?.dataset.deleteGoal && confirm('Delete this local goal?')) {
+    if (b?.dataset.deleteGoal && confirm(syncOn() ? 'Delete this goal for the whole wing?' : 'Delete this local goal?')) {
       if (persist({...S.data, goals:S.data.goals.filter(g => g.id !== b.dataset.deleteGoal)}) && editingGoal === b.dataset.deleteGoal) resetGoal();
     }
   });

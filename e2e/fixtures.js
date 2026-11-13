@@ -111,6 +111,21 @@ export async function mockApp(page,options={}) {
   if(path==='/api/wing'){if(state.expired)return json({error:'Backend session expired.'},401);return json({pilots:IDS.map(id=>wingRecord(id,state)).filter(r=>r.characterId===IDS[0]||!state.wingPrivate).map(r=>r.characterId===IDS[1]&&state.wingPrivate?{...r,sharing:false}:r)});}
   if(path==='/api/market')return state.noMarket?json({meta:null,regions:[]}):json(MARKET);
   if(path==='/api/waypoints'){state.waypoints=JSON.parse(req.postData()).systems;return json({waypoints:state.waypoints.length});}
+  if(path==='/api/journal'){
+   // A small stand-in for the Worker's journal: one rev counter, goals for the wing, entries for their pilot.
+   const j=state.journal||(state.journal={rows:new Map(),rev:0,posts:[]});
+   const who=IDS.find(id=>req.headers().authorization===`Bearer ${opaque.slice(0,42)}${IDS.indexOf(id)}`);
+   if(!who)return json({error:'Connect this pilot.'},401);
+   const out=r=>({kind:r.kind,id:r.id,rev:r.rev,record:r.record});
+   if(req.method()==='GET'){const since=Number(new URL(req.url()).searchParams.get('since'))||0;return json({rev:j.rev,more:false,records:[...j.rows.values()].filter(r=>r.rev>since&&(r.owner===0||r.owner===who)).sort((a,b)=>a.rev-b.rev).map(out)});}
+   const {changes}=JSON.parse(req.postData());j.posts.push({who,changes});const applied=[],conflicts=[],denied=[];
+   for(const c of changes){const k=`${c.kind}:${c.id}`,row=j.rows.get(k),owner=c.kind==='goal'?0:who;
+    if(row&&row.owner!==owner){denied.push({kind:c.kind,id:c.id});continue;}
+    if((row?.rev||0)!==c.base){conflicts.push(out(row));continue;}
+    if(!row&&c.record===null){applied.push({kind:c.kind,id:c.id,rev:0});continue;}
+    j.rows.set(k,{kind:c.kind,id:c.id,owner,record:c.record,rev:++j.rev});applied.push({kind:c.kind,id:c.id,rev:j.rev});}
+   return json({applied,conflicts,denied});
+  }
   if(path==='/auth/start')return route.fulfill({status:200,body:'EVE backend consent screen'});
   throw new Error(`Unexpected backend route ${path}`);
  });

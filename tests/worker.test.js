@@ -6,7 +6,7 @@ import {generateKeyPairSync,sign} from 'node:crypto';
 import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks} from '../worker/index.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474;
@@ -17,7 +17,7 @@ function token(character=id,scopes=REQUESTED_SCOPES){
 }
 function database(){
  const db=new DatabaseSync(':memory:');db.exec(sql);
- return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{const r=statement.run(...values);return {meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
+ return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{if(/\bRETURNING\b/i.test(sql)){const results=statement.all(...values);return {results,meta:{changes:results.length}};}const r=statement.run(...values);return {results:[],meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
 }
 function setup(options={}){
  const env={DB:database(),FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:'test-client',EVE_CLIENT_SECRET:'test-client-secret',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,4).toString('base64')};
@@ -234,4 +234,40 @@ test('disconnect waits for a running sync before revoking, so it revokes the lat
  assert.equal(res.status,200);assert.ok(Date.now()-started>=1000,'it waited for the lock');
  assert.deepEqual(await res.json(),{disconnected:true,revoked:true});
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);
+});
+const other=2124815118;
+async function wingApp(){
+ const options={};const app=setup(options);const a=(await connect(app)).bearer;
+ options.character=other;const b=(await connect(app,{character:other})).bearer;options.character=id;
+ const call=async(bearer,method,body,query='')=>{const res=await app.request(`/api/journal${query}`,{method,headers:{Authorization:`Bearer ${bearer}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:res.status,body:await res.json()};};
+ return {app,a,b,call};
+}
+const goal={id:'g1',title:'Fly a Heron',pilot:'Both pilots',done:false};
+const entry={id:'e1',title:'First trip',pilot:'Fiofka',date:'2026-11-01',body:'JOURNAL-SECRET-4411'};
+test('journal sync: goals reach both pilots, entries only their author, and nothing is stored in plain text',async()=>{
+ const {app,a,b,call}=await wingApp();
+ const put=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
+ assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.kind,x.rev]),[['goal',1],['entry',2]]);
+ const mine=await call(a,'GET',null,'?since=0');assert.deepEqual(mine.body.records.map(r=>r.id),['g1','e1']);assert.equal(mine.body.rev,2);assert.deepEqual(mine.body.records[1].record,entry);
+ const theirs=await call(b,'GET',null,'?since=0');assert.deepEqual(theirs.body.records.map(r=>r.id),['g1']);
+ assert.equal((await call(a,'GET',null,'?since=2')).body.records.length,0);
+ assert.doesNotMatch(JSON.stringify(app.env.DB.raw.prepare('SELECT data FROM journal').all()),/JOURNAL-SECRET|Heron/);
+ // The other pilot can neither read nor replace the entry.
+ const steal=await call(b,'POST',{changes:[{kind:'entry',id:'e1',base:2,record:{...entry,body:'mine now'}}]});
+ assert.deepEqual(steal.body.denied,[{kind:'entry',id:'e1'}]);assert.deepEqual(steal.body.conflicts,[]);
+ assert.equal((await app.request('/api/journal')).status,401);
+});
+test('journal sync: a stale base is a conflict that returns the stored copy; deletes leave a tombstone; disconnect keeps the journal',async()=>{
+ const {app,a,b,call}=await wingApp();
+ await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
+ const edit=await call(b,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,done:true}}]});assert.deepEqual(edit.body.applied,[{kind:'goal',id:'g1',rev:2}]);
+ const stale=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,title:'Fly a Buzzard'}}]});
+ assert.deepEqual(stale.body.applied,[]);assert.equal(stale.body.conflicts[0].rev,2);assert.equal(stale.body.conflicts[0].record.done,true);
+ const twice=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});assert.equal(twice.body.conflicts[0].rev,2,'creating an id that exists is a conflict too');
+ const gone=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:2,record:null}]});assert.deepEqual(gone.body.applied,[{kind:'goal',id:'g1',rev:3}]);
+ const seen=await call(b,'GET',null,'?since=2');assert.deepEqual(seen.body.records.map(r=>[r.id,r.record]),[['g1',null]]);
+ assert.equal((await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:{...goal,title:'x'.repeat(200)}}]})).status,400);
+ assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'other-id',base:0,record:entry}]})).status,400,'the record id must match');
+ await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${a}`}});
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM journal').get().n,1);
 });

@@ -1,4 +1,5 @@
 import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} from '../auth.js';
+import {validateBackup} from '../model.js';
 
 const EVE='https://login.eveonline.com';
 const ESI='https://esi.evetech.net/latest';
@@ -124,6 +125,63 @@ async function freshCredentials(row,env,fetchImpl,lockUntil){
   await save(credentials);
  }
  return credentials;
+}
+// Journal sync (migration 0004). The browser keeps the journal and sends what changed since the last rev it saw for
+// each record (base). A change applies only if the stored rev still equals base; otherwise the stored copy comes back
+// as a conflict and the browser keeps both. Records are validated like a backup file and encrypted at rest.
+export const JOURNAL_PAGE=500,JOURNAL_CHANGES=40;
+const NEXT_REV='(SELECT COALESCE(MAX(rev),0)+1 FROM journal)';
+function journalRecord(kind,record){
+ try{const data=validateBackup({version:1,goals:kind==='goal'?[record]:[],entries:kind==='entry'?[record]:[]});return (kind==='goal'?data.goals:data.entries)[0];}
+ catch(error){throw new ServiceError(`Invalid ${kind}: ${error.message}`);}
+}
+async function journalOut(row,env){
+ return {kind:row.kind,id:row.id,rev:row.rev,updatedAt:row.updated_at,record:row.data===null?null:await decrypt(row.data,env.TOKEN_ENCRYPTION_KEY)};
+}
+async function journal(request,url,env){
+ const s=await session(request,env),me=s.character_id;
+ if(request.method==='GET'){
+  const since=Math.max(0,Math.floor(Number(url.searchParams.get('since')))||0);
+  // Read the top rev first: a row written between the two queries is picked up next time instead of skipped.
+  const top=(await env.DB.prepare('SELECT COALESCE(MAX(rev),0) AS rev FROM journal').first()).rev;
+  const rows=(await env.DB.prepare('SELECT * FROM journal WHERE rev > ? AND rev <= ? AND owner IN (0, ?) ORDER BY rev LIMIT ?').bind(since,top,me,JOURNAL_PAGE+1).all()).results;
+  const more=rows.length>JOURNAL_PAGE;if(more)rows.length=JOURNAL_PAGE;
+  return response({rev:more?rows.at(-1).rev:Math.max(since,top),more,records:await Promise.all(rows.map(r=>journalOut(r,env)))});
+ }
+ if(request.method!=='POST')throw new ServiceError('Method not allowed.',405);
+ if(Number(request.headers.get('Content-Length'))>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
+ let body;try{body=await request.json();}catch{throw new ServiceError('Journal changes must be JSON.');}
+ const changes=body?.changes;
+ if(!Array.isArray(changes)||!changes.length||changes.length>JOURNAL_CHANGES)throw new ServiceError(`Send between 1 and ${JOURNAL_CHANGES} journal changes.`);
+ for(const c of changes){
+  if(!['goal','entry'].includes(c?.kind)||typeof c.id!=='string'||!c.id||c.id.length>100||!Number.isSafeInteger(c.base)||c.base<0)throw new ServiceError('Invalid journal change.');
+  if(c.record!==null){c.record=journalRecord(c.kind,c.record);if(c.record.id!==c.id)throw new ServiceError('Invalid journal change.');}
+ }
+ const key=c=>`${c.kind}:${c.id}`;
+ if(new Set(changes.map(key)).size!==changes.length)throw new ServiceError('Duplicate journal changes.');
+ const existing=new Map();
+ for(const kind of ['goal','entry']){
+  const ids=changes.filter(c=>c.kind===kind).map(c=>c.id);
+  if(ids.length)for(const row of (await env.DB.prepare(`SELECT * FROM journal WHERE kind = ? AND id IN (${ids.map(()=>'?').join(',')})`).bind(kind,...ids).all()).results)existing.set(key(row),row);
+ }
+ const applied=[],conflicts=[],denied=[],pending=[],now=Date.now();
+ for(const c of changes){
+  const row=existing.get(key(c)),owner=c.kind==='goal'?0:me;
+  // Another pilot's entry: never revealed or replaced.
+  if(row&&row.owner!==owner){denied.push({kind:c.kind,id:c.id});continue;}
+  if((row?.rev||0)!==c.base){conflicts.push(row);continue;}
+  if(!row&&c.record===null){applied.push({kind:c.kind,id:c.id,rev:0});continue;}
+  const data=c.record===null?null:await encrypt(c.record,env.TOKEN_ENCRYPTION_KEY);
+  pending.push([c,row?env.DB.prepare(`UPDATE journal SET data = ?, rev = ${NEXT_REV}, updated_at = ?, updated_by = ? WHERE kind = ? AND id = ? AND rev = ? RETURNING rev`).bind(data,now,me,c.kind,c.id,c.base)
+   :env.DB.prepare(`INSERT INTO journal (kind, id, owner, data, rev, updated_at, updated_by) VALUES (?, ?, ?, ?, ${NEXT_REV}, ?, ?) ON CONFLICT DO NOTHING RETURNING rev`).bind(c.kind,c.id,owner,data,now,me)]);
+ }
+ const results=pending.length?await env.DB.batch(pending.map(([,statement])=>statement)):[];
+ for(const [i,[c]] of pending.entries()){
+  const rev=results[i]?.results?.[0]?.rev;
+  if(rev)applied.push({kind:c.kind,id:c.id,rev});
+  else{const row=await env.DB.prepare('SELECT * FROM journal WHERE kind = ? AND id = ?').bind(c.kind,c.id).first();if(row&&row.owner===(c.kind==='goal'?0:me))conflicts.push(row);else denied.push({kind:c.kind,id:c.id});}
+ }
+ return response({applied,denied,conflicts:await Promise.all(conflicts.map(r=>journalOut(r,env)))});
 }
 // Replace the pilot's in-game autopilot route with these systems, in order.
 const MAX_WAYPOINTS=40; // shortcut: Cloudflare's free plan allows 50 subrequests per request
@@ -281,6 +339,7 @@ async function route(request,env,ctx,fetchImpl){
   let body;try{body=await request.json();}catch{throw new ServiceError('Waypoints must be JSON.');}
   return response(await setWaypoints(s.character_id,body?.systems,env,fetchImpl));
  }
+ if(url.pathname==='/api/journal')return journal(request,url,env);
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){
   if(url.pathname==='/api/session'&&request.method!=='GET')throw new ServiceError('Method not allowed.',405);
   if(url.pathname!=='/api/session'&&request.method!=='POST')throw new ServiceError('Method not allowed.',405);
@@ -328,7 +387,9 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
 // pilot whose sync keeps failing cannot starve the other.
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
- await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now())]);
+ await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now()),
+  // Tombstones only need to outlive the last sync of every device; half a year is plenty.
+  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ?').bind(Date.now()-180*86400000)]);
  const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
  if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
 }

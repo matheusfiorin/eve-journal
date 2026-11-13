@@ -3,6 +3,7 @@ import {validateBackup, mergeBackups, localDate, filterEntries} from '../../mode
 import {S, KEY, DRAFT} from '../state.js';
 import {$, esc, plural, notice, toast, persist, go, openDrawer, closeDrawer} from '../shared.js';
 import {readout} from './pilot.js';
+import {syncOn, synced} from '../journalsync.js';
 
 const CATEGORIES = '<option>Adventure</option><option>Milestone</option><option>Lesson learned</option><option>Fleet</option><option>Industry</option>';
 export const markup = {logbook:`<div class="toolbar" role="toolbar" aria-label="Logbook">
@@ -18,7 +19,10 @@ export const markup = {logbook:`<div class="toolbar" role="toolbar" aria-label="
    <form id="journal-form"><label>Entry title<input name="title" maxlength="160" required placeholder="Our first trip into low-sec"></label><label class="desk__body">Private notes<textarea name="body" required maxlength="20000" rows="9" placeholder="What happened? What did you learn?"></textarea></label><div class="desk__meta"><label>Pilot<select name="pilot" class="pilot-select"></select></label><label>Date<input name="date" type="date" required></label><label>Focus<select name="category">${CATEGORIES}</select></label></div><div class="actions"><button id="entry-submit">Save entry locally</button><button id="cancel-entry-edit" type="button" class="secondary" hidden>Cancel edit</button><button id="discard-draft" type="button" class="secondary">Discard draft</button></div></form>
   </section>
  </div>
- <section class="card backup" aria-labelledby="backup-title"><div class="panel__head"><div><h2 id="backup-title">Backup</h2><p class="panel__sub">Entries and shared goals live only in this browser. Export a backup to keep them safe or move them.</p></div></div>
+ <section class="card backup" aria-labelledby="backup-title"><div class="panel__head"><div><h2 id="backup-title">Backup</h2><p class="panel__sub">Entries and shared goals live in this browser. Turn on sync to keep them on the wing backend and open them on your other devices, or export a backup file.</p></div></div>
+  <label class="check sync-toggle"><input type="checkbox" id="journal-sync"> Sync goals and entries with the wing backend</label>
+  <p class="hint">Turn it on in each browser you use. Goals are shared with your wingmate; an entry is kept for the pilot it's written for (or the pilot flying here), and only that pilot's sessions can read it. Stored encrypted.</p>
+  <p id="journal-sync-status" class="hint" role="status"></p>
   <div class="backup__actions"><button id="export" class="secondary">Export backup</button><label class="import secondary-like">Restore or merge a backup<input id="import" type="file" accept="application/json,.json"></label><button id="recover" class="secondary" hidden>Download raw recovery file</button></div>
   <p id="backup-status" class="hint" role="status">Restore or merge a backup file.</p><p id="backup-age" class="hint"></p></section>`};
 
@@ -38,7 +42,7 @@ function renderEntries() {
   const entries = filterEntries(S.data.entries, {query:$('#journal-search').value, pilot:$('#journal-pilot').value, category:$('#journal-category').value});
   const all = S.data.entries, last = [...all].sort((a, b) => b.date.localeCompare(a.date))[0], month = localDate().slice(0, 7);
   $('#logbook-summary').innerHTML = readout([['Entries', `<span class="num">${all.length}</span>`], ['Last entry', last ? `<span class="num">${esc(last.date)}</span>` : '—'], ['This month', `<span class="num">${all.filter(e => e.date.startsWith(month)).length}</span>`]]);
-  $('#entry-count').textContent = entries.length === all.length ? `${plural(all.length, 'entry', 'entries')} · private to this browser` : `${entries.length} of ${plural(all.length, 'entry', 'entries')} match`;
+  $('#entry-count').textContent = entries.length === all.length ? `${plural(all.length, 'entry', 'entries')} · ${syncOn() ? 'private, synced' : 'private to this browser'}` : `${entries.length} of ${plural(all.length, 'entry', 'entries')} match`;
   $('#entries').innerHTML = entries.length ? `<ol class="entries">${entries.map((e, i) => `<li class="entry" data-row tabindex="${i ? -1 : 0}" style="--i:${i}" data-entry="${esc(e.id)}" data-pilot="${esc(String(e.pilot).toLowerCase())}">
       <time class="entry__date num" datetime="${esc(e.date)}">${esc(e.date)}</time>
       <div class="entry__main"><h3>${esc(e.title)}</h3><p class="entry__meta"><span class="who">${esc(e.pilot)}</span><span class="chip">${esc(e.category || 'Adventure')}</span></p><p class="entry__body">${esc(excerpt(e.body))}</p></div>
@@ -57,8 +61,8 @@ function exportedAt() { try { return Number(localStorage.getItem(EXPORTED)) || 0
 function renderBackupAge() {
   const records = S.data.goals.length + S.data.entries.length, at = exportedAt(), days = at ? Math.floor((Date.now() - at) / 86400000) : null;
   const kept = S.storageKept === false ? ' This browser has not agreed to keep its site data, so it may clear them when space runs low.' : '';
-  const stale = records && (days === null || days >= NUDGE_DAYS);
-  $('#backup-age').textContent = !records ? '' : days === null ? `Never exported from this browser. A new device, clearing site data, or Safari after a week without a visit loses everything here.${kept}`
+  const stale = records && !synced() && (days === null || days >= NUDGE_DAYS);
+  $('#backup-age').textContent = !records ? '' : synced() && days === null ? 'Kept on the wing backend by sync. Export a file too if you want an offline copy.' : days === null ? `Never exported from this browser. A new device, clearing site data, or Safari after a week without a visit loses everything here.${kept}`
     : `Last exported ${days ? plural(days, 'day', 'days') + ' ago' : 'today'}.${stale ? ' Export again to keep recent changes safe.' : ''}${kept}`;
   $('#backup-age').classList.toggle('error', Boolean(stale));
   if (stale && !nudged && !S.store.locked) { nudged = true; try { if (sessionStorage.getItem('eve.backup.nudged')) return; sessionStorage.setItem('eve.backup.nudged', '1'); } catch { /* Nudge this page. */ } toast(days === null ? 'Your goals and Logbook live only in this browser. Export a backup from the Logbook.' : `Your last journal backup is ${plural(days, 'day', 'days')} old. Export a new one from the Logbook.`, 'info', 8000); }
@@ -114,6 +118,7 @@ export function wire() {
   }
   document.getElementById('logbook').classList.add('vk');
   document.addEventListener('data-change', render);
+  document.addEventListener('journal-synced', renderBackupAge);
   // New entry (or n anywhere on the Logbook) puts the cursor in the writing desk.
   const compose = () => { const f = $('#journal-form'); f.scrollIntoView({block:'nearest'}); f.elements.title.focus(); };
   $('#new-entry').onclick = compose;
@@ -127,7 +132,7 @@ export function wire() {
     if (!fields.title.trim() || !fields.body.trim()) return;
     const entry = {...fields, title:fields.title.trim(), body:fields.body.trim(), id:editingEntry || crypto.randomUUID()};
     if (editingEntry && !S.data.entries.some(e => e.id === editingEntry)) { notice('This entry no longer exists. Cancel editing to save it as a new entry.'); return; }
-    if (persist({...S.data, entries:editingEntry ? S.data.entries.map(e => e.id === editingEntry ? entry : e) : [...S.data.entries, entry]})) { const edited = editingEntry; resetEntry(); toast(edited ? 'Entry updated. It stays private in this browser.' : 'Entry saved. It stays private in this browser.', 'ok'); }
+    if (persist({...S.data, entries:editingEntry ? S.data.entries.map(e => e.id === editingEntry ? entry : e) : [...S.data.entries, entry]})) { const edited = editingEntry; resetEntry(); toast(`${edited ? 'Entry updated' : 'Entry saved'}. ${syncOn() ? 'It syncs privately to your pilot.' : 'It stays private in this browser.'}`, 'ok'); }
   };
   $('#journal-form').addEventListener('input', () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); });
   $('#journal-form').addEventListener('change', saveDraft);
@@ -161,12 +166,15 @@ export function wire() {
       if (file.size > 5000000) throw new Error('Backup must be under 5 MB.');
       const incoming = validateBackup(JSON.parse(await file.text()));
       if (confirm(`Merge ${incoming.entries.length} entries and ${incoming.goals.length} goals? Matching IDs will be replaced.`)) {
-        if (persist(mergeBackups(S.data, incoming))) toast('Backup merged. These records stay private in this browser.', 'ok');
+        if (persist(mergeBackups(S.data, incoming))) toast(syncOn() ? 'Backup merged. The merged records sync next.' : 'Backup merged. These records stay private in this browser.', 'ok');
       }
     } catch (error) { notice(`Import failed: ${error.message}`); }
     finally { event.target.value = ''; }
   };
   window.addEventListener('storage', event => {
-    if (event.key === KEY || event.key === null) notice('Another tab changed this journal. Reload before saving. Your current draft is preserved in this tab.');
+    if (event.key !== KEY && event.key !== null) return;
+    // With sync on, tabs and devices change the journal all the time: adopt the saved copy (forms keep what's typed).
+    if (syncOn() && !S.store.locked) { try { S.data = S.store.load(); document.dispatchEvent(new Event('data-change')); return; } catch { /* Fall through to the warning. */ } }
+    notice('Another tab changed this journal. Reload before saving. Your current draft is preserved in this tab.');
   });
 }
