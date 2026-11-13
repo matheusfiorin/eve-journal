@@ -80,20 +80,34 @@ function weigher(g, ctx, {mode, lowsec, avoid, allow}) {
     return 1 + (Number.isFinite(scale) ? scale : 1e-6) * memo.get(id);
   };
 }
-// Visit order: the start stays first; the end is fixed, free, or a return to the start. Exact up to 8 stops, else nearest neighbour + 2-opt.
+// Visit order: the start stays first; the end is fixed, free, or a return to the start. Exact with up to EXACT_STOPS stops between
+// the ends (6! = 720 orders), else nearest neighbour + 2-opt: more stops than that froze the page for seconds.
+const EXACT_STOPS = 6;
 export function bestOrder(cost, {end = 'fixed'} = {}) {
   const n = cost.length;
   if (n <= 2) return [...Array(n).keys()];
   const last = end === 'fixed' ? n - 1 : null, middle = [...Array(n).keys()].slice(1).filter(i => i !== last);
   const total = order => { let t = 0; for (let i = 1; i < order.length; i++) t += cost[order[i - 1]][order[i]]; return t + (end === 'return' ? cost[order[order.length - 1]][0] : 0); };
   const wrap = mid => [0, ...mid, ...(last === null ? [] : [last])];
-  if (middle.length <= 8) {
+  if (middle.length <= EXACT_STOPS) {
+    // Depth-first over the orders in lexicographic order with one shared array; a branch already as dear as the best is dropped,
+    // so the first cheapest order wins exactly as when every order was priced.
     let best = null, bestCost = Infinity;
-    const permute = (rest, acc) => {
-      if (!rest.length) { const o = wrap(acc), c = total(o); if (c < bestCost) { bestCost = c; best = o; } return; }
-      for (let i = 0; i < rest.length; i++) permute([...rest.slice(0, i), ...rest.slice(i + 1)], [...acc, rest[i]]);
+    const used = new Array(middle.length).fill(false), acc = [0];
+    const walk = so_far => {
+      if (acc.length === middle.length + 1) {
+        const c = so_far + (last === null ? 0 : cost[acc[acc.length - 1]][last]) + (end === 'return' ? cost[last === null ? acc[acc.length - 1] : last][0] : 0);
+        if (c < bestCost) { bestCost = c; best = last === null ? [...acc] : [...acc, last]; }
+        return;
+      }
+      for (let i = 0; i < middle.length; i++) {
+        if (used[i]) continue;
+        const next = so_far + cost[acc[acc.length - 1]][middle[i]];
+        if (next >= bestCost) continue;
+        used[i] = true; acc.push(middle[i]); walk(next); acc.pop(); used[i] = false;
+      }
     };
-    permute(middle, []);
+    walk(0);
     return best;
   }
   const mid = [], left = new Set(middle);

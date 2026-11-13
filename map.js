@@ -19,6 +19,8 @@ export function readable(hex, bg = '#121C2E', min = 4.5) {
 // Security text colour: the in-game hue, lifted where it would be too dark to read (0.0–0.3 reds and purples).
 const SEC_TEXT = SEC.map(c => readable(c));
 export const secText = sec => SEC_TEXT[Math.max(0, Math.min(10, Math.round(secShown(sec) * 10)))];
+// A security light and its number, as HTML (the Star map, the system panel, route lists).
+export const secLight = sec => `<i class="light" style="--c:${secColor(sec)}" aria-hidden="true"></i><span class="sec-val" style="color:${secText(sec)}">${secShown(sec).toFixed(1)}</span>`;
 // The three bands pilots talk about, for the legend and screen-reader labels.
 export const secBand = sec => secShown(sec) >= 0.5 ? 'high-sec' : secShown(sec) > 0 ? 'low-sec' : 'null-sec';
 // A stable, distinct colour per sovereignty owner (alliance or faction id), spread around the hue wheel.

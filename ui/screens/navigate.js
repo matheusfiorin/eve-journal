@@ -1,11 +1,12 @@
 // Navigate: the Star map (ui/screens/starmap.js) and the risk-weighted Haul plan.
-import {HULLS, MODES, suggestHull, campIntel, plan} from '../../hauling.js';
+import {HULLS, MODES, suggestHull, campIntel} from '../../hauling.js';
+import {planAll, snapshotOf} from '../haulplan.js';
 import {secLight} from '../../mapview.js';
 import {secClass, dotlanRoute} from '../../route.js';
 import {S, mine} from '../state.js';
 import {name, resolveNames} from '../esi.js';
 import {regionKills, gateTargets} from '../killfeed.js';
-import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go} from '../shared.js';
+import {$, esc, format, plural, mapButton, routeAttrs, tabReady, skeleton, go} from '../shared.js';
 import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
 import {haulSaved, haulSave} from '../prefs.js';
 import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
@@ -66,11 +67,16 @@ export async function renderHauling() {
     status.textContent = unknown.length ? `Unknown system: ${unknown.join(', ')}` : 'Add at least two stops.';
     content.innerHTML = ''; return;
   }
-  const traffic = Object.fromEntries(Object.entries(meta.activity || {}).map(([id, a]) => [id, a[2]]));
+  const snapshot = snapshotOf(S.marketData), traffic = snapshot.traffic;
   const options = {lowsec:$('#haul-lowsec').checked, avoid, optimize:$('#haul-optimize').checked, end:$('#haul-end').value};
   let liveIntel = new Map(), liveNote = 'Loading live gate kills…';
-  const planAll = () => Object.fromEntries(Object.keys(MODES).map(mode => [mode, plan(g, stops, {history:meta.risk?.s || {}, traffic, live:liveIntel, value, hull, now:Date.now()}, {...options, mode})]));
-  haulPlans = planAll();
+  // The searches run in a Worker (ui/haulplan.js); the page stays usable while they do.
+  const planned = async () => planAll(g, snapshot, stops, {live:liveIntel, value, hull, now:Date.now()}, options);
+  status.textContent = 'Planning…'; content.setAttribute('aria-busy', 'true');
+  if (!content.children.length) content.innerHTML = skeleton('Planning the route…');
+  haulPlans = await planned();
+  if (stale()) return;
+  content.removeAttribute('aria-busy');
   const draw = () => {
     if (stale()) return;
     const plans = haulPlans, chosen = plans[haulMode];
@@ -119,7 +125,8 @@ export async function renderHauling() {
     liveNote = `Live: ${kills.filter(k => !k.zkb?.npc).length} kills in the last hour across ${plural(regions.length, 'region')} from zKillboard.`;
   } catch (error) { liveNote = `Live kills unavailable (${error.message}); using history only.`; }
   if (stale()) return;
-  haulPlans = planAll();
+  haulPlans = await planned();
+  if (stale()) return;
   draw();
 }
 

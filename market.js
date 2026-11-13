@@ -30,15 +30,23 @@ export function hauls(market, {salesTax, cargo, volumeOf, budget = Infinity, lim
   for (const [type, item] of market.items) {
     const m3 = volumeOf(type);
     if (!(m3 > 0)) continue;
-    let best = null;
-    for (const from of item.sells) for (const to of item.buys) {
-      if (from.loc === to.loc) continue;
-      const unit = to.price * (1 - salesTax) - from.price;
-      if (unit <= 0) continue;
-      const units = Math.min(from.volume, to.volume, Math.floor(cargo / m3), Math.floor(budget / from.price));
-      if (units < 1) continue;
-      const profit = unit * units;
-      if (!best || profit > best.profit) best = {type, from, to, unit, units, profit, invest:from.price * units, m3:units * m3};
+    let best = null, top = -Infinity;
+    for (const to of item.buys) top = Math.max(top, to.price);
+    const room = Math.floor(cargo / m3), topNet = top * (1 - salesTax);
+    for (const from of item.sells) {
+      // Prune: no buy order can beat the best price, and units can't pass what this sell, the hold and the wallet allow.
+      // Both bounds round the same way as the real numbers, so a pair that is skipped could never have won.
+      const cap = Math.min(from.volume, room, Math.floor(budget / from.price));
+      if (best && (topNet - from.price) * cap <= best.profit) continue;
+      for (const to of item.buys) {
+        if (from.loc === to.loc) continue;
+        const unit = to.price * (1 - salesTax) - from.price;
+        if (unit <= 0) continue;
+        const units = Math.min(cap, to.volume);
+        if (units < 1) continue;
+        const profit = unit * units;
+        if (!best || profit > best.profit) best = {type, from, to, unit, units, profit, invest:from.price * units, m3:units * m3};
+      }
     }
     if (best) out.push(best);
   }

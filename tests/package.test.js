@@ -24,7 +24,7 @@ test('Pages artifact includes every browser module and stylesheet and excludes j
     const path=queue.shift();if(seen.has(path))continue;seen.add(path);
     assert.ok(path.startsWith('ui/')||copyLine.includes(` ${path}`),`module omitted from Pages: ${path}`);
     const source=await read(path);
-    for(const m of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.{1,2}\/[^'"]+)['"]/g))queue.push(posix.normalize(posix.join(posix.dirname(path),m[1])));
+    for(const m of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*|\bnew URL\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g))queue.push(posix.normalize(posix.join(posix.dirname(path),m[1])));
   }
   for(const f of ['storage.js','backend.js','model.js','route.js'])assert.ok(seen.has(f),`the walk reaches ${f}`);
   for(const m of html.matchAll(/href="(styles\/[\w.-]+)"/g))await read(m[1]);
@@ -55,6 +55,7 @@ test('the Content-Security-Policy allows every host the app fetches and runs no 
   assert.ok(csp,'index.html declares a CSP');
   const directive=name=>csp.split(';').map(d=>d.trim().split(/\s+/)).find(([n])=>n===name)?.slice(1)||[];
   assert.deepEqual(directive('script-src'),["'self'"]);
+  assert.deepEqual(directive('worker-src'),[],"module Workers (the Haul planner) fall back to script-src 'self'");
   const hosts=new Set(sources.flatMap(s=>[...s.matchAll(/json\([`'](https:\/\/[^/`'$]+)/g)].map(m=>m[1])));
   assert.ok(hosts.size>=3,'found the fetched hosts');
   for(const host of hosts)assert.ok(directive('connect-src').includes(host),`connect-src misses ${host}`);

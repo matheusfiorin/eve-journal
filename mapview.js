@@ -5,7 +5,7 @@ import {escapeHTML as esc} from './model.js';
 import {attach} from './ui/gestures.js';
 import {routeInRegion} from './ui/mapstate.js';
 
-export const secLight = sec => `<i class="light" style="--c:${secColor(sec)}" aria-hidden="true"></i><span class="sec-val" style="color:${secText(sec)}">${secShown(sec).toFixed(1)}</span>`;
+export {secLight} from './map.js';
 
 const f1 = v => v.toFixed(1);
 const line = ([a, b], cls, style = '') => `<line class="${cls}" x1="${f1(a[0])}" y1="${f1(a[1])}" x2="${f1(b[0])}" y2="${f1(b[1])}"${style ? ` style="${style}"` : ''}/>`;
@@ -87,17 +87,27 @@ const coarse = () => typeof matchMedia === 'function' && matchMedia('(pointer: c
 
 // The 3D star map: drag (one finger) to orbit, wheel or pinch to zoom, two fingers to pan, tap to select,
 // arrow keys orbit, +/− zoom, Enter selects the system nearest the centre. It only draws while something changes:
-// the camera easing, auto-rotation (off with reduced motion), the route pulse, new data, a resize or the pointer.
+// the camera easing, a slow turn (one for ten seconds, then it stops; off with reduced motion), the route and selection
+// pulse (a few seconds after anything changes), new data, a resize or the pointer. A hidden tab doesn't draw at all.
+// Projections live in typed arrays that are reused every frame, and colours are worked out once per set().
+const SPIN_MS = 10000, PULSE_MS = 8000;
 export class StarMap {
   constructor(canvas, {onHover = () => {}, onSelect = () => {}, reduced = false} = {}) {
-    Object.assign(this, {canvas, onHover, onSelect, reduced, yaw:0.6, pitch:0.55, distance:300, target:{center:[0, 0, 0], distance:300}, center:[0, 0, 0], frames:0, idleUntil:0, pulse:0, last:0, layers:[], labels:[], widths:new Map()});
+    Object.assign(this, {canvas, onHover, onSelect, reduced, yaw:0.6, pitch:0.55, distance:300, target:{center:[0, 0, 0], distance:300}, center:[0, 0, 0], frames:0, idleUntil:0, pulse:0, last:0, layers:[], labels:[], widths:new Map(),
+      spinLeft:SPIN_MS, pulseUntil:0, systems:null, index:new Map(), pos3:new Float32Array(0), sx:new Float32Array(0), sy:new Float32Array(0), ss:new Float32Array(0), hits:new Int32Array(0), hitCount:0, edges:new Int32Array(0), groups:[]});
     this.ctx = canvas.getContext('2d');
     canvas.tabIndex = 0;
     canvas.setAttribute('role', 'img');
     // A fixed field of faint background stars, in screen fractions so it survives resizes.
     let seed = 7; const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     this.stars = Array.from({length:160}, () => [rand(), rand(), rand() * 0.5 + 0.1]);
-    const touch = () => { this.idleUntil = performance.now() + 4000; this.invalidate(); };
+    // After a touch the map stays still for 4 s; if its turn isn't used up it wakes then.
+    const touch = () => {
+      const now = performance.now();
+      this.idleUntil = now + 4000; this.pulseUntil = now + PULSE_MS;
+      clearTimeout(this.wake); if (this.spinLeft > 0) this.wake = setTimeout(() => this.invalidate(), 4050);
+      this.invalidate();
+    };
     this.detach = attach(canvas, {
       pan:(dx, dy, n) => {
         if (n === 1) { this.yaw += dx * 0.006; this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + dy * 0.006)); }
@@ -123,20 +133,36 @@ export class StarMap {
       e.preventDefault(); touch();
     });
     if (typeof ResizeObserver === 'function') { this.resize = new ResizeObserver(() => this.invalidate()); this.resize.observe(canvas); }
+    this.visible = () => { if (!document.hidden) this.invalidate(); };
+    document.addEventListener('visibilitychange', this.visible);
   }
   // systems: [{id, pos, sec, name}], color(id) → css colour, focus: Set of ids drawn bright (others dimmed),
   // layers: [{kind, ids, color, label}] (a plain `route` is drawn as one route layer), labels: [{text, pos}].
   set({g, systems, color, focus = null, route = [], layers = [], selected = null, labels = [], summary = ''}) {
     if (route.length) layers = [...layers, {kind:'route', ids:route, color:'#A99BFF', label:'Route'}];
     Object.assign(this, {g, systems, color, focus, layers, selected, labels});
+    const n = systems.length;
     if (this.graph !== g || this.systemsRef !== systems) {
       this.graph = g; this.systemsRef = systems;
-      const ids = new Set(systems.map(s => s.id));
-      this.edges = [];
-      for (const s of systems) for (const to of s.links) if (s.id < to && ids.has(to)) this.edges.push([s, g.systems.get(to)]);
+      this.index = new Map(systems.map((s, i) => [s.id, i]));
+      this.pos3 = new Float32Array(n * 3).fill(NaN);
+      systems.forEach((s, i) => { if (s.pos) this.pos3.set(s.pos, i * 3); });
+      this.sx = new Float32Array(n); this.sy = new Float32Array(n); this.ss = new Float32Array(n); this.hits = new Int32Array(n);
+      const edges = [];
+      for (let i = 0; i < n; i++) for (const to of systems[i].links) { const j = this.index.get(to); if (j !== undefined && systems[i].id < to) edges.push(i, j); }
+      this.edges = Int32Array.from(edges);
     }
+    // One colour lookup per system per set(), batched into one path per colour (bright and dimmed separately).
+    const batches = new Map();
+    for (let i = 0; i < n; i++) {
+      const dim = Boolean(focus && !focus.has(systems[i].id)), css = color(systems[i].id), key = `${dim ? 1 : 0}${css}`;
+      let b = batches.get(key); if (!b) batches.set(key, b = {dim, css, list:[]});
+      b.list.push(i);
+    }
+    this.groups = [...batches.values()].map(b => ({dim:b.dim, css:b.css, idx:Int32Array.from(b.list)}));
     this.layerSystems = layers.map(l => ({...l, systems:l.ids.map(id => g.systems.get(id)).filter(s => s?.pos)}));
     this.canvas.setAttribute('aria-label', summary || `3D star map of ${systems.length} systems${selected && g.systems.get(selected) ? `, ${g.systems.get(selected).name} selected` : ''}. Arrow keys turn, plus and minus zoom, Enter selects the system in the middle.`);
+    this.pulseUntil = performance.now() + PULSE_MS;
     this.invalidate();
   }
   fly(systems, {snap = false} = {}) {
@@ -153,28 +179,28 @@ export class StarMap {
     const move = [0, 1, 2].map(i => -dx * k * right[i] + dy * k * up[i]);
     this.target.center = this.target.center.map((v, i) => v + move[i]); this.center = this.center.map((v, i) => v + move[i]);
   }
-  pick(x, y) {
-    let best = null, bestD = coarse() ? 22 : 12;
-    for (const p of this.projected || []) { const d = Math.hypot(p.xy[0] - x, p.xy[1] - y); if (d < bestD) { bestD = d; best = p.system; } }
-    return best;
+  // The visible, bright system closest to a point (in the last drawn frame), within reach of a mouse or a finger.
+  closest(x, y, reach) {
+    let best = -1, bestD = reach;
+    for (let k = 0; k < this.hitCount; k++) { const i = this.hits[k], d = Math.hypot(this.sx[i] - x, this.sy[i] - y); if (d < bestD) { bestD = d; best = i; } }
+    return best < 0 ? null : this.systems[best];
   }
-  nearestCentre() {
-    const w = this.canvas.clientWidth / 2, h = this.canvas.clientHeight / 2;
-    let best = null, bestD = Infinity;
-    for (const p of this.projected || []) { const d = Math.hypot(p.xy[0] - w, p.xy[1] - h); if (d < bestD) { bestD = d; best = p.system; } }
-    return best;
-  }
+  pick(x, y) { return this.closest(x, y, coarse() ? 22 : 12); }
+  nearestCentre() { return this.closest(this.canvas.clientWidth / 2, this.canvas.clientHeight / 2, Infinity); }
   invalidate() { this.dirty = true; this.start(); }
   start() { if (!this.running && this.systems) { this.running = true; requestAnimationFrame(t => this.draw(t)); } }
   stop() { this.running = false; }
-  destroy() { this.stop(); this.detach?.(); this.resize?.disconnect(); }
+  destroy() { this.stop(); clearTimeout(this.wake); this.detach?.(); this.resize?.disconnect(); document.removeEventListener('visibilitychange', this.visible); }
   // True while something on screen is still moving.
   animating(time) {
     const settle = Math.abs(this.target.distance - this.distance) > 0.01 * this.distance || this.center.some((v, i) => Math.abs(this.target.center[i] - v) > 0.01);
-    return settle || (!this.reduced && (time > this.idleUntil || this.layerSystems?.some(l => l.kind === 'route' && l.systems.length > 1) || this.selected));
+    if (settle) return true;
+    if (this.reduced) return false;
+    return (time > this.idleUntil && this.spinLeft > 0) || (time < this.pulseUntil && Boolean(this.selected || this.layerSystems?.some(l => l.kind === 'route' && l.systems.length > 1)));
   }
   draw(time) {
     if (!this.running) return;
+    if (document.hidden) { this.running = false; this.last = 0; return; }
     if (!this.canvas.isConnected || !this.canvas.offsetParent) { this.running = false; return; }
     const moving = this.animating(time);
     if (!this.dirty && !moving) { this.running = false; this.last = 0; return; }
@@ -186,37 +212,46 @@ export class StarMap {
     ctx.fillStyle = 'rgba(200,215,235,0.35)';
     for (const [x, y, a] of this.stars) { ctx.globalAlpha = a; ctx.fillRect(x * w, y * h, 1, 1); }
     ctx.globalAlpha = 1;
-    // Ease the camera toward its target by elapsed time; idle maps turn slowly unless motion is reduced.
+    // Ease the camera toward its target by elapsed time; an idle map turns slowly, for ten seconds in all.
     const ease = this.reduced ? 1 : easeStep(dt);
-    this.center = this.center.map((v, i) => v + (this.target.center[i] - v) * ease);
+    for (let i = 0; i < 3; i++) this.center[i] += (this.target.center[i] - this.center[i]) * ease;
     this.distance += (this.target.distance - this.distance) * ease;
-    if (!this.reduced && time > this.idleUntil) this.yaw += 0.0012 * dt / 16.7;
+    if (!this.reduced && time > this.idleUntil && this.spinLeft > 0) { this.yaw += 0.0012 * dt / 16.7; this.spinLeft -= dt; }
     this.fov = Math.min(w, h) * 1.1;
-    const project = projector({center:this.center, yaw:this.yaw, pitch:this.pitch, distance:this.distance, width:w, height:h, fov:this.fov});
-    const pos = new Map();
-    const P = s => { if (!pos.has(s.id)) pos.set(s.id, s.pos ? project(s.pos) : null); return pos.get(s.id); };
+    // The same perspective maths as map.js projector(), for every system at once into reused arrays (NaN = behind the camera).
+    const {pos3, sx, sy, ss, edges, hits} = this, n = this.systems.length;
+    const cyaw = Math.cos(this.yaw), syaw = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch), [cx, cy, cz] = this.center, fov = this.fov, hw = w / 2, hh = h / 2, away = this.distance;
+    for (let i = 0, j = 0; i < n; i++, j += 3) {
+      const dx = pos3[j] - cx, dy = pos3[j + 1] - cy, dz = pos3[j + 2] - cz;
+      const rx = dx * cyaw - dz * syaw, rz = dx * syaw + dz * cyaw, depth = dy * sp + rz * cp + away;
+      if (!(depth > 1)) { sx[i] = NaN; continue; }
+      const scale = fov / depth;
+      sx[i] = hw + rx * scale; sy[i] = hh - (dy * cp - rz * sp) * scale; ss[i] = scale;
+    }
+    let project; // for anything not among `systems`: route ends, region labels
+    const free = pos => (project ||= projector({center:this.center, yaw:this.yaw, pitch:this.pitch, distance:this.distance, width:w, height:h, fov:this.fov}))(pos);
+    const P = s => { const i = this.index.get(s.id); if (i === undefined) return s.pos ? free(s.pos) : null; return sx[i] === sx[i] ? [sx[i], sy[i], 0, ss[i]] : null; };
     ctx.lineWidth = 1;
     ctx.strokeStyle = 'rgba(139,155,176,0.16)';
     ctx.beginPath();
-    for (const [a, b] of this.edges) { const p = P(a), q = P(b); if (p && q) { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); } }
+    for (let k = 0; k < edges.length; k += 2) { const a = edges[k], b = edges[k + 1]; if (sx[a] === sx[a] && sx[b] === sx[b]) { ctx.moveTo(sx[a], sy[a]); ctx.lineTo(sx[b], sy[b]); } }
     ctx.stroke();
-    // Stars, batched into one path per colour (bright and dimmed separately).
-    this.projected = [];
-    const batches = new Map();
-    for (const s of this.systems) {
-      const p = P(s); if (!p || p[0] < -20 || p[1] < -20 || p[0] > w + 20 || p[1] > h + 20) continue;
-      const dim = this.focus && !this.focus.has(s.id), r = Math.max(0.9, Math.min(3.2, p[3] * 0.45)), key = `${dim ? 1 : 0}${this.color(s.id)}`;
-      if (!batches.has(key)) batches.set(key, []);
-      batches.get(key).push(p[0], p[1], r);
-      if (!dim) this.projected.push({system:s, xy:p});
-    }
-    for (const [key, pts] of batches) {
-      ctx.globalAlpha = key[0] === '1' ? 0.18 : 1; ctx.fillStyle = key.slice(1); ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 3) { ctx.moveTo(pts[i] + pts[i + 2], pts[i + 1]); ctx.arc(pts[i], pts[i + 1], pts[i + 2], 0, Math.PI * 2); }
+    let hc = 0;
+    for (const grp of this.groups) {
+      ctx.globalAlpha = grp.dim ? 0.18 : 1; ctx.fillStyle = grp.css; ctx.beginPath();
+      for (const i of grp.idx) {
+        const x = sx[i], y = sy[i];
+        if (!(x >= -20 && y >= -20 && x <= w + 20 && y <= h + 20)) continue;
+        const r = Math.max(0.9, Math.min(3.2, ss[i] * 0.45));
+        ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, Math.PI * 2);
+        if (!grp.dim) hits[hc++] = i;
+      }
       ctx.fill();
     }
+    this.hitCount = hc;
     ctx.globalAlpha = 1;
     // Layers: routes glow with a pulse running from start to end; pins and rings mark systems.
+    const pulsing = !this.reduced && time < this.pulseUntil;
     let pulsed = false;
     const named = new Set();
     for (const l of this.layerSystems || []) {
@@ -227,7 +262,7 @@ export class StarMap {
         ctx.beginPath(); rp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); ctx.restore();
         if (l.kind === 'route' && !pulsed) {
           pulsed = true;
-          this.pulse = this.reduced ? 0 : (this.pulse + 0.012 * dt / 16.7) % 1;
+          if (pulsing) this.pulse = (this.pulse + 0.012 * dt / 16.7) % 1;
           const at = this.pulse * (rp.length - 1), i = Math.floor(at), f = at - i, a = rp[i], b = rp[Math.min(i + 1, rp.length - 1)];
           ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 3.5, 0, Math.PI * 2); ctx.fill();
         }
@@ -239,17 +274,17 @@ export class StarMap {
     const taken = [];
     ctx.font = '600 11px system-ui, sans-serif';
     for (const l of this.labels) {
-      const p = project(l.pos); if (!p) continue;
+      const p = free(l.pos); if (!p) continue;
       const tw = this.measure(l.text, 11), box = [p[0] + 8, p[1] - 20, tw, 14];
       if (taken.some(t => box[0] < t[0] + t[2] + 6 && t[0] < box[0] + box[2] + 6 && box[1] < t[1] + t[3] + 2 && t[1] < box[1] + box[3] + 2)) continue;
       taken.push(box); this.label(l.text, p, 'rgba(232,238,244,0.6)', 11);
     }
-    const sel = this.selected && this.g.systems.get(this.selected), sp = sel && P(sel);
-    if (sp) {
-      ctx.strokeStyle = secColor(sel.sec); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sp[0], sp[1], 9 + Math.sin(time / 300) * (this.reduced ? 0 : 2), 0, Math.PI * 2); ctx.stroke();
-      if (!named.has(sel.id)) this.label(sel.name, sp, '#e8eef4');
+    const sel = this.selected && this.g.systems.get(this.selected), sp2 = sel && P(sel);
+    if (sp2) {
+      ctx.strokeStyle = secColor(sel.sec); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sp2[0], sp2[1], 9 + Math.sin(time / 300) * (pulsing ? 2 : 0), 0, Math.PI * 2); ctx.stroke();
+      if (!named.has(sel.id)) this.label(sel.name, sp2, '#e8eef4');
       named.add(sel.id);
-      c.dataset.focusXy = `${Math.round(sp[0])},${Math.round(sp[1])}`;
+      c.dataset.focusXy = `${Math.round(sp2[0])},${Math.round(sp2[1])}`;
     } else delete c.dataset.focusXy;
     if (this.hover && !named.has(this.hover.id)) { const hp = P(this.hover); if (hp) this.label(this.hover.name, hp, '#e8eef4'); }
     c.dataset.frames = ++this.frames;
