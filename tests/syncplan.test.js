@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {emptyMeta, fingerprint, changesFor, markApplied, applyRemote, reassign, dirty} from '../ui/syncplan.js';
+import {emptyMeta, fingerprint, changesFor, markApplied, applyRemote, handOver, dirty} from '../ui/syncplan.js';
 const A = 2124810474, B = 2124815118;
 const goal = {id:'g1', title:'Fly a Heron', pilot:'Both pilots', done:false};
 const entry = {id:'e1', title:'First trip', pilot:'Fiofka', date:'2026-11-01', body:'Notes'};
@@ -53,7 +53,11 @@ test('a local edit survives a remote delete, a remote edit restores a local dele
   assert.equal(twin.copies, 0); assert.equal(twin.data.goals.length, 1);
 });
 
-test('an entry id another pilot owns is given a new id', () => {
-  const r = reassign(data([], [entry]), emptyMeta(), [{kind:'entry', id:'e1'}], () => 'fresh');
-  assert.deepEqual(r.data.entries.map(e => e.id), ['fresh']);
+test('an entry another pilot owns is left with that pilot instead of being copied under a new id', () => {
+  const meta = handOver(emptyMeta(), [{kind:'entry', id:'e1'}], B);
+  const d = data([], [entry]);
+  assert.deepEqual(changesFor(d, meta, A), [], 'A stops sending it');
+  assert.deepEqual(changesFor(d, meta, B).map(c => [c.id, c.base]), [['e1', 0]], 'B sends it when connected here, and the server reconciles');
+  const r = applyRemote(d, meta, [{kind:'entry', id:'e1', rev:4, record:entry}], B);
+  assert.equal(r.copies, 0); assert.equal(r.data.entries.length, 1);
 });

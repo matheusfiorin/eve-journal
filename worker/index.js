@@ -149,8 +149,9 @@ async function journal(request,url,env){
   return response({rev:more?rows.at(-1).rev:Math.max(since,top),more,records:await Promise.all(rows.map(r=>journalOut(r,env)))});
  }
  if(request.method!=='POST')throw new ServiceError('Method not allowed.',405);
- if(Number(request.headers.get('Content-Length'))>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
- let body;try{body=await request.json();}catch{throw new ServiceError('Journal changes must be JSON.');}
+ // Content-Length can be absent (chunked bodies), so measure what actually arrived.
+ const text=await request.text();if(text.length>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
+ let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Journal changes must be JSON.');}
  const changes=body?.changes;
  if(!Array.isArray(changes)||!changes.length||changes.length>JOURNAL_CHANGES)throw new ServiceError(`Send between 1 and ${JOURNAL_CHANGES} journal changes.`);
  for(const c of changes){
@@ -169,17 +170,20 @@ async function journal(request,url,env){
   const row=existing.get(key(c)),owner=c.kind==='goal'?0:me;
   // Another pilot's entry: never revealed or replaced.
   if(row&&row.owner!==owner){denied.push({kind:c.kind,id:c.id});continue;}
-  if((row?.rev||0)!==c.base){conflicts.push(row);continue;}
+  // No row although the device saw one (purged tombstone, reset database): a delete is done, a record is created anew.
+  if(row&&row.rev!==c.base){conflicts.push(row);continue;}
   if(!row&&c.record===null){applied.push({kind:c.kind,id:c.id,rev:0});continue;}
   const data=c.record===null?null:await encrypt(c.record,env.TOKEN_ENCRYPTION_KEY);
   pending.push([c,row?env.DB.prepare(`UPDATE journal SET data = ?, rev = ${NEXT_REV}, updated_at = ?, updated_by = ? WHERE kind = ? AND id = ? AND rev = ? RETURNING rev`).bind(data,now,me,c.kind,c.id,c.base)
    :env.DB.prepare(`INSERT INTO journal (kind, id, owner, data, rev, updated_at, updated_by) VALUES (?, ?, ?, ?, ${NEXT_REV}, ?, ?) ON CONFLICT DO NOTHING RETURNING rev`).bind(c.kind,c.id,owner,data,now,me)]);
  }
  const results=pending.length?await env.DB.batch(pending.map(([,statement])=>statement)):[];
- for(const [i,[c]] of pending.entries()){
-  const rev=results[i]?.results?.[0]?.rev;
-  if(rev)applied.push({kind:c.kind,id:c.id,rev});
-  else{const row=await env.DB.prepare('SELECT * FROM journal WHERE kind = ? AND id = ?').bind(c.kind,c.id).first();if(row&&row.owner===(c.kind==='goal'?0:me))conflicts.push(row);else denied.push({kind:c.kind,id:c.id});}
+ const lost=[];
+ for(const [i,[c]] of pending.entries()){const rev=results[i]?.results?.[0]?.rev;if(rev)applied.push({kind:c.kind,id:c.id,rev});else lost.push(c);}
+ // Lost a race with another device: read those rows back in one query (D1's free plan allows 50 per request).
+ if(lost.length){
+  const rows=(await env.DB.prepare(`SELECT * FROM journal WHERE ${lost.map(()=>'(kind = ? AND id = ?)').join(' OR ')}`).bind(...lost.flatMap(c=>[c.kind,c.id])).all()).results;
+  for(const c of lost){const row=rows.find(r=>r.kind===c.kind&&r.id===c.id);if(row&&row.owner===(c.kind==='goal'?0:me))conflicts.push(row);else denied.push({kind:c.kind,id:c.id});}
  }
  return response({applied,denied,conflicts:await Promise.all(conflicts.map(r=>journalOut(r,env)))});
 }
@@ -388,8 +392,9 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now()),
-  // Tombstones only need to outlive the last sync of every device; half a year is plenty.
-  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ?').bind(Date.now()-180*86400000)]);
+  // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
+  // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
+  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(Date.now()-180*86400000)]);
  const ids=(await env.DB.prepare('SELECT character_id FROM pilots ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
  if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
 }

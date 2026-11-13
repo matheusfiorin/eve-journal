@@ -92,3 +92,9 @@ test('sessions that expired while no page was open are removed quietly',()=>{
  const s=storage();s.setItem('eve-backend-sessions:https://api.example',JSON.stringify([[id,{token:'a'.repeat(43),expires:Date.now()-1000}]]));
  const c=new BackendClient('https://api.example',s);assert.equal(c.has(id),false);assert.deepEqual(c.expire(),[]);
 });
+test('after a failed write, sessions another tab stores are still read, and this page keeps its own',async()=>{
+ const values=new Map();let full=true;const s={getItem:k=>values.get(k)||null,setItem:(k,v)=>{if(full)throw new Error('quota');values.set(k,v);},removeItem:k=>values.delete(k)};
+ const c=new BackendClient('https://api.example',s);auth(c);assert.equal(c.has(id),true,'kept in memory');
+ full=false;values.set('eve-backend-sessions:https://api.example',JSON.stringify([[2124815118,{token:'b'.repeat(43),expires:Date.now()+3600000}]]));
+ c.reload();assert.equal(c.has(2124815118),true);assert.equal(c.has(id),true);
+});

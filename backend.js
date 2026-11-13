@@ -11,11 +11,16 @@ export class BackendClient {
  // being changed, so a tab opened before the other pilot connected can't write back a map without them.
  read(){try{return new Map(JSON.parse(this.storage.getItem(this.key)||'[]').filter(([id,s])=>Number.isSafeInteger(id)&&/^[\w-]{43}$/.test(s?.token)&&Number.isFinite(s.expires)));}catch{return null;}}
  // Adopt what another tab stored (call on a storage event); without readable storage the in-memory sessions stay.
- reload(){const stored=this.memoryOnly?null:this.read();if(stored)this.sessions=stored;return this.sessions;}
+ reload(){
+  const stored=this.read();if(!stored)return this.sessions;
+  // After a failed write some sessions exist only in this page: keep those the stored copy doesn't have.
+  if(this.memoryOnly)for(const [id,s] of this.sessions)if(!stored.has(id))stored.set(id,s);
+  this.sessions=stored;return this.sessions;
+ }
  change(id,fn){
   this.reload();const next=fn(this.sessions.get(id));
   if(next)this.sessions.set(id,next);else this.sessions.delete(id);
-  try{this.storage.setItem(this.key,JSON.stringify([...this.sessions]));}catch{this.memoryOnly=true;/* Sessions last for this page only. */}
+  try{this.storage.setItem(this.key,JSON.stringify([...this.sessions]));this.memoryOnly=false;}catch{this.memoryOnly=true;/* Sessions last for this page only. */}
  }
  // Drop a session only if it is still the token that failed: another tab may have reconnected the pilot meanwhile.
  drop(id,token){this.change(id,s=>s&&(token===undefined||s.token===token)?null:s);}
@@ -63,6 +68,6 @@ export class BackendClient {
  // Journal sync: records after a rev, and changes sent against the rev each was based on (see worker/index.js).
  async journalPull(id,since){const data=await this.call(`/api/journal?since=${encodeURIComponent(since)}`,{id});if(!Array.isArray(data.records)||!Number.isSafeInteger(data.rev))throw new Error('Backend returned an invalid journal.');return data;}
  async journalPush(id,changes){const data=await this.call('/api/journal',{id,method:'POST',body:{changes}});if(![data.applied,data.conflicts,data.denied].every(Array.isArray))throw new Error('Backend returned an invalid journal reply.');return data;}
- async disconnect(id){await this.call('/api/disconnect',{id,method:'POST'});this.drop(id);}
+ async disconnect(id){const token=this.sessions.get(id)?.token;await this.call('/api/disconnect',{id,method:'POST'});this.drop(id,token);}
  expire(){this.reload();const ids=[...this.sessions].filter(([,s])=>s.expires<=Date.now()).map(([id])=>id);for(const id of ids)this.change(id,s=>s&&s.expires<=Date.now()?null:s);return ids;}
 }

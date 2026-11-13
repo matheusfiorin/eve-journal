@@ -83,14 +83,10 @@ export function applyRemote(data, meta, records, pilotId, newId = () => crypto.r
   return {data:next, meta:{...meta, known}, copies};
 }
 
-// The server refused these ids because another pilot owns an entry with the same id: give ours a new id.
-export function reassign(data, meta, denied, newId = () => crypto.randomUUID()) {
-  let next = data;
+// The server refused these ids because another pilot already owns an entry with that id (e.g. both merged the same
+// backup). Don't fork a copy: leave the record with that pilot, so it syncs (or reconciles) when their session is here.
+export function handOver(meta, denied, owner) {
   const known = {...meta.known};
-  for (const d of denied) {
-    const local = find(next, d.kind, d.id);
-    delete known[keyOf(d.kind, d.id)];
-    if (local) { const id = newId(); next = put(put(next, d.kind, d.id, null), d.kind, id, {...local, id}); }
-  }
-  return {data:next, meta:{...meta, known}};
+  for (const d of denied) known[keyOf(d.kind, d.id)] = {rev:0, owner, fp:''};
+  return {...meta, known};
 }

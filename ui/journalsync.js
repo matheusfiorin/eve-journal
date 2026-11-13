@@ -5,7 +5,7 @@
 import {validateBackup} from '../model.js';
 import {S} from './state.js';
 import {$, plural} from './shared.js';
-import {emptyMeta, changesFor, markApplied, applyRemote, reassign, pendingCount} from './syncplan.js';
+import {emptyMeta, changesFor, markApplied, applyRemote, handOver, pendingCount} from './syncplan.js';
 
 const SYNC = 'eve-journal-sync:v1', CHUNK = 40, EVERY = 5 * 60000, DEBOUNCE = 1500;
 let state = read(), running = null, again = false, lastError = null, lastAt = 0, copies = 0, timer;
@@ -17,6 +17,8 @@ function read() {
 function write(next) { state = next; try { localStorage.setItem(SYNC, JSON.stringify(state)); } catch { /* Kept for this page. */ } }
 export const syncOn = () => state.on;
 
+// The wing's other pilot (an entry the server says isn't this pilot's belongs to them).
+const otherPilot = id => S.pilots.find(p => p.id && p.id !== id)?.id ?? -1;
 // Connected pilots, the pilot flying here first (their session sends the goals).
 function pilots() {
   if (!S.backend) return [];
@@ -35,11 +37,11 @@ function valid(records) {
 
 // Fold results into the latest saved journal in one synchronous step (load, merge, save), so an edit this tab saved
 // while a request was out is never overwritten.
-function fold({remote = [], applied = [], denied = [], cursor = {}}) {
+function fold({remote = [], applied = [], denied = [], deniedFor = null, cursor = {}}) {
   let data = S.store.load(), meta = read();
   for (const [id, list, sent] of applied) meta = markApplied(meta, list, sent, id);
   for (const [id, list] of remote) { const r = applyRemote(data, meta, valid(list), id); data = r.data; meta = r.meta; copies += r.copies; }
-  if (denied.length) ({data, meta} = reassign(data, meta, denied));
+  if (denied.length) meta = handOver(meta, denied, otherPilot(deniedFor));
   for (const [id, rev] of Object.entries(cursor)) meta.cursor = {...meta.cursor, [id]:Math.max(meta.cursor[id] || 0, rev)};
   const changed = JSON.stringify(data) !== JSON.stringify(S.data);
   S.data = changed ? S.store.save(data) : data;
@@ -64,7 +66,7 @@ async function run() {
     const changes = changesFor(S.data, state, p.id, {goals:i === 0, ownerOf:owner});
     for (let at = 0; at < changes.length; at += CHUNK) {
       const chunk = changes.slice(at, at + CHUNK), reply = await S.backend.journalPush(p.id, chunk);
-      fold({applied:[[p.id, reply.applied, new Map(chunk.map(c => [`${c.kind}:${c.id}`, c]))]], remote:[[p.id, reply.conflicts]], denied:reply.denied});
+      fold({applied:[[p.id, reply.applied, new Map(chunk.map(c => [`${c.kind}:${c.id}`, c]))]], remote:[[p.id, reply.conflicts]], denied:reply.denied, deniedFor:p.id});
     }
   }
   lastError = null; lastAt = Date.now();

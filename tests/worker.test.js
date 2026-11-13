@@ -271,3 +271,14 @@ test('journal sync: a stale base is a conflict that returns the stored copy; del
  await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${a}`}});
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM journal').get().n,1);
 });
+test('journal sync: a change based on a row the server no longer has is applied, not a 500, and purging never lowers the rev',async()=>{
+ const {app,a,call}=await wingApp();
+ const ghost=await call(a,'POST',{changes:[{kind:'entry',id:'e9',base:7,record:{...entry,id:'e9'}},{kind:'goal',id:'g9',base:3,record:null}]});
+ assert.equal(ghost.status,200);assert.deepEqual(ghost.body.applied.map(x=>[x.id,x.rev]).sort(),[['e9',1],['g9',0]]);
+ await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
+ await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:2,record:null}]});
+ app.env.DB.raw.prepare('UPDATE journal SET updated_at = 0').run();
+ await scheduledSync(app.env,app.fetchImpl,0);
+ assert.deepEqual(app.env.DB.raw.prepare('SELECT id, rev FROM journal ORDER BY rev').all().map(r=>[r.id,r.rev]),[['e9',1],['g1',3]],'the newest tombstone stays');
+ const next=await call(a,'POST',{changes:[{kind:'goal',id:'g2',base:0,record:{...goal,id:'g2'}}]});assert.equal(next.body.applied[0].rev,4);
+});
