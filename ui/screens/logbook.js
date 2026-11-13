@@ -20,7 +20,7 @@ export const markup = {logbook:`<div class="toolbar" role="toolbar" aria-label="
  </div>
  <section class="card backup" aria-labelledby="backup-title"><div class="panel__head"><div><h2 id="backup-title">Backup</h2><p class="panel__sub">Entries and shared goals live only in this browser. Export a backup to keep them safe or move them.</p></div></div>
   <div class="backup__actions"><button id="export" class="secondary">Export backup</button><label class="import secondary-like">Restore or merge a backup<input id="import" type="file" accept="application/json,.json"></label><button id="recover" class="secondary" hidden>Download raw recovery file</button></div>
-  <p id="backup-status" class="hint" role="status">Restore or merge a backup file.</p></section>`};
+  <p id="backup-status" class="hint" role="status">Restore or merge a backup file.</p><p id="backup-age" class="hint"></p></section>`};
 
 let editingEntry = null, draftTimer;
 // Read the draft before initialization resets the blank editor.
@@ -50,7 +50,20 @@ function readEntry(id) {
   openDrawer({title:e.title, body:`<p class="entry__meta"><span class="num">${esc(e.date)}</span><span class="who" data-pilot="${esc(String(e.pilot).toLowerCase())}">${esc(e.pilot)}</span><span class="chip">${esc(e.category || 'Adventure')}</span></p><div class="reading">${esc(e.body)}</div>`,
     foot:`<button data-edit-entry="${esc(e.id)}" class="secondary">Edit</button><button data-delete-entry="${esc(e.id)}" class="secondary" aria-label="Delete ${esc(e.title)}">Delete</button>`});
 }
-export function render() { authorFilter(); renderEntries(); }
+// When this browser last exported a backup, so the Backup card can say how much is at risk.
+const EXPORTED = 'eve-journal-exported:v1', NUDGE_DAYS = 14;
+let nudged = false;
+function exportedAt() { try { return Number(localStorage.getItem(EXPORTED)) || 0; } catch { return 0; } }
+function renderBackupAge() {
+  const records = S.data.goals.length + S.data.entries.length, at = exportedAt(), days = at ? Math.floor((Date.now() - at) / 86400000) : null;
+  const kept = S.storageKept === false ? ' This browser has not agreed to keep its site data, so it may clear them when space runs low.' : '';
+  const stale = records && (days === null || days >= NUDGE_DAYS);
+  $('#backup-age').textContent = !records ? '' : days === null ? `Never exported from this browser. A new device, clearing site data, or Safari after a week without a visit loses everything here.${kept}`
+    : `Last exported ${days ? plural(days, 'day', 'days') + ' ago' : 'today'}.${stale ? ' Export again to keep recent changes safe.' : ''}${kept}`;
+  $('#backup-age').classList.toggle('error', Boolean(stale));
+  if (stale && !nudged && !S.store.locked) { nudged = true; try { if (sessionStorage.getItem('eve.backup.nudged')) return; sessionStorage.setItem('eve.backup.nudged', '1'); } catch { /* Nudge this page. */ } toast(days === null ? 'Your goals and Logbook live only in this browser. Export a backup from the Logbook.' : `Your last journal backup is ${plural(days, 'day', 'days')} old. Export a new one from the Logbook.`, 'info', 8000); }
+}
+export function render() { authorFilter(); renderEntries(); renderBackupAge(); }
 function saveDraft() {
   clearTimeout(draftTimer);
   try {
@@ -138,6 +151,8 @@ export function wire() {
     if (S.store.locked) { notice('Export is blocked because the journal could not be read. Use Download raw recovery file.'); return; }
     download(JSON.stringify(S.data, null, 2), `eve-journal-${localDate()}.json`);
     $('#backup-status').textContent = `Backup requested ${new Date().toLocaleString()}. It contains private notes.`;
+    try { localStorage.setItem(EXPORTED, String(Date.now())); } catch { /* The reminder just stays. */ }
+    renderBackupAge();
   };
   $('#recover').onclick = () => { try { download(localStorage.getItem(KEY) || '', `eve-journal-recovery-${localDate()}.json`); } catch { notice('Browser storage is inaccessible. Recovery requires access to this browser’s site data.'); } };
   $('#import').onchange = async event => {

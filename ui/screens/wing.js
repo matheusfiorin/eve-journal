@@ -212,6 +212,26 @@ function renderSummary() {
 }
 
 let editingGoal = null;
+// The goal form keeps a draft in this tab, like the Logbook, so a reload (for example after another tab saved) loses nothing.
+const GOAL_DRAFT = 'eve-goal-draft:v1';
+let goalDraftTimer;
+function saveGoalDraft() {
+  clearTimeout(goalDraftTimer);
+  const fields = Object.fromEntries(new FormData($('#goal-form')));
+  try { if (fields.title || fields.steps || fields.notes) sessionStorage.setItem(GOAL_DRAFT, JSON.stringify({...fields, editingGoal})); else sessionStorage.removeItem(GOAL_DRAFT); } catch { /* The form still works without a draft. */ }
+}
+export function restoreGoalDraft() {
+  let d; try { d = JSON.parse(sessionStorage.getItem(GOAL_DRAFT) || 'null'); } catch { return; }
+  if (!d || typeof d.title !== 'string') return;
+  const f = $('#goal-form');
+  for (const key of ['title','pilot','category','due','target','result','steps','notes']) if (typeof d[key] === 'string' && d[key].length <= 4000) {
+    if (key === 'pilot' && ![...f.elements.pilot.options].some(o => o.value === d.pilot)) f.elements.pilot.add(new Option(d.pilot, d.pilot));
+    if (key === 'category' && ![...f.elements.category.options].some(o => o.value === d.category)) f.elements.category.add(new Option(d.category, d.category));
+    f.elements[key].value = d[key];
+  }
+  editingGoal = S.data.goals.some(g => g.id === d.editingGoal) ? d.editingGoal : null;
+  $('#goal-submit').textContent = editingGoal ? 'Save changes' : 'Add goal'; $('#cancel-goal-edit').hidden = !editingGoal;
+}
 // A goal's target against its result, its steps as a checklist, and its notes.
 function goalDetails(g) {
   const doneSteps = (g.steps || []).filter(st => st.done).length;
@@ -230,6 +250,7 @@ export function renderGoals() {
 }
 function resetGoal() {
   editingGoal = null; $('#goal-form').reset(); $('#goal-submit').textContent = 'Add goal'; $('#cancel-goal-edit').hidden = true;
+  clearTimeout(goalDraftTimer); try { sessionStorage.removeItem(GOAL_DRAFT); } catch { /* No draft to clear. */ }
 }
 export function wire() {
   wireMap();
@@ -246,6 +267,9 @@ export function wire() {
     if (persist({...S.data, goals:editingGoal ? S.data.goals.map(g => g.id === editingGoal ? goal : g) : [...S.data.goals, goal]})) { resetGoal(); toast('Goal saved in this browser.', 'ok'); }
   };
   $('#cancel-goal-edit').onclick = resetGoal;
+  $('#goal-form').addEventListener('input', () => { clearTimeout(goalDraftTimer); goalDraftTimer = setTimeout(saveGoalDraft, 400); });
+  $('#goal-form').addEventListener('change', saveGoalDraft);
+  window.addEventListener('pagehide', saveGoalDraft);
   $('#goal-filter').onchange = renderGoals;
   document.addEventListener('change', event => {
     if (event.target.matches('[data-goal-step]')) {
@@ -267,7 +291,7 @@ export function wire() {
       if (g.category && ![...f.elements.category.options].some(o => o.value === g.category)) f.elements.category.add(new Option(g.category, g.category));
       for (const key of ['title','pilot','due','category','notes']) f.elements[key].value = g[key] || (key === 'category' ? 'Other' : '');
       f.elements.target.value = g.target ?? ''; f.elements.result.value = g.result ?? ''; f.elements.steps.value = (g.steps || []).map(st => st.text).join('\n');
-      $('#goal-submit').textContent = 'Save changes'; $('#cancel-goal-edit').hidden = false; f.scrollIntoView({behavior:reduced ? 'auto' : 'smooth'}); f.elements.title.focus();
+      saveGoalDraft(); $('#goal-submit').textContent = 'Save changes'; $('#cancel-goal-edit').hidden = false; f.scrollIntoView({behavior:reduced ? 'auto' : 'smooth'}); f.elements.title.focus();
     }
     if (b?.dataset.deleteGoal && confirm('Delete this local goal?')) {
       if (persist({...S.data, goals:S.data.goals.filter(g => g.id !== b.dataset.deleteGoal)}) && editingGoal === b.dataset.deleteGoal) resetGoal();

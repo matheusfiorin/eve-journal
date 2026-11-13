@@ -115,7 +115,8 @@ async function freshCredentials(row,env,fetchImpl,lockUntil){
   const refreshed=await exchange(env,{grant_type:'refresh_token',refresh_token:credentials.refreshToken},fetchImpl);
   // EVE has rotated the refresh token: the old one is dead from here on. Save the new one before anything else can
   // fail (checking the access token fetches EVE's keys), or one failed check would leave the pilot needing a reconnect.
-  const save=async c=>env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(c,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();
+  // If the lock was lost (another request reset it), the rotated token was not stored: stop rather than carry on with it.
+  const save=async c=>{const r=await env.DB.prepare('UPDATE pilots SET credentials = ? WHERE character_id = ? AND sync_lock_until = ?').bind(await encrypt(c,env.TOKEN_ENCRYPTION_KEY),row.character_id,lockUntil).run();if(r?.meta?.changes===0)throw new ServiceError('This pilot changed while syncing. Try again in a moment.',409);};
   credentials={...credentials,accessToken:refreshed.access_token,refreshToken:refreshed.refresh_token||credentials.refreshToken,expires:0};
   await save(credentials);
   const identity=await verify(refreshed.access_token,env,row.character_id,fetchImpl);
@@ -287,14 +288,24 @@ async function route(request,env,ctx,fetchImpl){
   let row=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(s.character_id).first();
   if(!row)throw new ServiceError('This pilot is no longer connected.',401);
   if(url.pathname==='/api/disconnect'){
+   // Take the sync lock first: a sync running now may rotate the refresh token, and revoking the one it replaced
+   // would leave the new one authorized at EVE after its row is deleted. A sync holds the lock for seconds.
+   let locked=null;
+   for(let i=0;i<8&&!locked;i++){
+    if(i)await new Promise(r=>setTimeout(r,1000));
+    locked=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(Date.now()+90000,row.character_id,Date.now()).first();
+   }
+   if(!locked)throw new ServiceError('This pilot is syncing. Try Disconnect again in a moment.',409);
+   let revoked=false;
    try{
-    const credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY);
-    await fetchImpl(`${EVE}/v2/oauth/revoke`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams({token:credentials.refreshToken,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(15000)});
+    const credentials=await decrypt(locked.credentials,env.TOKEN_ENCRYPTION_KEY);
+    const res=await fetchImpl(`${EVE}/v2/oauth/revoke`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams({token:credentials.refreshToken,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(15000)});
+    revoked=res.ok;
    }catch{ /* Local deletion still removes access and shared snapshots. */ }
    await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
-   return response({disconnected:true});
+   return response({disconnected:true,revoked});
   }
-  if(url.pathname==='/api/sync')row=await syncPilot(row.character_id,env,fetchImpl);
+  if(url.pathname==='/api/sync'){row=await syncPilot(row.character_id,env,fetchImpl);if(!row)throw new ServiceError('This pilot is no longer connected.',401);}
   return response(privatePayload(row,s));
  }
  throw new ServiceError('Not found.',404);

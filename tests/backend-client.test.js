@@ -65,3 +65,30 @@ test('a connection link this tab did not start cannot replace a pilot’s valid 
   assert.throws(()=>after.acceptRedirect(link('y')),/already connected/,'the mark is used once');
  }finally{delete globalThis.sessionStorage;}
 });
+test('a tab opened before the other pilot connected does not erase that pilot when it saves',async()=>{
+ const s=storage(),other=2124815118,later=Date.now()+30*86400000;
+ const stale=new BackendClient('https://api.example',s,async()=>Response.json({characterId:id,expires:later}));
+ stale.acceptRedirect(`#backend_session=${'a'.repeat(43)}&pilot=${id}&expires=${Date.now()+3600000}`);
+ const fresh=new BackendClient('https://api.example',s);
+ fresh.acceptRedirect(`#backend_session=${'b'.repeat(43)}&pilot=${other}&expires=${Date.now()+3600000}`);
+ await stale.privatePilot(id); // renews the first pilot and writes the stored sessions
+ const reloaded=new BackendClient('https://api.example',s);
+ assert.equal(reloaded.has(other),true,'the second pilot survives the stale tab');
+ assert.equal(reloaded.expires(id),later);
+});
+test('a 401 for an old token does not drop the session another tab just reconnected',async()=>{
+ const s=storage();
+ const a=new BackendClient('https://api.example',s,async()=>{
+  // Meanwhile the pilot reconnects in another tab.
+  new BackendClient('https://api.example',s).change(id,()=>({token:'n'.repeat(43),expires:Date.now()+3600000}));
+  return Response.json({error:'Expired'},{status:401});
+ });
+ a.acceptRedirect(`#backend_session=${'a'.repeat(43)}&pilot=${id}&expires=${Date.now()+3600000}`);
+ await assert.rejects(a.privatePilot(id),/Expired/);
+ assert.equal(new BackendClient('https://api.example',s).has(id),true);
+ assert.equal(a.sessions.get(id).token,'n'.repeat(43));
+});
+test('sessions that expired while no page was open are removed quietly',()=>{
+ const s=storage();s.setItem('eve-backend-sessions:https://api.example',JSON.stringify([[id,{token:'a'.repeat(43),expires:Date.now()-1000}]]));
+ const c=new BackendClient('https://api.example',s);assert.equal(c.has(id),false);assert.deepEqual(c.expire(),[]);
+});

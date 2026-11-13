@@ -101,3 +101,12 @@ test('logbook reads an entry in the drawer, counts entries and starts a new one 
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  await page.screenshot({path:testInfo.outputPath('logbook.png'),fullPage:true});expect(errors).toEqual([]);
 });
+test('an unsaved goal survives a reload, and the Backup card says when the journal was last exported',async({page})=>{
+ await mockApp(page,{data});await openApp(page);await tab(page,'goals');const f=page.locator('#goal-form');
+ await f.getByLabel('Next milestone').fill('Half-typed goal');await f.getByLabel('Notes').fill('Do not lose me');await page.waitForTimeout(500);
+ await page.reload();await tab(page,'goals');
+ await expect(f.getByLabel('Next milestone')).toHaveValue('Half-typed goal');await expect(f.getByLabel('Notes')).toHaveValue('Do not lose me');
+ await tab(page,'journal');await expect(page.locator('#backup-age')).toContainText('Never exported');
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export backup'}).click();await download;
+ await expect(page.locator('#backup-age')).toHaveText('Last exported today.');
+});

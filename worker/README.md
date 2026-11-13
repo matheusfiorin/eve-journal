@@ -1,6 +1,6 @@
 # EVE backend
 
-GitHub Pages remains the frontend. A Cloudflare Worker handles EVE Authorization Code login with a confidential client, PKCE S256, signed-token validation, encrypted credentials, D1 snapshots, opaque dashboard sessions and scheduled refreshes every 30 minutes.
+GitHub Pages remains the frontend. A Cloudflare Worker handles EVE Authorization Code login with a confidential client, PKCE S256, signed-token validation, encrypted credentials, D1 snapshots, opaque dashboard sessions and scheduled refreshes every 10 minutes per pilot.
 
 Only Fiofka (2124810474) and Decxus (2124815118) may enroll. Each pilot explicitly confirms sharing their skill total and queue on the public dashboard. Wallet, ship, location and industry data require the pilot's opaque dashboard bearer session. No EVE access or refresh tokens are returned to the frontend in backend mode.
 
@@ -41,7 +41,7 @@ Then connect each pilot from Pages. A GitHub secret being present does not prove
 - `GET /api/market/regions`, `GET /api/market/survey`, `POST /api/market/ingest`: the market pipeline's reads and uploads, authorized with an HMAC of the EVE client secret.
 - `POST /api/disconnect`: requests EVE revocation and deletes stored enrollment, all that pilot's dashboard sessions and shared snapshot. If EVE's revocation service is unavailable, deletion still proceeds; account management can revoke the remote grant.
 
-Opaque dashboard sessions expire 30 days after their last use; each day of use pushes the expiry forward. Scheduled refreshes run every 15 minutes and sync one pilot per run (the free plan allows 50 subrequests per invocation), so each pilot refreshes every 30 minutes. Encrypted refresh tokens remain server-side for scheduled updates until disconnected or revoked. D1 stores private snapshots, protected by the API session checks; the credentials themselves are additionally encrypted with AES-GCM.
+Opaque dashboard sessions expire 30 days after their last use; each day of use pushes the expiry forward. Scheduled refreshes run every 5 minutes and sync one pilot per run (the free plan allows 50 subrequests per invocation), so each pilot refreshes every 10 minutes. Disconnect waits for a running sync, then revokes the newest refresh token. Encrypted refresh tokens remain server-side for scheduled updates until disconnected or revoked. D1 stores private snapshots, protected by the API session checks; the credentials themselves are additionally encrypted with AES-GCM.
 
 Only the configured Pages origin can issue browser API requests. OAuth consent/callback cookies are first-party, HttpOnly, Secure, SameSite=Lax. No cross-site third-party cookie is required by Pages. EVE responses and secrets are not logged by the Worker; observability is disabled in deployment configuration.
 

@@ -95,6 +95,14 @@ async function syncIfStale() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { expireSessions(); syncIfStale(); } });
 setInterval(expireSessions, 30000);
+// Another tab connected, reconnected or disconnected a pilot: adopt its sessions and show what they unlock.
+window.addEventListener('storage', event => {
+  if (!S.backend || (event.key !== S.backend.key && event.key !== null)) return;
+  const before = JSON.stringify([...S.backend.sessions]);
+  if (JSON.stringify([...S.backend.reload()]) === before) return;
+  for (const p of S.pilots) if (p.id && p.private && !S.backend.has(p.id)) clearPrivate(p);
+  loadPilots(false, renderAll);
+});
 
 async function init() {
   shell.build();
@@ -123,6 +131,7 @@ async function init() {
   hero.renderMe();
   selectTab(shell.resolve(location.hash.slice(1)) || 'bridge');
   logbook.restoreDraft();
+  wing.restoreGoalDraft();
   if (await loadPilots(false, renderAll)) await syncIfStale();
 }
 await init();

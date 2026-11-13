@@ -96,9 +96,17 @@ export function toast(message, kind = 'info', ms = 4000) {
 }
 // Navigate anywhere (a view id, an old tab id, "earn" or "earn/mine"); app.js owns the router.
 export const go = key => document.dispatchEvent(new CustomEvent('go', {detail:key}));
+// Browsers may clear site data when the device runs short of space. Once the pilot has saved something, ask this
+// browser to keep it (Chrome and Safari decide silently, Firefox asks). It does not stop Safari's 7-day clearing.
+let keepAsked = false;
+export function keepStorage() {
+  if (keepAsked || !navigator.storage?.persist) return; keepAsked = true;
+  navigator.storage.persisted().then(kept => kept || navigator.storage.persist())
+    .then(kept => { S.storageKept = kept; document.dispatchEvent(new Event('data-change')); }).catch(() => {});
+}
 // Save the journal store; screens that show goals or entries re-render on 'data-change'.
 export function persist(next) {
-  try { S.data = S.store.save(next); document.dispatchEvent(new Event('data-change')); return true; }
+  try { S.data = S.store.save(next); document.dispatchEvent(new Event('data-change')); keepStorage(); return true; }
   catch (error) { notice(`${error.message} Your change was not saved.`); return false; }
 }
 // Pilot <select>s on the goal and entry forms: both pilots, everyone who has written, and the current value.

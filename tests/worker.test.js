@@ -17,7 +17,7 @@ function token(character=id,scopes=REQUESTED_SCOPES){
 }
 function database(){
  const db=new DatabaseSync(':memory:');db.exec(sql);
- return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>statement.run(...values)};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
+ return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{const r=statement.run(...values);return {meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
 }
 function setup(options={}){
  const env={DB:database(),FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:'test-client',EVE_CLIENT_SECRET:'test-client-secret',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,4).toString('base64')};
@@ -225,4 +225,13 @@ test('sync keeps a trail of visited systems without repeating the current one',a
  await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(trail().length,1,'still in Jita');
  const limited=setup({scopes:SCOPES});await connect(limited);
  assert.equal(JSON.parse(limited.env.DB.raw.prepare('SELECT snapshot FROM pilots').get().snapshot).operations.trail,undefined,'no location permission, no trail');
+});
+test('disconnect waits for a running sync before revoking, so it revokes the latest refresh token',async()=>{
+ const app=setup();const {bearer}=await connect(app);
+ app.env.DB.raw.prepare('UPDATE pilots SET sync_lock_until = ?').run(Date.now()+1500);
+ const started=Date.now();
+ const res=await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}});
+ assert.equal(res.status,200);assert.ok(Date.now()-started>=1000,'it waited for the lock');
+ assert.deepEqual(await res.json(),{disconnected:true,revoked:true});
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);
 });
