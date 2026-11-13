@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0C1424"><meta name="referrer" content="no-referrer">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Echelon"><meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://images.evetech.net; connect-src 'self' https://esi.evetech.net https://*.workers.dev https://zkillboard.com https://api.eve-scout.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="description" content="Echelon, the EVE Pilot Console for Fiofka and Decxus: a two-pilot EVE Online wing console for training, earning, routes and the logbook.">
 <title>Echelon · Fiofka &amp; Decxus</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230C1424'/%3E%3Cpath d='M27 9.5A12.5 12.5 0 1 0 22 27' fill='none' stroke='%233A4D6E' stroke-width='1.6' stroke-linecap='round'/%3E%3Cpath d='M7 15 13 7l6 8-6-2.5Z' fill='%23F0BB5C'/%3E%3Cpath d='M14 23l6-8 6 8-6-2.5Z' fill='%235CD3DE'/%3E%3Ccircle cx='27' cy='9.5' r='1.8' fill='%23A99BFF'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Martian+Mono:wdth,wght@87.5,400;87.5,600&family=Michroma&display=swap">
 <link rel="stylesheet" href="styles/tokens.css">
@@ -68,6 +70,11 @@
  </header>
  <div id="viewbar" class="viewbar" hidden></div>
  <main id="views">
+  <aside id="install-hint" class="install-hint" aria-labelledby="install-hint-text" hidden>
+   <svg class="install-hint__mark" width="28" height="28" aria-hidden="true"><use href="#i-emblem"/></svg>
+   <p><span id="install-hint-text">Add Echelon to your Home Screen so Safari doesn’t clear your session and journal after a week away.</span> <small>Tap <b>Share</b>, then <b>Add to Home Screen</b>.</small></p>
+   <button type="button" id="install-hint-close" class="icon-btn" aria-label="Dismiss home screen tip"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </aside>
   <div id="notice" role="status" aria-live="polite" hidden></div>
   <section id="bridge" class="view" aria-label="Bridge"></section>
   <section id="strengths" class="view" aria-label="Crew map" hidden></section>

@@ -8,6 +8,7 @@ import {loadPilots, clearPrivate, dataTime, STALE_MS} from './ui/pilots.js';
 import * as routes from './ui/routes.js';
 import * as mapmodal from './ui/mapmodal.js';
 import * as hero from './ui/hero.js';
+import * as installhint from './ui/installhint.js';
 import * as shell from './ui/shell.js';
 import * as journalsync from './ui/journalsync.js';
 import * as bridge from './ui/screens/bridge.js';
@@ -123,7 +124,7 @@ async function init() {
       if (S.backend.acceptRedirect(location.hash)) { history.replaceState(null, '', home); notice('Pilot connected. Training is shared and private data is now available.'); }
     } catch (error) { if (location.hash.includes('backend_session')) history.replaceState(null, '', home); notice(error.message); }
   }
-  for (const module of [routes, mapmodal, shell, journalsync, ...SCREENS]) module.wire?.();
+  for (const module of [routes, mapmodal, shell, journalsync, installhint, ...SCREENS]) module.wire?.();
   hero.wire(() => { selectTab('bridge'); renderAll(); shell.boot(); landOn('bridge'); });
   // Populate selects before restoring an existing author in a draft.
   S.pilots = S.config.pilots.map(n => ({name:n})); pilotOptions(); logbook.resetEntry(true);

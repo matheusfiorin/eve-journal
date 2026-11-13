@@ -78,3 +78,20 @@ test('the mobile tab bar reaches every destination through More',async({page})=>
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  expect(errors).toEqual([]);
 });
+test('iOS Safari shows the Home Screen tip until dismissed, in the page flow, without taking focus',async({page})=>{
+ test.skip(!isMobile(page),'the tip is for iPhone Safari');
+ const hint=page.locator('#install-hint'),synced=()=>expect(page.locator('#sync-status')).toContainText('Synced');
+ // The suite's iPhone runs in Chromium, which has no navigator.standalone, so the other tests never see the tip.
+ const {errors}=await mockApp(page);await openApp(page);await expect(page.locator('#bridge .screen-title')).toBeVisible();await expect(hint).toBeHidden();
+ // Safari in a tab: navigator.standalone is false.
+ await page.addInitScript(()=>Object.defineProperty(Navigator.prototype,'standalone',{get:()=>false,configurable:true}));
+ await page.reload();await synced();
+ await expect(hint).toBeVisible();await expect(hint).toContainText('Add Echelon to your Home Screen so Safari doesn’t clear your session and journal after a week away.');
+ expect(await page.evaluate(()=>document.activeElement.closest('#install-hint'))).toBeNull();
+ expect(await hint.evaluate(el=>getComputedStyle(el).position)).toBe('static');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ await page.locator('#tabbar').getByRole('button',{name:'Earn'}).click();await expect(page.locator('#industry')).toBeVisible();await expect(hint).toBeVisible();
+ await page.getByRole('button',{name:'Dismiss home screen tip'}).click();await expect(hint).toBeHidden();await expect(page.locator('#viewbar .screen-title')).toBeFocused();
+ await page.reload();await synced();await expect(hint).toBeHidden();
+ expect(errors).toEqual([]);
+});

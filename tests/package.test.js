@@ -16,7 +16,7 @@ test('every explicit app control exists exactly once in the document',async()=>{
 test('Pages artifact includes every browser module and stylesheet and excludes journal data',async()=>{
   const [workflow,html]=await Promise.all(['.github/workflows/pages.yml','index.html'].map(read));
   const copyLine=workflow.split('\n').find(l=>l.includes('cp index.html'));
-  assert.match(copyLine,/cp -r ui styles _site\//,'ui/ and styles/ are copied whole');
+  assert.match(copyLine,/cp -r ui styles icons _site\//,'ui/, styles/ and icons/ are copied whole');
   // Walk the whole import graph from the page's entry scripts: root modules' imports too, static and dynamic.
   const seen=new Set(),queue=[...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map(m=>posix.normalize(m[1]));
   assert.ok(queue.includes('app.js'));
@@ -30,6 +30,23 @@ test('Pages artifact includes every browser module and stylesheet and excludes j
   for(const m of html.matchAll(/href="(styles\/[\w.-]+)"/g))await read(m[1]);
   assert.ok(!copyLine.includes('*.json'),'only explicit public configuration is packaged');
   assert.ok(copyLine.includes('config.json'));
+});
+test('the web app manifest and its icons are linked and packaged',async()=>{
+  const [workflow,html]=await Promise.all(['.github/workflows/pages.yml','index.html'].map(read));
+  const copyLine=workflow.split('\n').find(l=>l.includes('cp index.html'));
+  const href=rel=>html.match(new RegExp(`<link rel="${rel}" href="([^"]+)">`))?.[1];
+  assert.equal(href('manifest'),'manifest.webmanifest');
+  assert.ok(copyLine.includes(' manifest.webmanifest '),'the manifest is packaged');
+  const manifest=JSON.parse(await read('manifest.webmanifest'));
+  assert.equal(manifest.name,'Echelon');
+  assert.equal(manifest.display,'standalone');
+  assert.equal(manifest.start_url,'./');assert.equal(manifest.scope,'./');
+  const tokens=await read('styles/tokens.css');
+  assert.ok(tokens.includes(`--bg:${manifest.background_color};`),'background colour is the --bg token');
+  assert.match(html,new RegExp(`<meta name="theme-color" content="${manifest.theme_color}">`));
+  const icons=[...manifest.icons.map(i=>i.src),href('apple-touch-icon')];
+  for(const size of ['192x192','512x512'])assert.ok(manifest.icons.some(i=>i.sizes===size&&i.type==='image/png'),`a ${size} PNG icon`);
+  for(const src of icons){assert.ok(src.startsWith('icons/'),`${src} lives in icons/`);await readFile(new URL(`../${src}`,import.meta.url));}
 });
 test('the Content-Security-Policy allows every host the app fetches and runs no inline script',async()=>{
   const files=['app.js','backend.js',...await uiFiles()];

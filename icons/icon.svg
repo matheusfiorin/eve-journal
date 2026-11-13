@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+ <!-- Echelon app icon, the source of the PNGs beside it: the console's emblem (two pilots' chevrons in formation on a plotted arc).
+      Full bleed, so it also works as a maskable icon: the emblem stays inside the central safe circle. -->
+ <defs>
+  <radialGradient id="g" cx="50%" cy="42%" r="70%"><stop offset="0" stop-color="#18243A"/><stop offset="1" stop-color="#0C1424"/></radialGradient>
+ </defs>
+ <rect width="512" height="512" fill="url(#g)"/>
+ <circle cx="256" cy="256" r="196" fill="none" stroke="#24324B" stroke-width="2" stroke-dasharray="2 14"/>
+ <g transform="translate(96 96) scale(10)">
+  <path d="M27 9.5A12.5 12.5 0 1 0 22 27" fill="none" stroke="#3A4D6E" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M7 15 13 7l6 8-6-2.5Z" fill="#F0BB5C"/>
+  <path d="M14 23l6-8 6 8-6-2.5Z" fill="#5CD3DE"/>
+  <circle cx="27" cy="9.5" r="1.8" fill="#A99BFF"/>
+ </g>
+</svg>

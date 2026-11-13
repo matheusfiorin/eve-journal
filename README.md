@@ -73,6 +73,15 @@ Pushing to `main` runs the tests, deploys the Worker and Pages, then runs live s
 
 The page is static ES modules with no build step. `app.js` boots the app and routes between views; `ui/` holds the shell and shared helpers, and each destination owns `ui/screens/<name>.js` (its markup, renderers and listeners) and `styles/<name>.css`. Design tokens live in `styles/tokens.css`. The pure planning modules (`model.js`, `market.js`, `industry.js`, `route.js`, …) stay at the root with their unit tests.
 
+## Staying signed in and keeping your data
+
+- **Sessions are per device and per browser.** Connecting a pilot stores an opaque dashboard session in this browser's `localStorage`; it lasts 30 days from its last use, and every tab of that browser shares it. Another phone, another browser, a private window or a Home Screen copy of the app (it has its own storage, separate from Safari's) needs its own **Connect**.
+- **Safari clears it after a week away.** Safari deletes everything a site's scripts stored (sessions, the journal, drafts) after 7 days of Safari use without visiting the site. Web apps added to the Home Screen are exempt ([WebKit tracking prevention](https://webkit.org/tracking-prevention/)), so on an iPhone or iPad open Echelon in Safari, tap **Share → Add to Home Screen**, and use it from there. iOS Safari shows a one-time tip about this (`ui/installhint.js`). The app ships a web app manifest and icons (`manifest.webmanifest`, `icons/`, PNGs rendered from `icons/icon.svg` by `scripts/render-icons.mjs`) and no service worker, so nothing is cached past a deploy.
+- **The journal can live on the backend too.** Turn on **Sync goals and entries with the wing backend** in the Logbook's Backup card and goals and entries come back on any device once a pilot connects (see below).
+- **Export a backup file** from the same card for an offline copy; **Restore or merge a backup** brings it back on any device.
+
+GitHub Pages also serves every `*.github.io` project of this account from one origin, so they all share its `localStorage`. `worker/README.md` sketches moving to a custom domain, which would fix that and let the session move into an HttpOnly cookie.
+
 ## Notes storage
 
 Goals and entries live in `localStorage` (`eve-flight-journal:v1`); unsaved Logbook and goal drafts live in `sessionStorage`. Unreadable saved data blocks writes and offers a raw recovery download. A change made in another tab blocks stale saves. After the first save the app asks the browser to keep its site data, and the Backup card says when this browser last exported.
