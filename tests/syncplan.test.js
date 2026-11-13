@@ -37,10 +37,11 @@ test('a record unchanged here takes the server version, including deletes', () =
 
 test('both sides edited: the server keeps the id and this device keeps a conflict copy that uploads', () => {
   const meta = {cursor:{}, known:{'entry:e1':{rev:2, owner:A, fp:fingerprint(entry)}}};
-  const r = applyRemote(data([], [{...entry, body:'Local words'}]), meta, [{kind:'entry', id:'e1', rev:3, record:{...entry, body:'Remote words'}}], A, newId);
+  const r = applyRemote(data([], [{...entry, body:'Local words'}]), meta, [{kind:'entry', id:'e1', rev:3, record:{...entry, body:'Remote words'}}], A, newId, Date.parse('2026-11-13'));
   assert.equal(r.copies, 1);
   assert.deepEqual(r.data.entries.map(e => [e.id, e.body, e.title]), [['e1', 'Remote words', 'First trip'], ['new-1', 'Local words', 'First trip (conflict copy)']]);
   assert.deepEqual(changesFor(r.data, r.meta, A).map(c => c.id), ['new-1']);
+  assert.equal(r.data.entries[1].updatedAt, Date.parse('2026-11-13'), 'the copy is stamped as edited now');
 });
 
 test('a local edit survives a remote delete, a remote edit restores a local delete, and identical edits are no conflict', () => {
@@ -60,4 +61,12 @@ test('an entry another pilot owns is left with that pilot instead of being copie
   assert.deepEqual(changesFor(d, meta, B).map(c => [c.id, c.base]), [['e1', 0]], 'B sends it when connected here, and the server reconciles');
   const r = applyRemote(d, meta, [{kind:'entry', id:'e1', rev:4, record:entry}], B);
   assert.equal(r.copies, 0); assert.equal(r.data.entries.length, 1);
+});
+
+test('updatedAt and fields from a newer build travel with records: a stamp change is an edit, extras survive a conflict copy', () => {
+  const stamped = {...goal, updatedAt:1000, plan:{ships:['Heron']}};
+  const meta = {cursor:{}, known:{'goal:g1':{rev:1, owner:0, fp:fingerprint(stamped)}}};
+  assert.equal(dirty(data([{...stamped, updatedAt:2000}]), meta, 'goal', 'g1'), true);
+  const r = applyRemote(data([{...stamped, done:true, updatedAt:5000}]), meta, [{kind:'goal', id:'g1', rev:2, record:{...stamped, title:'Remote', updatedAt:3000}}], A, () => 'copy', 4000);
+  assert.deepEqual(r.data.goals.map(g => [g.id, g.title, g.updatedAt, g.plan?.ships[0]]), [['g1', 'Remote', 3000, 'Heron'], ['copy', 'Fly a Heron (conflict copy)', 5001, 'Heron']], 'never older than the local edit it copies');
 });

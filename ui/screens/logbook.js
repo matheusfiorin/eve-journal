@@ -1,5 +1,5 @@
 // Logbook: private journal entries with search and filters, drafts that survive reloads, and backup/restore.
-import {validateBackup, mergeBackups, localDate, filterEntries} from '../../model.js';
+import {validateBackup, mergeBackups, mergeSummary, editedAt, localDate, filterEntries} from '../../model.js';
 import {S, KEY, DRAFT} from '../state.js';
 import {$, esc, plural, notice, toast, persist, go, openDrawer, closeDrawer} from '../shared.js';
 import {readout} from './pilot.js';
@@ -111,6 +111,23 @@ function download(contents, filename) {
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+// Restoring asks merge or replace in the drawer. Merge is the default (focused, and the only one-click choice):
+// it never deletes and never puts back an older copy. Replace needs a second confirm because it can do both.
+function restore(incoming) {
+  const s = mergeSummary(S.data, incoming), ids = new Set([...incoming.goals, ...incoming.entries].map(r => r.id));
+  const lost = [...S.data.goals, ...S.data.entries].filter(r => !ids.has(r.id)).length;
+  openDrawer({title:'Restore a backup', body:`<p>This backup has ${plural(incoming.entries.length, 'entry', 'entries')} and ${plural(incoming.goals.length, 'goal')}.</p>
+    <p><b>Merge</b> keeps the newer copy of each record: ${s.added} new here, ${s.newer} newer than the copy here, ${s.kept} older or the same, so the copy here stays. A record saved before edit times were recorded counts as oldest. Merge deletes nothing, so a record you deleted since this backup comes back.</p>
+    <p class="alert danger">Replace everything makes this browser match the backup exactly. ${lost ? `${plural(lost, 'record')} not in the backup will be deleted` : 'Nothing here is missing from the backup'}, and newer edits are reverted to the backup's copies.${syncOn() ? ' With sync on, this also happens on your other devices and to your wingmate’s goals.' : ''} Export a backup first if you might want them.</p>`,
+    foot:'<button type="button" class="secondary" data-close>Cancel</button><button type="button" data-restore="replace" class="secondary">Replace everything…</button><button type="button" data-restore="merge">Merge</button>'});
+  const merge = $('#drawer-foot [data-restore=merge]');
+  merge.focus();
+  merge.onclick = () => { closeDrawer(); if (persist(mergeBackups(S.data, incoming))) toast(syncOn() ? 'Backup merged. The merged records sync next.' : 'Backup merged. These records stay private in this browser.', 'ok'); };
+  $('#drawer-foot [data-restore=replace]').onclick = () => {
+    if (!confirm(`Replace your whole journal with this backup? ${lost ? `${plural(lost, 'record')} will be deleted and ` : ''}any newer edits will be lost${syncOn() ? ', here and on every synced device' : ''}. This can't be undone.`)) return;
+    closeDrawer(); if (persist(validateBackup(incoming))) toast('Journal replaced with the backup.', 'ok');
+  };
+}
 export function wire() {
   if (S.store.locked) {
     document.querySelectorAll('#journal-form button,#import').forEach(b => b.disabled = true);
@@ -130,8 +147,10 @@ export function wire() {
     event.preventDefault(); clearTimeout(draftTimer);
     const fields = Object.fromEntries(new FormData(event.target));
     if (!fields.title.trim() || !fields.body.trim()) return;
-    const entry = {...fields, title:fields.title.trim(), body:fields.body.trim(), id:editingEntry || crypto.randomUUID()};
-    if (editingEntry && !S.data.entries.some(e => e.id === editingEntry)) { notice('This entry no longer exists. Cancel editing to save it as a new entry.'); return; }
+    const prior = editingEntry && S.data.entries.find(e => e.id === editingEntry);
+    if (editingEntry && !prior) { notice('This entry no longer exists. Cancel editing to save it as a new entry.'); return; }
+    // Start from the saved entry so fields a newer build added to it survive an edit made here.
+    const entry = {...prior, ...fields, title:fields.title.trim(), body:fields.body.trim(), id:editingEntry || crypto.randomUUID(), updatedAt:editedAt(prior)};
     if (persist({...S.data, entries:editingEntry ? S.data.entries.map(e => e.id === editingEntry ? entry : e) : [...S.data.entries, entry]})) { const edited = editingEntry; resetEntry(); toast(`${edited ? 'Entry updated' : 'Entry saved'}. ${syncOn() ? 'It syncs privately to your pilot.' : 'It stays private in this browser.'}`, 'ok'); }
   };
   $('#journal-form').addEventListener('input', () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); });
@@ -164,10 +183,7 @@ export function wire() {
     try {
       const file = event.target.files[0]; if (!file) return;
       if (file.size > 5000000) throw new Error('Backup must be under 5 MB.');
-      const incoming = validateBackup(JSON.parse(await file.text()));
-      if (confirm(`Merge ${incoming.entries.length} entries and ${incoming.goals.length} goals? Matching IDs will be replaced.`)) {
-        if (persist(mergeBackups(S.data, incoming))) toast(syncOn() ? 'Backup merged. The merged records sync next.' : 'Backup merged. These records stay private in this browser.', 'ok');
-      }
+      restore(validateBackup(JSON.parse(await file.text())));
     } catch (error) { notice(`Import failed: ${error.message}`); }
     finally { event.target.value = ''; }
   };

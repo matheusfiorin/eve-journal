@@ -3,6 +3,7 @@
 // fingerprint of the record at that moment. A record whose fingerprint differs has changed on this device.
 //   meta = {cursor:{[pilotId]:rev}, known:{'goal:id':{rev, owner, fp}}}   (fp '-' = deleted on the server)
 // Goals belong to the wing (owner 0); an entry belongs to the pilot whose session uploaded it.
+import {editedAt} from '../model.js';
 export const keyOf = (kind, id) => `${kind}:${id}`;
 export const emptyMeta = () => ({cursor:{}, known:{}});
 const GONE = '-';
@@ -64,8 +65,8 @@ export function markApplied(meta, applied, sent, pilotId) {
 // Fold server records into the journal. A record unchanged here takes the server's version (or is deleted). When
 // both sides changed it, nothing is lost: the server's version keeps the id and this device's version stays as a
 // "(conflict copy)" with a new id, which then uploads like any new record. A local edit beats a remote delete, and a
-// remote edit brings back a record deleted here.
-export function applyRemote(data, meta, records, pilotId, newId = () => crypto.randomUUID()) {
+// remote edit brings back a record deleted here. The copy is stamped as edited now, so a later backup merge keeps it.
+export function applyRemote(data, meta, records, pilotId, newId = () => crypto.randomUUID(), now = Date.now()) {
   let next = data, copies = 0;
   const known = {...meta.known};
   for (const r of records) {
@@ -76,7 +77,7 @@ export function applyRemote(data, meta, records, pilotId, newId = () => crypto.r
     if (!changed || same(local, r.record)) { next = put(next, r.kind, r.id, r.record); known[k] = agreed; continue; }
     if (!r.record) { known[k] = agreed; continue; } // Deleted there, edited here: keep the edit; it re-uploads.
     if (!local) { next = put(next, r.kind, r.id, r.record); known[k] = agreed; continue; }
-    const copy = {...local, id:newId(), title:`${local.title.slice(0, 140)} (conflict copy)`};
+    const copy = {...local, id:newId(), title:`${local.title.slice(0, 140)} (conflict copy)`, updatedAt:editedAt(local, now)};
     next = put(put(next, r.kind, r.id, r.record), r.kind, copy.id, copy);
     known[k] = agreed; copies++;
   }

@@ -149,9 +149,11 @@ async function journal(request,url,env){
   return response({rev:more?rows.at(-1).rev:Math.max(since,top),more,records:await Promise.all(rows.map(r=>journalOut(r,env)))});
  }
  if(request.method!=='POST')throw new ServiceError('Method not allowed.',405);
- // Content-Length can be absent (chunked bodies), so measure what actually arrived.
- const text=await request.text();if(text.length>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
- let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Journal changes must be JSON.');}
+ if(Number(request.headers.get('Content-Length'))>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
+ // Content-Length can be missing (chunked uploads), so measure the body too. Records keep extra fields a newer build
+ // added, but validateBackup caps those per record, so 40 changes still fit.
+ const raw=await request.text();if(raw.length>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
+ let body;try{body=JSON.parse(raw);}catch{throw new ServiceError('Journal changes must be JSON.');}
  const changes=body?.changes;
  if(!Array.isArray(changes)||!changes.length||changes.length>JOURNAL_CHANGES)throw new ServiceError(`Send between 1 and ${JOURNAL_CHANGES} journal changes.`);
  for(const c of changes){

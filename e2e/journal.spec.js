@@ -36,7 +36,7 @@ test('export contains records but no tokens or settings',async({page})=>{
  await mockApp(page,{data,connected:true});await openApp(page);await tab(page,'journal');const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Export backup'}).click();const download=await downloadPromise;const stream=await download.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);const text=Buffer.concat(chunks).toString();expect(JSON.parse(text)).toEqual(data);expect(text).not.toContain('test-client');expect(text).not.toContain('token');
 });
 test('backup merge preserves existing entries and rejects malformed imports',async({page})=>{
- await mockApp(page,{data});await openApp(page);await tab(page,'journal');page.once('dialog',d=>d.accept());await page.locator('#import').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({version:1,goals:[],entries:[{...data.entries[0],id:'third',title:'Third entry'}]}))});await expect(page.locator('.entry')).toHaveCount(3);await page.locator('#import').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{bad')});await expect(page.locator('#notice')).toContainText('Import failed');await expect(page.locator('.entry')).toHaveCount(3);
+ await mockApp(page,{data});await openApp(page);await tab(page,'journal');await page.locator('#import').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({version:1,goals:[],entries:[{...data.entries[0],id:'third',title:'Third entry'}]}))});await page.locator('#drawer').getByRole('button',{name:'Merge',exact:true}).click();await expect(page.locator('.entry')).toHaveCount(3);await page.locator('#import').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{bad')});await expect(page.locator('#notice')).toContainText('Import failed');await expect(page.locator('.entry')).toHaveCount(3);
 });
 test('corrupt storage blocks writes and offers raw recovery',async({page})=>{
  await mockApp(page,{corrupt:true});await openApp(page);await tab(page,'journal');await expect(page.getByRole('button',{name:'Save entry locally'})).toBeDisabled();await expect(page.locator('#recover')).toBeVisible();await expect(page.locator('#import')).toBeDisabled();await expect(page.locator('#notice')).toContainText('blocked');expect(await page.evaluate(key=>localStorage.getItem(key),KEY)).toBe('{broken');
@@ -75,7 +75,7 @@ test('entry edits recover as edits instead of creating a duplicate',async({page}
 test('a goal with a target, steps and notes imports, ticks off and records its result',async({page})=>{
  const ctx=await mockApp(page);await openApp(page);await tab(page,'goals');
  const file=readFileSync(new URL('./data/goal-backup.json',import.meta.url));
- page.once('dialog',d=>d.accept());await page.locator('#import').setInputFiles({name:'goal.json',mimeType:'application/json',buffer:file});
+ await page.locator('#import').setInputFiles({name:'goal.json',mimeType:'application/json',buffer:file});await page.locator('#drawer').getByRole('button',{name:'Merge',exact:true}).click();
  const goal=page.locator('.goal').filter({hasText:'Antimatter Charge S'});await expect(goal).toBeVisible();
  await expect(goal).toContainText('Target 1.0M ISK · no result yet');await expect(goal.locator('.goal-steps li')).toHaveCount(6);await expect(goal).toContainText('Mass Production III');
  await expect(goal.locator('[data-goal-step$=":0"]')).toBeChecked();await goal.locator('[data-goal-step$=":2"]').check();
@@ -136,4 +136,24 @@ test('with sync on, goals and entries written on one device appear on another, a
 test('a pilot without sync keeps the old promise: nothing reaches the journal API',async({page})=>{
  const {calls}=await mockApp(page,{connected:'first'});await openApp(page);await addEntry(page);await tab(page,'journal');
  await expect(page.locator('#journal-sync-status')).toContainText('Off');expect(calls.some(c=>c.path==='/api/journal')).toBe(false);
+});
+test('importing an older backup keeps newer edits, and Replace everything restores the backup exactly',async({page})=>{
+ const {errors}=await mockApp(page,{data});await openApp(page);await tab(page,'journal');
+ const backup={version:1,goals:[],entries:[{...data.entries[1],updatedAt:Date.parse('2026-01-01')},{...data.entries[0],id:'third',title:'Third entry'}]};
+ const file={name:'old.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))},drawer=page.locator('#drawer');
+ await page.locator('.entry').filter({hasText:'Wormhole discovery'}).getByRole('button',{name:'Edit',exact:true}).click();
+ await page.locator('#journal-form').getByLabel('Private notes').fill('Edited after the backup.');await page.getByRole('button',{name:'Save changes',exact:true}).click();
+ await page.locator('#import').setInputFiles(file);
+ await expect(drawer).toContainText('1 new here, 0 newer than the copy here, 1 older or the same');await expect(drawer).toContainText('2 records not in the backup will be deleted');
+ await expect(drawer.getByRole('button',{name:'Merge',exact:true})).toBeFocused();
+ await drawer.getByRole('button',{name:'Merge',exact:true}).click();await expect(drawer).toBeHidden();
+ await expect(page.locator('.entry')).toHaveCount(3);await expect(page.locator('#entries')).toContainText('Edited after the backup.');await expect(page.locator('#entries')).not.toContainText('Decxus found a connection.');
+ // Replace asks again; saying no there changes nothing.
+ await page.locator('#import').setInputFiles(file);
+ page.once('dialog',d=>{expect(d.message()).toContain('can\'t be undone');d.dismiss();});await drawer.getByRole('button',{name:'Replace everything…'}).click();
+ await expect(drawer).toBeVisible();await expect(page.locator('.entry')).toHaveCount(3);
+ page.once('dialog',d=>d.accept());await drawer.getByRole('button',{name:'Replace everything…'}).click();await expect(drawer).toBeHidden();
+ await expect(page.locator('.entry')).toHaveCount(2);await expect(page.locator('#entries')).toContainText('Decxus found a connection.');await expect(page.locator('#entries')).not.toContainText('A careful journey home.');
+ expect(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY)).toEqual({...backup,goals:[]});
+ expect(errors).toEqual([]);
 });

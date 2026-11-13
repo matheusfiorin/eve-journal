@@ -1,5 +1,5 @@
 // Wing: what the two pilots are good at together tonight (Crew map) and what they're building toward (Goals).
-import {localDate} from '../../model.js';
+import {localDate, editedAt} from '../../model.js';
 import {crewLayout, shown, ACT} from '../../capabilities.js';
 import {S, reduced, ordered, summary, assetCats} from '../state.js';
 import {name} from '../esi.js';
@@ -262,9 +262,10 @@ export function wire() {
     const fields = Object.fromEntries(new FormData(event.target));
     if (!fields.title.trim()) return;
     const prior = S.data.goals.find(g => g.id === editingGoal), number = v => v === '' || v === undefined ? undefined : Number(v);
-    // Steps keep their ticks when the goal is edited and the line text is unchanged.
-    const steps = fields.steps.split('\n').map(t => t.trim()).filter(Boolean).slice(0, 30).map(text => ({text:text.slice(0, 160), done:prior?.steps?.find(st => st.text === text.slice(0, 160))?.done || false}));
-    const goal = {...fields, title:fields.title.trim(), notes:fields.notes.trim(), target:number(fields.target), result:number(fields.result), steps, id:editingGoal || crypto.randomUUID(), done:prior?.done || false};
+    // Steps keep their ticks (and anything a newer build stored on them) when the goal is edited and the line text is unchanged.
+    const steps = fields.steps.split('\n').map(t => t.trim()).filter(Boolean).slice(0, 30).map(t => t.slice(0, 160)).map(text => ({done:false, ...prior?.steps?.find(st => st.text === text), text}));
+    // Start from the saved goal so fields a newer build added to it survive an edit made here.
+    const goal = {...prior, ...fields, title:fields.title.trim(), notes:fields.notes.trim(), target:number(fields.target), result:number(fields.result), steps, id:editingGoal || crypto.randomUUID(), done:prior?.done || false, updatedAt:editedAt(prior)};
     if (persist({...S.data, goals:editingGoal ? S.data.goals.map(g => g.id === editingGoal ? goal : g) : [...S.data.goals, goal]})) { resetGoal(); toast(syncOn() ? 'Goal saved. It syncs to your wingmate.' : 'Goal saved in this browser.', 'ok'); }
   };
   $('#cancel-goal-edit').onclick = resetGoal;
@@ -275,12 +276,12 @@ export function wire() {
   document.addEventListener('change', event => {
     if (event.target.matches('[data-goal-step]')) {
       const [id, i] = event.target.dataset.goalStep.split(':');
-      if (!persist({...S.data, goals:S.data.goals.map(g => g.id === id ? {...g, steps:g.steps.map((st, n) => n === Number(i) ? {...st, done:event.target.checked} : st)} : g)})) event.target.checked = !event.target.checked;
+      if (!persist({...S.data, goals:S.data.goals.map(g => g.id === id ? {...g, steps:g.steps.map((st, n) => n === Number(i) ? {...st, done:event.target.checked} : st), updatedAt:editedAt(g)} : g)})) event.target.checked = !event.target.checked;
       return;
     }
     if (!event.target.matches('[data-goal]')) return;
     const goal = S.data.goals.find(g => g.id === event.target.dataset.goal);
-    if (!persist({...S.data, goals:S.data.goals.map(g => g.id === event.target.dataset.goal ? {...g, done:event.target.checked} : g)})) event.target.checked = !event.target.checked;
+    if (!persist({...S.data, goals:S.data.goals.map(g => g.id === event.target.dataset.goal ? {...g, done:event.target.checked, updatedAt:editedAt(g)} : g)})) event.target.checked = !event.target.checked;
     else if (event.target.checked && goal) toast(`Goal done: ${goal.title}. Nice flying, both of you.`, 'ok');
   });
   document.addEventListener('click', event => {

@@ -1,17 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateBackup,mergeBackups,remaining,escapeHTML,filterEntries,trainingProgress,localDate,queueState,pilotRoles,pilotTitle,assetHoldings,compactNumber} from '../model.js';
+import {validateBackup,mergeBackups,mergeSummary,editedAt,EXTRA_MAX,remaining,escapeHTML,filterEntries,trainingProgress,localDate,queueState,pilotRoles,pilotTitle,assetHoldings,compactNumber} from '../model.js';
 const goal={id:'goal-1',title:'Fly a cruiser',pilot:'Both pilots',done:false};
 const entry={id:'entry-1',title:'First flight',pilot:'Pilot',date:'2026-10-30',body:'We made it home.'};
-test('backup validation preserves journal records and strips unrelated data',()=>{
-  assert.deepEqual(validateBackup({version:1,goals:[{...goal,token:'must not import'}],entries:[entry],secret:'ignored'}),{version:1,goals:[goal],entries:[entry]});
+test('backup validation keeps fields a newer build added to records and drops unrelated top-level data',()=>{
+  const g={...goal,shipFit:{hull:'Heron',slots:[1,2]},token:'kept as data',steps:[{text:'Train',done:false,doneAt:5}]};
+  const out=validateBackup({version:1,goals:[g],entries:[{...entry,mood:3}],secret:'ignored'});
+  assert.deepEqual(out,{version:1,goals:[g],entries:[{...entry,mood:3}]});
+  assert.deepEqual(Object.keys(out.goals[0]),['id','title','pilot','done','steps','shipFit','token'],'known fields first, extras sorted, so fingerprints are stable');
+  assert.notEqual(out.goals[0].shipFit,g.shipFit,'extras are copied');
+});
+test('extra fields must be plain, bounded JSON without prototype keys',()=>{
+  const ok=extra=>validateBackup({version:1,goals:[],entries:[{...entry,...extra}]});
+  assert.deepEqual(ok({gone:undefined}).entries[0],entry);
+  for(const bad of ['{"__proto__":{"admin":true}}','{"x":{"constructor":1}}','{"x":[{"prototype":1}]}'])assert.throws(()=>ok(JSON.parse(bad)),/extra field/);
+  for(const bad of [{x:()=>1},{x:new Date()},{x:NaN},{x:[[[[[[[1]]]]]]]}])assert.throws(()=>ok(bad),/extra field/);
+  assert.throws(()=>ok({x:'a'.repeat(EXTRA_MAX)}),/too much extra data/);
+  assert.equal(ok({x:'a'.repeat(EXTRA_MAX-20)}).entries[0].x.length,EXTRA_MAX-20);
+  assert.throws(()=>validateBackup({version:1,goals:[{...goal,steps:Array.from({length:30},()=>({text:'s',done:false,note:'n'.repeat(300)}))}],entries:[]}),/too much extra data/,'steps share the record cap');
+  assert.equal(Object.getPrototypeOf(ok({}).entries[0]),Object.prototype);
+});
+test('updatedAt is an edit time in ms: validated, kept, and optional so old backups still load',()=>{
+  const at=1762000000000;
+  assert.equal(validateBackup({version:1,goals:[{...goal,updatedAt:at}],entries:[{...entry,updatedAt:at}]}).entries[0].updatedAt,at);
+  for(const updatedAt of ['2026-11-01T00:00:00Z',0,-1,1.5,1e16,null])assert.throws(()=>validateBackup({version:1,goals:[],entries:[{...entry,updatedAt}]}),/Invalid record/);
+  assert.deepEqual(validateBackup({version:1,goals:[goal],entries:[entry]}),{version:1,goals:[goal],entries:[entry]});
+  assert.equal(editedAt(undefined,at),at);assert.equal(editedAt({updatedAt:at+5000},at),at+5001,'a clock behind the last edit still moves it forward');
 });
 test('malformed backups cannot overwrite local records',()=>{
   for(const bad of [null,{}, {version:2,goals:[],entries:[]},{version:1,goals:[{...goal,done:'yes'}],entries:[]},{version:1,goals:[],entries:[{...entry,date:'invalid'}]}])assert.throws(()=>validateBackup(bad));
 });
 test('merge keeps existing entries and deduplicates stable IDs',()=>{
-  const merged=mergeBackups({version:1,goals:[goal],entries:[entry]},{version:1,goals:[{...goal,done:true}],entries:[]});
+  const merged=mergeBackups({version:1,goals:[goal],entries:[entry]},{version:1,goals:[{...goal,done:true,updatedAt:5}],entries:[]});
   assert.equal(merged.goals.length,1);assert.equal(merged.goals[0].done,true);assert.deepEqual(merged.entries,[entry]);
+});
+test('merge keeps the newer copy of each record; unstamped counts as oldest and a tie keeps the current copy',()=>{
+  const now={...entry,body:'Edited today.',updatedAt:2000},old={...entry,body:'From the backup.',updatedAt:1000};
+  assert.equal(mergeBackups({version:1,goals:[],entries:[now]},{version:1,goals:[],entries:[old]}).entries[0].body,'Edited today.','an old backup does not revert a newer edit');
+  assert.equal(mergeBackups({version:1,goals:[],entries:[old]},{version:1,goals:[],entries:[now]}).entries[0].body,'Edited today.');
+  assert.equal(mergeBackups({version:1,goals:[],entries:[now]},{version:1,goals:[],entries:[entry]}).entries[0].body,'Edited today.','an unstamped backup copy loses');
+  assert.equal(mergeBackups({version:1,goals:[],entries:[entry]},{version:1,goals:[],entries:[old]}).entries[0].body,'From the backup.','a stamped copy beats an unstamped one');
+  assert.equal(mergeBackups({version:1,goals:[],entries:[entry]},{version:1,goals:[],entries:[{...entry,body:'Other'}]}).entries[0].body,entry.body,'tie: both unstamped');
+  assert.equal(mergeBackups({version:1,goals:[],entries:[now]},{version:1,goals:[],entries:[{...now,body:'Other'}]}).entries[0].body,'Edited today.','tie: same stamp');
+  const both={version:1,goals:[{...goal,updatedAt:3000,plan:'v2'}],entries:[now]},incoming={version:1,goals:[{...goal,title:'Older',updatedAt:10}],entries:[old,{...entry,id:'e9'}]};
+  assert.deepEqual(mergeBackups(both,incoming),{version:1,goals:both.goals,entries:[now,{...entry,id:'e9'}]},'a newer field from this build survives too');
+  assert.deepEqual(mergeSummary(both,incoming),{added:1,newer:0,kept:2});
+  assert.deepEqual(mergeSummary({version:1,goals:[],entries:[old]},{version:1,goals:[],entries:[now]}),{added:0,newer:1,kept:0});
 });
 test('queue timing handles future, finished, and paused dates',()=>{
   assert.equal(remaining('2026-10-31T02:00:00Z',Date.parse('2026-10-30T00:00:00Z')),'1d 2h remaining');

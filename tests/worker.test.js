@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks} from '../worker/index.js';
+import {handleRequest,encrypt,decrypt,syncPilot,scheduledSync,pipelineToken,HUB_REGIONS,SYNC_EVERY,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
+import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
 const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
@@ -281,4 +282,19 @@ test('journal sync: a change based on a row the server no longer has is applied,
  await scheduledSync(app.env,app.fetchImpl,0);
  assert.deepEqual(app.env.DB.raw.prepare('SELECT id, rev FROM journal ORDER BY rev').all().map(r=>[r.id,r.rev]),[['e9',1],['g1',3]],'the newest tombstone stays');
  const next=await call(a,'POST',{changes:[{kind:'goal',id:'g2',base:0,record:{...goal,id:'g2'}}]});assert.equal(next.body.applied[0].rev,4);
+});
+test('journal sync keeps fields a newer build added and edit times, within the same size limits',async()=>{
+ const {a,call,app}=await wingApp();
+ const newer={...entry,updatedAt:1762000000000,mood:{stars:4,tags:['calm']}};
+ assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:newer}]})).status,200);
+ assert.deepEqual((await call(a,'GET',null,'?since=0')).body.records[0].record,newer,'mood is not stripped');
+ assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:JSON.parse('{"id":"e2","title":"t","pilot":"p","date":"2026-11-01","body":"b","__proto__":{"x":1}}')}]})).status,400,'no prototype keys');
+ assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:{...entry,id:'e2',x:'x'.repeat(EXTRA_MAX)}}]})).status,400,'extras are capped per record');
+ assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:{...entry,id:'e2',updatedAt:'yesterday'}}]})).status,400);
+ // The biggest valid batch still fits under the body limit, and a body over it is refused even without Content-Length.
+ const big=Array.from({length:JOURNAL_CHANGES},(_,i)=>({kind:'entry',id:`big${i}`,base:0,record:{...entry,id:`big${i}`,body:'x'.repeat(20000),x:'y'.repeat(EXTRA_MAX-20)}}));
+ const full=await call(a,'POST',{changes:big});assert.equal(full.status,200);assert.equal(full.body.applied.length,JOURNAL_CHANGES);
+ const body=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(JSON.stringify({changes:[],pad:'z'.repeat(2000001)})));c.close();}});
+ const res=await app.request('/api/journal',{method:'POST',headers:{Authorization:`Bearer ${a}`,'Content-Type':'application/json'},body,duplex:'half'});
+ assert.equal(res.status,413);
 });
