@@ -1,6 +1,7 @@
 import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} from '../auth.js';
 import {validateBackup,validatePref} from '../model.js';
 import {history,lastHour} from './activity.js';
+import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
 
 const EVE='https://login.eveonline.com';
 // Unversioned ESI routes answer as they did on the compatibility date sent with each request
@@ -29,15 +30,44 @@ function isSameOrigin(request,url){
  if(origin===url.origin)return true;
  return origin==='null'&&request.headers.get('Sec-Fetch-Site')==='same-origin';
 }
-// The pipeline proves itself with an HMAC of the EVE client secret, so no extra secret has to be provisioned.
+// Legacy pipeline credential: an HMAC of the EVE client secret. It never changes, so a captured copy works forever; it
+// is accepted only while PIPELINE_SECRET is not set (see worker/README.md), then every request must be signed.
 export async function pipelineToken(secret){
  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
  return base64url(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode('market-pipeline'))));
 }
-async function requirePipeline(request,env){
+// bytes is the request body as received: the signature covers its digest.
+async function requirePipeline(request,env,url,bytes=new Uint8Array(0)){
+ if(env.PIPELINE_SECRET){
+  const ts=request.headers.get('X-Pipeline-Timestamp')||'',given=request.headers.get('X-Pipeline-Signature')||'';
+  if(!/^\d{10,15}$/.test(ts)||!/^[\w-]{43}$/.test(given)||Math.abs(Date.now()-Number(ts))>PIPELINE_WINDOW)throw new ServiceError('Pipeline authorization required.',401);
+  const want=await pipelineSignature(env.PIPELINE_SECRET,{ts,method:request.method,path:url.pathname,bytes});
+  if(await hash(given)!==await hash(want))throw new ServiceError('Pipeline authorization required.',401);
+  return;
+ }
  const given=request.headers.get('Authorization')?.match(/^Bearer ([\w-]{43})$/)?.[1]||'';
  // Compare digests so the comparison time does not depend on the token.
  if(!env.EVE_CLIENT_SECRET||await hash(given)!==await hash(await pipelineToken(env.EVE_CLIENT_SECRET)))throw new ServiceError('Pipeline authorization required.',401);
+ log({e:'warn',what:'pipeline-legacy-token'});
+}
+// One structured JSON line per event for Workers Logs. Never put tokens, character ids, names or locations in one.
+export const logger={sink:line=>console.log(line)};
+export const log=event=>{try{logger.sink(JSON.stringify(event));}catch{/* Logging never fails a request. */}};
+// The body in bytes (a string's length counts UTF-16 units, so a multi-byte body could pass a character limit and still
+// exceed a byte one), refused above max. Content-Length can be missing or wrong, so the body is measured as read.
+async function readBytes(request,max,message){
+ if(Number(request.headers.get('Content-Length'))>max)throw new ServiceError(message,413);
+ const bytes=new Uint8Array(await request.arrayBuffer());
+ if(bytes.byteLength>max)throw new ServiceError(message,413);
+ return bytes;
+}
+const readText=async(request,max,message)=>new TextDecoder().decode(await readBytes(request,max,message));
+// Cloudflare's Rate Limiting binding (ratelimits in the Worker config). Without the binding (tests, local runs) it is a
+// no-op, and a failing binding never blocks a request. Keys are per client address (CF-Connecting-IP) per limiter.
+async function limit(env,request,name,key){
+ const binding=env[name];if(typeof binding?.limit!=='function')return;
+ let ok=true;try{ok=(await binding.limit({key:key||request.headers.get('CF-Connecting-IP')||'unknown'})).success!==false;}catch{/* Fail open. */}
+ if(!ok)throw new ServiceError('Too many requests. Try again in a minute.',429,{retryAfter:60});
 }
 const random=()=>base64url(crypto.getRandomValues(new Uint8Array(32)));
 const hash=async value=>base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
@@ -205,6 +235,7 @@ async function journalOut(row,env){
  return {kind:row.kind,id:row.id,rev:row.rev,updatedAt:row.updated_at,record:row.data===null?null:await decrypt(row.data,env.TOKEN_ENCRYPTION_KEY,`${row.kind}:${row.id}`)};
 }
 async function journal(request,url,env){
+ await limit(env,request,'RATE_JOURNAL',`j:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
  const s=await session(request,env),me=s.character_id;
  if(request.method==='GET'){
   const since=Math.max(0,Math.floor(Number(url.searchParams.get('since')))||0);
@@ -216,10 +247,8 @@ async function journal(request,url,env){
   return response({rev:more?rows.at(-1).rev:Math.max(since,top),more,records:await Promise.all(rows.map(r=>journalOut(r,env)))});
  }
  if(request.method!=='POST')throw new ServiceError('Method not allowed.',405);
- if(Number(request.headers.get('Content-Length'))>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
- // Content-Length can be missing (chunked uploads), so measure the body too. Records keep extra fields a newer build
- // added, but validateBackup caps those per record, so 40 changes still fit.
- const raw=await request.text();if(raw.length>2000000)throw new ServiceError('Send fewer journal changes at once.',413);
+ // Records keep extra fields a newer build added, but validateBackup caps those per record, so 40 changes still fit.
+ const raw=await readText(request,2000000,'Send fewer journal changes at once.');
  let body;try{body=JSON.parse(raw);}catch{throw new ServiceError('Journal changes must be JSON.');}
  const changes=body?.changes;
  if(!Array.isArray(changes)||!changes.length||changes.length>JOURNAL_CHANGES)throw new ServiceError(`Send between 1 and ${JOURNAL_CHANGES} journal changes.`);
@@ -358,6 +387,87 @@ async function saveUniverse(env,{map,meta}){
  const version=(await hash(`${hints.map}|${hints.meta}`)).slice(0,16);
  await env.DB.prepare("INSERT INTO market_docs (name, version, data, hints, updated_at) VALUES ('universe', ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET version = excluded.version, data = excluded.data, hints = excluded.hints, updated_at = CASE WHEN market_docs.version = excluded.version THEN market_docs.updated_at ELSE excluded.updated_at END").bind(version,data,JSON.stringify(hints),Date.now()).run();
 }
+// Take the pilot's sync lock, then have EVE revoke the refresh token. A sync running now may rotate the refresh token,
+// and revoking the one it replaced would leave the new one authorized at EVE after its row is deleted; a sync holds the
+// lock for seconds. Returns whether EVE confirmed; a failure there still lets the caller delete locally.
+async function revokeGrant(id,env,fetchImpl,action){
+ let locked=null;
+ for(let i=0;i<8&&!locked;i++){
+  if(i)await new Promise(r=>setTimeout(r,1000));
+  locked=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(Date.now()+90000,id,Date.now()).first();
+ }
+ if(!locked)throw new ServiceError(`This pilot is syncing. Try ${action} again in a moment.`,409);
+ try{
+  const credentials=await decrypt(locked.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${locked.character_id}`);
+  const res=await fetchImpl(`${EVE}/v2/oauth/revoke`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams({token:credentials.refreshToken,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(15000)});
+  return res.ok;
+ }catch{ /* Local deletion still removes access and shared snapshots. */ return false; }
+}
+// Delete everything stored about the caller: their journal entries and settings, the EVE grant, the pilot row and every
+// session. Wing goals belong to both pilots, so they stay unless {goals:true,confirm:true} is sent.
+async function forget(request,env,fetchImpl){
+ const s=await session(request,env),me=s.character_id;
+ let body={};try{const text=await readText(request,1024,'That request is too large.');if(text.trim())body=JSON.parse(text);}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Send JSON.');}
+ const goals=body?.goals===true;
+ if(goals&&body.confirm!==true)throw new ServiceError('Deleting the wing goals needs confirmation.',400);
+ const row=await env.DB.prepare('SELECT character_id FROM pilots WHERE character_id = ?').bind(me).first();
+ const revoked=row?await revokeGrant(me,env,fetchImpl,'Delete my data'):false;
+ // Revs only ever grow: a lower MAX(rev) would hand out revs the other devices have already read past. So the newest
+ // row of the whole table, if it is being deleted, stays as an empty tombstone instead.
+ const mine="(owner = ? OR (kind = 'pref' AND id LIKE ?))",top='rev < (SELECT MAX(rev) FROM journal)',args=[me,`%:${me}`];
+ const statements=[
+  env.DB.prepare(`DELETE FROM journal WHERE ${mine} AND ${top}`).bind(...args),
+  env.DB.prepare(`UPDATE journal SET data = NULL, updated_at = ? WHERE ${mine}`).bind(Date.now(),...args),
+  env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(me),
+  env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(me)];
+ // Goals become tombstones with fresh revs, so the wingmate's device learns they are gone (40 at a time: D1 caps the statements in a batch).
+ let goalsLeft=false;
+ if(goals){
+  const rows=(await env.DB.prepare("SELECT id FROM journal WHERE kind = 'goal' AND owner = 0 AND data IS NOT NULL LIMIT 40").all()).results,now=Date.now();
+  goalsLeft=rows.length===40;
+  for(const g of rows)statements.unshift(env.DB.prepare(`UPDATE journal SET data = NULL, rev = ${NEXT_REV}, updated_at = ?, updated_by = ? WHERE kind = 'goal' AND id = ?`).bind(now,me,g.id));
+ }
+ await env.DB.batch(statements);
+ return response({forgotten:true,revoked,goals,...(goalsLeft?{goalsLeft:true}:{})});
+}
+// Ingest bodies come from our own pipeline, but a leaked secret should not let anyone store anything anywhere: the region
+// must be one the pipeline scans (meta 0, map 1, survey 2, the hubs, or a real ESI region id) and the data a plain object
+// of the expected shape.
+const plain=v=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v);
+export const knownRegion=r=>Number.isSafeInteger(r)&&(r>=0&&r<=2||HUB_REGIONS.has(r)||(r>=10000001&&r<=10001000)||(r>=11000001&&r<=11001000));
+export const INGEST_TYPES=20000;
+function validateIngest(body){
+ const region=body?.region,data=body?.data;
+ if(!Number.isSafeInteger(region)||!plain(data))throw new ServiceError('Market snapshot needs a region and data.');
+ if(!knownRegion(region))throw new ServiceError('Unknown market region.',400);
+ if(region===0&&data.types!==undefined&&!plain(data.types))throw new ServiceError('Market meta types must be an object.');
+ if(region===1&&((data.systems!==undefined&&!plain(data.systems))||(data.stations!==undefined&&!Array.isArray(data.stations))))throw new ServiceError('The gate map has the wrong shape.');
+ if(region===2&&data.done!==undefined&&!plain(data.done))throw new ServiceError('The blueprint survey has the wrong shape.');
+ if(region>2){
+  if(data.name!==undefined&&(typeof data.name!=='string'||data.name.length>100))throw new ServiceError('Region name is invalid.');
+  if(data.types!==undefined&&(!plain(data.types)||Object.keys(data.types).length>INGEST_TYPES))throw new ServiceError('Region types have the wrong shape.');
+ }
+}
+// How old each part of the stored data is, for the freshness check: ages in seconds, never names, ids or locations.
+// Market data older than 3 h, the activity sample older than 2 h, or a connected pilot not synced for an hour is a 503.
+export const FRESH={market:3*3600000,activity:2*3600000,pilot:3600000};
+async function freshness(env){
+ const now=Date.now(),age=at=>Number.isFinite(at)?Math.max(0,Math.round((now-at)/1000)):null;
+ const snaps=(await env.DB.prepare('SELECT region_id, updated_at FROM market_snapshots').all()).results;
+ const docs=(await env.DB.prepare('SELECT name, updated_at FROM market_docs').all()).results;
+ const pilots=(await env.DB.prepare('SELECT character_id, updated_at, last_error, grant_revoked_at FROM pilots ORDER BY character_id').all()).results.filter(p=>ALLOWED.has(p.character_id));
+ const meta=snaps.find(r=>r.region_id===0)?.updated_at,hubs=snaps.filter(r=>HUB_REGIONS.has(r.region_id)).map(r=>r.updated_at);
+ const report={market:{metaAge:age(meta),universeAge:age(docs.find(d=>d.name==='universe')?.updated_at),hubs:{count:hubs.length,oldestAge:hubs.length?age(Math.min(...hubs)):null}},
+  activityAge:age(docs.find(d=>d.name==='activity')?.updated_at),
+  pilots:pilots.map((p,i)=>({pilot:i+1,syncAge:age(p.updated_at),error:Boolean(p.last_error||p.grant_revoked_at)}))};
+ // A missing row counts as stale. The universe document only changes with CCP's static data, so its age is not judged.
+ // A pilot whose grant EVE refused cannot sync until they reconnect, so that is reported (error) but is not an outage.
+ const stale=(seconds,max)=>seconds===null||seconds*1000>max,problems=[];
+ if(stale(report.market.metaAge,FRESH.market)||(report.market.hubs.count&&stale(report.market.hubs.oldestAge,FRESH.market)))problems.push('market');
+ if(stale(report.activityAge,FRESH.activity))problems.push('activity');
+ for(const [i,p] of pilots.entries())if(!p.grant_revoked_at&&stale(report.pilots[i].syncAge,FRESH.pilot))problems.push(`pilot ${i+1}`);
+ return response({ok:!problems.length,problems,...report},problems.length?503:200);
+}
 async function route(request,env,ctx,fetchImpl){
  const url=new URL(request.url),front=frontend(env);
  if(url.pathname==='/health'){
@@ -365,14 +475,19 @@ async function route(request,env,ctx,fetchImpl){
   const ready=Boolean(database&&env.EVE_CLIENT_ID&&env.EVE_CLIENT_SECRET&&env.TOKEN_ENCRYPTION_KEY);
   return response({service:'eve-journal-api',ready,database,callback:`${url.origin}/auth/callback`},ready?200:503);
  }
+ if(url.pathname==='/health/freshness'&&request.method==='GET'){
+  await limit(env,request,'RATE_MARKET');
+  return freshness(env);
+ }
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
   const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data.</p><ul><li>Your skill-point total and training queue will be visible on the public two-pilot dashboard.</li><li>Wallet, ship, location, assets and industry jobs are visible only to your authorized dashboard session, and to your wingmate if you tick the second box.</li><li>Refresh tokens are encrypted on the backend. You can disconnect and remove the stored authorization and snapshot.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree to share my skill total and training queue publicly.</label><label><input type="checkbox" name="wing" value="yes" checked> Share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public.</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data. What it keeps, and who sees it:</p><ul><li><b>Public:</b> your skill-point total and training queue will be visible on the public two-pilot dashboard, to anyone who opens it. The dashboard works that way, so connecting requires you to agree to it.</li><li><b>Only you, and your wingmate if you tick the second box:</b> wallet, ship, location, assets, industry jobs and mining ledger.</li><li><b>Journal sync:</b> your Logbook entries, goals and settings are stored encrypted on the backend so they sync between your devices. Goals are shared with your wingmate; entries and settings are only yours.</li><li><b>Market scans:</b> once an hour the market pipeline reads the market of the region you are in, so the dashboard can price trades near you. That region is shown only to signed-in pilots, never publicly.</li><li>Refresh tokens are encrypted on the backend. You can disconnect, or use Delete my data on the dashboard to remove everything stored about you.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree that my skill total and training queue are shown publicly on this dashboard. (Required.)</label><label><input type="checkbox" name="wing" value="yes"> Also share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public. (Optional.)</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
-  const fields=new URLSearchParams(await request.text());
+  await limit(env,request,'RATE_AUTH');
+  const fields=new URLSearchParams(await readText(request,4096,'That request is too large.'));
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
   const state=random(),verifier=random(),stateHash=await hash(state);
@@ -409,21 +524,21 @@ async function route(request,env,ctx,fetchImpl){
   })});
  }
  if(url.pathname==='/api/market/regions'&&request.method==='GET'){
-  await requirePipeline(request,env);
+  await requirePipeline(request,env,url);
   const rows=await env.DB.prepare('SELECT snapshot FROM pilots').all();
   const systems=[...new Set(rows.results.map(row=>parseSnapshot(row).operations?.location?.value?.solar_system_id).filter(Number.isSafeInteger))];
   return response({systems});
  }
  if(url.pathname==='/api/market/survey'&&request.method==='GET'){
-  await requirePipeline(request,env);
+  await requirePipeline(request,env,url);
   const row=await env.DB.prepare('SELECT data FROM market_snapshots WHERE region_id = 2').first();
   return response({survey:row?JSON.parse(row.data):null});
  }
  if(url.pathname==='/api/market/ingest'&&request.method==='POST'){
-  await requirePipeline(request,env);
-  const text=await request.text();if(text.length>1900000)throw new ServiceError('Market snapshot is too large.',413); // D1 rows top out at 2 MB
-  let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Market snapshot is not JSON.');}
-  if(!Number.isSafeInteger(body?.region)||body.region<0||!body.data||typeof body.data!=='object')throw new ServiceError('Market snapshot needs a region and data.');
+  const bytes=await readBytes(request,1900000,'Market snapshot is too large.'); // D1 rows top out at 2 MB
+  await requirePipeline(request,env,url,bytes);
+  let body;try{body=JSON.parse(new TextDecoder().decode(bytes));}catch{throw new ServiceError('Market snapshot is not JSON.');}
+  validateIngest(body);
   const data=body.data,now=Date.now();
   if(body.region===0){
    // Kill and jump history is the cron's now. A pipeline from before the switch still sends its copy: keep it only if
@@ -445,6 +560,7 @@ async function route(request,env,ctx,fetchImpl){
  // The static universe document: the gate map (region 1) and STATIC_META. A request naming the current version is
  // cached for a year; the browser asks again only when /api/market names a new one.
  if(url.pathname==='/api/market/universe'&&request.method==='GET'){
+  await limit(env,request,'RATE_MARKET');
   const doc=await env.DB.prepare("SELECT version, data FROM market_docs WHERE name = 'universe'").first();
   if(!doc)throw new ServiceError('The universe map is not stored yet.',404);
   const tag=`"u-${doc.version}"`,headers={ETag:tag,'Cache-Control':url.searchParams.get('v')===doc.version?'public, max-age=31536000, immutable':'public, max-age=300'};
@@ -453,6 +569,7 @@ async function route(request,env,ctx,fetchImpl){
   return jsonText(`{"version":${JSON.stringify(doc.version)},"universe":${map?.data||'null'},"meta":${doc.data}}`,200,headers);
  }
  if(url.pathname==='/api/market'&&request.method==='GET'){
+  await limit(env,request,'RATE_MARKET');
   // Pilot regions reveal where the pilots fly, so only a signed-in dashboard session sees them; everyone else gets the hubs.
   let signedIn=false;
   if(request.headers.has('Authorization'))try{await session(request,env);signedIn=true;}catch{/* Serve the public view. */}
@@ -490,7 +607,7 @@ async function route(request,env,ctx,fetchImpl){
  }
  if(url.pathname==='/api/waypoints'&&request.method==='POST'){
   const s=await session(request,env);
-  let body;try{body=await request.json();}catch{throw new ServiceError('Waypoints must be JSON.');}
+  let body;try{body=JSON.parse(await readText(request,4096,'Send fewer waypoints.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Waypoints must be JSON.');}
   return response(await setWaypoints(s.character_id,body?.systems,env,fetchImpl));
  }
  if(url.pathname==='/api/journal')return journal(request,url,env);
@@ -502,6 +619,10 @@ async function route(request,env,ctx,fetchImpl){
   const r=await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await hash(token)).run();
   return response({revoked:(r?.meta?.changes||0)>0});
  }
+ if(url.pathname==='/api/forget'){
+  if(request.method!=='POST')throw new ServiceError('Method not allowed.',405);
+  return forget(request,env,fetchImpl);
+ }
  if(['/api/session','/api/sync','/api/disconnect'].includes(url.pathname)){
   if(url.pathname==='/api/session'&&request.method!=='GET')throw new ServiceError('Method not allowed.',405);
   if(url.pathname!=='/api/session'&&request.method!=='POST')throw new ServiceError('Method not allowed.',405);
@@ -509,20 +630,7 @@ async function route(request,env,ctx,fetchImpl){
   let row=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(s.character_id).first();
   if(!row)throw new ServiceError('This pilot is no longer connected.',401);
   if(url.pathname==='/api/disconnect'){
-   // Take the sync lock first: a sync running now may rotate the refresh token, and revoking the one it replaced
-   // would leave the new one authorized at EVE after its row is deleted. A sync holds the lock for seconds.
-   let locked=null;
-   for(let i=0;i<8&&!locked;i++){
-    if(i)await new Promise(r=>setTimeout(r,1000));
-    locked=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(Date.now()+90000,row.character_id,Date.now()).first();
-   }
-   if(!locked)throw new ServiceError('This pilot is syncing. Try Disconnect again in a moment.',409);
-   let revoked=false;
-   try{
-    const credentials=await decrypt(locked.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${locked.character_id}`);
-    const res=await fetchImpl(`${EVE}/v2/oauth/revoke`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams({token:credentials.refreshToken,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(15000)});
-    revoked=res.ok;
-   }catch{ /* Local deletion still removes access and shared snapshots. */ }
+   const revoked=await revokeGrant(row.character_id,env,fetchImpl,'Disconnect');
    await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
    return response({disconnected:true,revoked});
   }
@@ -531,7 +639,17 @@ async function route(request,env,ctx,fetchImpl){
  }
  throw new ServiceError('Not found.',404);
 }
+// Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
+ const started=Date.now();
+ const result=await handle(request,env,ctx,fetchImpl);
+ // No query, headers, tokens or addresses: route, method, status and duration only.
+ const {pathname}=new URL(request.url);
+ log({e:'req',route:LOGGED.has(pathname)?pathname:'other',method:request.method,status:result.status,ms:Date.now()-started});
+ return result;
+}
+async function handle(request,env,ctx,fetchImpl){
  const origin=request.headers.get('Origin');
  const url=new URL(request.url);
  let front;try{front=frontend(env);}catch{return response({error:'Backend configuration is incomplete.'},503);}
@@ -539,7 +657,7 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const cors=origin===front.origin?{'Access-Control-Allow-Origin':front.origin,Vary:'Origin','Access-Control-Allow-Headers':'Authorization,Content-Type','Access-Control-Allow-Methods':'GET,POST,OPTIONS'}:{};
  if(request.method==='OPTIONS')return new Response(null,{status:204,headers:{...cors,...(Object.keys(cors).length?{'Access-Control-Max-Age':'7200'}:{})}});
  let result;
- try{result=await route(request,env,ctx,fetchImpl);}catch(error){result=response({error:error instanceof ServiceError?error.message:'Backend request failed. Try again later.'},error instanceof ServiceError?error.status:500);}
+ try{result=await route(request,env,ctx,fetchImpl);}catch(error){result=response({error:error instanceof ServiceError?error.message:'Backend request failed. Try again later.'},error instanceof ServiceError?error.status:500,error.retryAfter?{'Retry-After':String(error.retryAfter)}:{});if(!(error instanceof ServiceError))log({e:'error',what:'unhandled'});}
  // Append Vary rather than replace it: /api/market varies by Authorization too, and a cached signed-in copy must not
  // be reused once the session is gone. Preflights are cached for two hours instead of preceding every request.
  const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))key==='Vary'?headers.append(key,value):headers.set(key,value);
@@ -589,7 +707,7 @@ export async function sampleActivity(env,fetchImpl=fetch,now=Date.now()){
  // updated_at moves only with new data: /api/market's ETag is built from it.
  await env.DB.prepare(`INSERT INTO market_docs (name, data, hints, updated_at, expires_at, turns) VALUES ('activity', ?, ?, ?, ?, 1) ON CONFLICT(name) DO UPDATE SET ${data?'data = excluded.data, updated_at = excluded.updated_at, ':''}hints = excluded.hints, expires_at = excluded.expires_at, turns = market_docs.turns + 1`)
   .bind(data||'{}',JSON.stringify({kills:kills.hint,jumps:jumps.hint}),now,expires).run();
- return {sampled:Boolean(fresh),expires};
+ return {sampled:Boolean(fresh),expires,failed:Boolean(failed)};
 }
 // One ESI job per run, taking turns: a pilot sync makes about 13 ESI calls plus up to 19 more asset pages and a token
 // refresh (fewer now that unexpired endpoints are skipped), and the free plan allows 50 subrequests and 10 ms of CPU per
@@ -600,13 +718,30 @@ export async function sampleActivity(env,fetchImpl=fetch,now=Date.now()){
 // the turn counter it bumps hands the skipped turn to the same pilot on the next run, so neither pilot always loses it.
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
- await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now()),
+ const sample=await env.DB.prepare("SELECT expires_at, turns FROM market_docs WHERE name = 'activity'").first();
+ if(!sample||Date.now()>=sample.expires_at){const r=await sampleActivity(env,fetchImpl);return {job:'sample',kills:r.failed?'failed':'ok'};}
+ const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
+ if(!ids.length)return {job:'sync',pilot:'none'};
+ const row=await syncPilot(ids[(Math.floor(at/SYNC_EVERY)+sample.turns)%ids.length],env,fetchImpl);
+ return {job:'sync',pilot:row&&!row.last_error?'ok':'failed'};
+}
+// Once a day (DAILY_CRON in scripts/deploy-backend.mjs): expired sessions and login states are already refused where they
+// are read, so removing them is housekeeping that does not need to run every 5 minutes.
+export const DAILY_CRON='17 3 * * *';
+export async function cleanup(env,now=Date.now()){
+ await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
-  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(Date.now()-180*86400000)]);
- const sample=await env.DB.prepare("SELECT expires_at, turns FROM market_docs WHERE name = 'activity'").first();
- if(!sample||Date.now()>=sample.expires_at){await sampleActivity(env,fetchImpl);return;}
- const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
- if(ids.length)await syncPilot(ids[(Math.floor(at/SYNC_EVERY)+sample.turns)%ids.length],env,fetchImpl);
+  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(now-180*86400000)]);
+ return {job:'cleanup'};
 }
-export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env,fetch,event.scheduledTime));}};
+// event.cron says which trigger fired: the daily one cleans up, any other syncs. Each run logs one structured line.
+export async function scheduled(event,env,at=event.scheduledTime,fetchImpl=fetch){
+ const started=Date.now();
+ try{
+  const result=event.cron===DAILY_CRON?await cleanup(env):await scheduledSync(env,fetchImpl,at);
+  log({e:'cron',...result,ms:Date.now()-started});
+  return result;
+ }catch(error){log({e:'cron',job:event.cron===DAILY_CRON?'cleanup':'sync',failed:true,ms:Date.now()-started});throw error;}
+}
+export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduled(event,env,event.scheduledTime));}};

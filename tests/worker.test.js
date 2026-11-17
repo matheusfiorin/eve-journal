@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
-import {generateKeyPairSync,sign} from 'node:crypto';
-import {handleRequest,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
+import {generateKeyPairSync,sign,createHmac,createHash} from 'node:crypto';
+import {signPipelineRequest} from '../worker/pipeline-auth.js';
+import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -149,7 +150,7 @@ test('a revoked refresh token asks the pilot to reconnect instead of blaming EVE
 test('disconnect removes enrollment, all sessions and public snapshot and requests EVE revocation',async()=>{
  const app=setup();const {bearer}=await connect(app);const disconnected=await app.request('/api/disconnect',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}});assert.equal(disconnected.status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,0);assert.ok(app.calls.some(call=>call.url.endsWith('/oauth/revoke')));assert.deepEqual((await(await app.request('/api/public/pilots')).json()).pilots,[]);
 });
-test('scheduler removes expired transient state and does not duplicate recent syncs',async()=>{
+test('the 5 minute scheduler does not duplicate recent syncs',async()=>{
  const app=setup();await connect(app);sampled(app);const before=app.calls.length;await scheduledSync(app.env,app.fetchImpl);assert.equal(app.calls.length,before);
 });
 test('encryption rejects altered ciphertext and uses a fresh IV',async()=>{
@@ -376,7 +377,7 @@ test('journal sync: a change based on a row the server no longer has is applied,
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:2,record:null}]});
  app.env.DB.raw.prepare('UPDATE journal SET updated_at = 0').run();
- await scheduledSync(app.env,app.fetchImpl,0);
+ await cleanup(app.env);
  assert.deepEqual(app.env.DB.raw.prepare('SELECT id, rev FROM journal ORDER BY rev').all().map(r=>[r.id,r.rev]),[['e9',1],['g1',3]],'the newest tombstone stays');
  const next=await call(a,'POST',{changes:[{kind:'goal',id:'g2',base:0,record:{...goal,id:'g2'}}]});assert.equal(next.body.applied[0].rev,4);
 });
@@ -639,4 +640,205 @@ test('the universe version changes only when the map or the static meta changes;
 });
 test('joinObjects splices JSON objects without parsing them',()=>{
  assert.deepEqual(JSON.parse(joinObjects('{"a":1}',null,'{}',' {"b":[1,2]} ','{"a":3}')),{a:3,b:[1,2]});assert.equal(joinObjects(),'{}');
+});
+
+// ---- Observability, pipeline signing, rate limits, Delete my data, freshness, cron (items 6 and 7) ----
+const LOGS=[];logger.sink=line=>LOGS.push(line);
+const signedHeaders=(secret,method,path,body='',now=Date.now())=>signPipelineRequest(secret,method,path,body,now);
+const ingestSigned=async(app,body,{path='/api/market/ingest',now,tamper,secret='pipeline-secret'}={})=>{
+ const text=JSON.stringify(body),headers=await signedHeaders(secret,'POST',path,text,now);
+ return app.request('/api/market/ingest',{method:'POST',headers,body:tamper?text.replace('Forge','Fargo'):text});
+};
+test('the pipeline signs each request: ts|method|path|body digest within a 5 minute window',async()=>{
+ const app=setup();app.env.PIPELINE_SECRET='pipeline-secret';const forge={region:10000002,data:{name:'The Forge',types:{}}};
+ assert.equal((await ingestSigned(app,forge)).status,200);
+ // Everything the signature covers is checked, and the old fixed token no longer works once PIPELINE_SECRET is set.
+ assert.equal((await ingestSigned(app,forge,{now:Date.now()-6*60000})).status,401,'a replay after the window');
+ assert.equal((await ingestSigned(app,forge,{now:Date.now()+6*60000})).status,401,'a timestamp from the future');
+ assert.equal((await ingestSigned(app,forge,{now:Date.now()-4*60000})).status,200,'inside the window');
+ assert.equal((await ingestSigned(app,forge,{tamper:true})).status,401,'another body');
+ assert.equal((await ingestSigned(app,forge,{path:'/api/market/regions'})).status,401,'a signature made for another route');
+ assert.equal((await ingestSigned(app,forge,{secret:'other'})).status,401);
+ const legacy=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ assert.equal((await app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${legacy}`},body:JSON.stringify(forge)})).status,401,'the legacy token is refused');
+ assert.equal((await app.request('/api/market/ingest',{method:'POST',body:JSON.stringify(forge)})).status,401);
+ assert.equal((await app.request('/api/market/ingest',{method:'POST',headers:{'X-Pipeline-Timestamp':String(Date.now()),'X-Pipeline-Signature':'x'.repeat(43)},body:JSON.stringify(forge)})).status,401);
+ // GETs are signed too (empty body).
+ assert.equal((await app.request('/api/market/regions',{headers:await signedHeaders('pipeline-secret','GET','/api/market/regions')})).status,200);
+ assert.equal((await app.request('/api/market/survey',{headers:await signedHeaders('pipeline-secret','GET','/api/market/regions')})).status,401);
+});
+test('without PIPELINE_SECRET the legacy token still works and logs a warning',async()=>{
+ const app=setup();LOGS.length=0;const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const res=await app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify({region:10000002,data:{name:'The Forge',types:{}}})});
+ assert.equal(res.status,200);assert.ok(LOGS.some(l=>JSON.parse(l).what==='pipeline-legacy-token'));
+ // A request signed for a Worker that has no PIPELINE_SECRET is not accepted either.
+ const text=JSON.stringify({region:10000002,data:{types:{}}});
+ assert.equal((await app.request('/api/market/ingest',{method:'POST',headers:await signedHeaders('pipeline-secret','POST','/api/market/ingest',text),body:text})).status,401);
+});
+test('the pipeline script signs the way the Worker verifies',async()=>{
+ const headers=await signPipelineRequest('s3cret','post','/api/market/ingest','{"a":"é"}',1762000000000);
+ assert.equal(headers['X-Pipeline-Timestamp'],'1762000000000');
+ assert.equal(headers['X-Pipeline-Signature'],createHmac('sha256','s3cret').update(`1762000000000|POST|/api/market/ingest|${createHash('sha256').update('{"a":"é"}').digest('base64url')}`).digest('base64url'));
+});
+test('ingest accepts only known regions and well-shaped data, and measures its body in bytes',async()=>{
+ const app=setup();const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ const send=body=>app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:typeof body==='string'?body:JSON.stringify(body)});
+ for(const region of [0,1,2,10000002,10000001,10000043,10001000,11000005])assert.equal((await send({region,data:region===1?{systems:{},stations:[]}:{types:{}}})).status,200,`region ${region}`);
+ for(const region of [-1,3,999,10000000,10001001,10999999,12000000,2**40,1.5,'10000002',null])assert.equal((await send({region,data:{types:{}}})).status,400,`region ${region}`);
+ assert.equal((await send({region:10000002,data:[]})).status,400);
+ assert.equal((await send({region:10000002,data:{types:[]}})).status,400,'types must be an object');
+ assert.equal((await send({region:10000002,data:{name:'x'.repeat(101),types:{}}})).status,400);
+ assert.equal((await send({region:10000002,data:{types:Object.fromEntries(Array.from({length:INGEST_TYPES+1},(_,i)=>[i,{}]))}})).status,400,'too many types');
+ assert.equal((await send({region:1,data:{systems:[]}})).status,400);
+ assert.equal((await send({region:2,data:{done:[]}})).status,400);
+ // 1,000,000 two-byte characters is under 1.9 million characters but over 1.9 million bytes.
+ const big=JSON.stringify({region:10000002,data:{name:'é'.repeat(1000000)}});assert.ok(big.length<1900000&&new TextEncoder().encode(big).length>1900000);
+ assert.equal((await send(big)).status,413);
+ assert.equal((await send('not json')).status,400);
+});
+function limiter(allow){const keys=[];return {keys,limit:async({key})=>{keys.push(key);return {success:keys.length<=allow};}};}
+test('rate limits are a no-op without the binding, fail open when it breaks, and answer 429 when it says no',async()=>{
+ const app=setup();
+ for(let i=0;i<30;i++)assert.equal((await app.request(`/auth/start?pilot=${id}`)).status,200);
+ const page=await app.request(`/auth/start?pilot=${id}`),csrf=(await page.text()).match(/name="csrf" value="([^"]+)"/)[1],cookie=page.headers.get('Set-Cookie').split(';')[0];
+ const post=()=>app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:cookie,'CF-Connecting-IP':'203.0.113.9'},body:new URLSearchParams({pilot:String(id),csrf,share:'yes'})});
+ app.env.RATE_AUTH={limit:async()=>{throw new Error('binding down');}};assert.equal((await post()).status,303,'a broken binding never blocks');
+ const auth=app.env.RATE_AUTH=limiter(1);assert.equal((await post()).status,303);
+ const blocked=await post();assert.equal(blocked.status,429);assert.equal(blocked.headers.get('Retry-After'),'60');
+ assert.deepEqual(auth.keys,['203.0.113.9','203.0.113.9'],'keyed by CF-Connecting-IP');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM oauth_states').get().n,2,'a refused request writes nothing');
+ // Public market reads share one limiter; the journal has its own, keyed by session.
+ const market=app.env.RATE_MARKET=limiter(2);
+ assert.equal((await app.request('/api/market',{headers:{'CF-Connecting-IP':'198.51.100.1'}})).status,200);
+ assert.equal((await app.request('/api/market/universe')).status,404,'under the limit: the real answer (no universe stored yet)');
+ assert.equal((await app.request('/api/market')).status,429);assert.equal((await app.request('/api/market/universe')).status,429);assert.equal((await app.request('/health/freshness')).status,429);
+ assert.equal(market.keys[0],'198.51.100.1');assert.equal(market.keys[1],'unknown','no address header, still one shared key');
+ const journal=setup();const b2=(await connect(journal)).bearer;
+ const jl=journal.env.RATE_JOURNAL=limiter(1);const get=()=>journal.request('/api/journal?since=0',{headers:{Authorization:`Bearer ${b2}`}});
+ assert.equal((await get()).status,200);assert.equal((await get()).status,429);assert.ok(!jl.keys.join().includes(b2),'the session token is not the key');assert.equal(new Set(jl.keys).size,1);
+});
+test('small endpoints cap their bodies',async()=>{
+ const app=setup();const {bearer}=await connect(app);
+ const page=await app.request(`/auth/start?pilot=${id}`),cookie=page.headers.get('Set-Cookie').split(';')[0];
+ const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:cookie},body:'x'.repeat(5000)});assert.equal(start.status,413);
+ const waypoints=body=>app.request('/api/waypoints',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},body});
+ assert.equal((await waypoints(JSON.stringify({systems:[30000142],pad:'é'.repeat(3000)}))).status,413,'3000 two-byte characters are 6000 bytes');
+ assert.equal((await waypoints(JSON.stringify({systems:[30000142]}))).status,200);
+});
+test('the consent page names journal sync and the market scan, states the public sharing plainly, and leaves wing sharing unticked',async()=>{
+ const app=setup();const text=await (await app.request(`/auth/start?pilot=${id}`)).text();
+ assert.match(text,/Journal sync/);assert.match(text,/market of the region you are in/);assert.match(text,/visible on the public two-pilot dashboard, to anyone/);assert.match(text,/Delete my data/);
+ assert.match(text,/<input type="checkbox" name="share" value="yes" required>/);
+ const wing=text.match(/<input type="checkbox" name="wing"[^>]*>/)[0];assert.doesNotMatch(wing,/checked/);assert.doesNotMatch(wing,/required/);
+ const kept=setup();await connect(kept,{wing:false});assert.equal(kept.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,0);
+});
+test('Delete my data removes the journal, prefs, grant, pilot and sessions; goals and the wingmate stay',async()=>{
+ const {app,a,b,call}=await wingApp();
+ assert.equal((await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry},{kind:'pref',id:explored.id,base:0,record:explored}]})).status,200);
+ assert.equal((await call(b,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:{...entry,id:'e2',pilot:'Decxus'}}]})).status,200);
+ const forget=(bearer,body)=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},...(body?{body:JSON.stringify(body)}:{})});
+ assert.equal((await app.request('/api/forget',{method:'POST'})).status,401);assert.equal((await app.request('/api/forget',{headers:{Authorization:`Bearer ${a}`}})).status,405);
+ const before=app.calls.length;
+ const res=await forget(a);assert.equal(res.status,200);assert.deepEqual(await res.json(),{forgotten:true,revoked:true,goals:false});
+ assert.ok(app.calls.slice(before).some(c=>c.url.endsWith('/oauth/revoke')&&String(c.init.body).includes('private-rotating-refresh-token')),'EVE is asked to revoke the grant');
+ const rows=app.env.DB.raw.prepare('SELECT kind, id, owner, data FROM journal ORDER BY rev').all();
+ assert.ok(!rows.some(r=>r.id==='e1'&&r.data),'the entry is gone');assert.ok(!rows.some(r=>r.kind==='pref'&&r.data),'the prefs are gone');
+ assert.ok(rows.some(r=>r.id==='g1'&&r.data&&r.owner===0),'the wing goal stays');assert.ok(rows.some(r=>r.id==='e2'&&r.data),'the wingmate\'s entry stays');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots WHERE character_id = ?').get(id).n,0);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE character_id = ?').get(id).n,0);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots WHERE character_id = ?').get(other).n,1);
+ assert.equal((await app.request('/api/session',{headers:{Authorization:`Bearer ${a}`}})).status,401,'the session is gone');
+ // Revs never go back, so the other pilot's device keeps its place.
+ const next=await call(b,'POST',{changes:[{kind:'entry',id:'e3',base:0,record:{...entry,id:'e3',pilot:'Decxus'}}]});assert.ok(next.body.applied[0].rev>3);
+});
+test('Delete my data: wing goals go only when asked and confirmed, as tombstones the wingmate learns of',async()=>{
+ const {app,a,b,call}=await wingApp();
+ await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
+ const forget=body=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${a}`},body:JSON.stringify(body)});
+ assert.equal((await forget({goals:true})).status,400,'unconfirmed');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,2);
+ assert.equal((await app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${a}`},body:'{nope'})).status,400);
+ assert.equal((await forget({goals:true,confirm:true})).status,200);
+ const seen=await call(b,'GET',null,'?since=0');assert.deepEqual(seen.body.records.map(r=>[r.id,r.record]),[['g1',null]],'the goal is a tombstone');
+});
+test('Delete my data waits for a running sync like Disconnect, and a pilot who never synced is still removed',async()=>{
+ const app=setup();const {bearer}=await connect(app);
+ app.env.DB.raw.prepare('UPDATE pilots SET sync_lock_until = ?').run(Date.now()+60000);
+ const real=globalThis.setTimeout;globalThis.setTimeout=(fn)=>real(fn,0);
+ try{assert.equal((await app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${bearer}`}})).status,409);}finally{globalThis.setTimeout=real;}
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,1,'nothing was deleted');
+});
+const age=(app,sql,...values)=>app.env.DB.raw.prepare(sql).run(...values);
+async function freshApp(){
+ const app=setup();await connect(app);const now=Date.now();
+ age(app,'INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (0, ?, ?), (10000002, ?, ?), (10000043, ?, ?)','{}',now-600000,'{}',now-300000,'{}',now-900000);
+ age(app,"INSERT INTO market_docs (name, data, updated_at) VALUES ('activity', '{}', ?), ('universe', '{}', ?)",now-1200000,now-30*86400000);
+ return app;
+}
+test('/health/freshness reports ages only, 200 when fresh',async()=>{
+ const app=await freshApp();const res=await app.request('/health/freshness');assert.equal(res.status,200);
+ const body=await res.json();assert.equal(body.ok,true);assert.deepEqual(body.problems,[]);
+ assert.ok(Math.abs(body.market.metaAge-600)<5);assert.equal(body.market.hubs.count,2);assert.ok(Math.abs(body.market.hubs.oldestAge-900)<5);assert.ok(body.market.universeAge>86400,'an old universe document is not an outage');
+ assert.ok(Math.abs(body.activityAge-1200)<5);assert.deepEqual(body.pilots.map(p=>[p.pilot,p.error]),[[1,false]]);assert.ok(body.pilots[0].syncAge<60);
+ const text=JSON.stringify(body);for(const secret of [String(id),'Fiofka','30000142','Private ship'])assert.ok(!text.includes(secret),`${secret} stays out`);
+ assert.deepEqual(Object.keys(body.pilots[0]).sort(),['error','pilot','syncAge']);
+ assert.equal(res.headers.get('Cache-Control'),'no-store');
+});
+test('/health/freshness is 503 for old market data, an old activity sample, a pilot not synced for an hour or missing data',async()=>{
+ const H=3600000,now=Date.now(),check=async(fix)=>{const app=await freshApp();fix(app);const res=await app.request('/health/freshness');return {status:res.status,body:await res.json()};};
+ let r=await check(app=>age(app,'UPDATE market_snapshots SET updated_at = ? WHERE region_id = 0',now-3*H-60000));assert.equal(r.status,503);assert.deepEqual(r.body.problems,['market']);
+ r=await check(app=>age(app,'UPDATE market_snapshots SET updated_at = ? WHERE region_id = 10000043',now-4*H));assert.deepEqual(r.body.problems,['market'],'a stale hub row counts as market data');
+ r=await check(app=>age(app,"UPDATE market_docs SET updated_at = ? WHERE name = 'activity'",now-2*H-60000));assert.equal(r.status,503);assert.deepEqual(r.body.problems,['activity']);
+ r=await check(app=>age(app,'UPDATE pilots SET updated_at = ?',now-H-60000));assert.equal(r.status,503);assert.deepEqual(r.body.problems,['pilot 1']);
+ r=await check(app=>age(app,'UPDATE pilots SET updated_at = NULL'));assert.deepEqual(r.body.problems,['pilot 1'],'never synced');
+ r=await check(app=>age(app,"DELETE FROM market_docs WHERE name = 'activity'"));assert.deepEqual(r.body.problems,['activity']);assert.equal(r.body.activityAge,null);
+ r=await check(app=>age(app,'DELETE FROM market_snapshots'));assert.deepEqual(r.body.problems,['market']);
+ r=await check(app=>age(app,'UPDATE pilots SET last_error = ?','Some EVE data could not be refreshed.'));assert.equal(r.status,200);assert.equal(r.body.pilots[0].error,true,'an error flag alone is not an outage');
+ r=await check(app=>age(app,'UPDATE pilots SET updated_at = ?, grant_revoked_at = ?',now-5*H,now));assert.equal(r.status,200,'a revoked grant waits for the pilot to reconnect');assert.equal(r.body.pilots[0].error,true);
+ // No pilot connected: nothing to be late.
+ r=await check(app=>age(app,'DELETE FROM pilots'));assert.equal(r.status,200);assert.deepEqual(r.body.pilots,[]);
+});
+test('the daily cron cleans up, any other cron syncs, and each logs one structured line',async()=>{
+ const app=setup();await connect(app);sampled(app);
+ const raw=app.env.DB.raw;raw.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').run('old',id,1);raw.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').run('old','x',1);
+ raw.prepare("INSERT INTO journal (kind, id, owner, data, rev, updated_at, updated_by) VALUES ('entry','dead',?,NULL,1,0,?),('entry','top',?,NULL,2,0,?)").run(id,id,id,id);
+ LOGS.length=0;const before=app.calls.length;
+ const daily=await scheduled({cron:DAILY_CRON,scheduledTime:Date.now()},app.env,Date.now(),app.fetchImpl);
+ assert.deepEqual(daily,{job:'cleanup'});assert.equal(app.calls.length,before,'cleanup asks EVE for nothing');
+ assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?').get('old').n,0);assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM oauth_states').get().n,0);
+ assert.deepEqual(raw.prepare('SELECT id FROM journal').all().map(r=>r.id),['top'],'old tombstones go, the newest stays');
+ assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash != ?').get('old').n>0,true,'live sessions stay');
+ // The 5 minute cron no longer deletes.
+ raw.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').run('old2',id,1);
+ const sync=await scheduled({cron:'*/5 * * * *',scheduledTime:Date.now()},app.env,Date.now(),app.fetchImpl);
+ assert.deepEqual(sync,{job:'sync',pilot:'ok'});assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?').get('old2').n,1);
+ const events=LOGS.map(l=>JSON.parse(l));assert.deepEqual(events.map(e=>[e.e,e.job]),[['cron','cleanup'],['cron','sync']]);
+ for(const e of events)assert.equal(typeof e.ms,'number');
+});
+test('cron logs say which job ran and whether the pilot sync and the kills sample worked, and never who or where',async()=>{
+ const T0=Date.parse('2026-11-14T12:00:00Z');
+ const app=setup({feeds:{kills:[{system_id:30000142,ship_kills:3,pod_kills:0,npc_kills:1}],jumps:[{system_id:30000142,ship_jumps:9}],modified:T0,expires:T0+3600000}});await connect(app);
+ LOGS.length=0;
+ assert.deepEqual(await scheduled({cron:'*/5 * * * *'},app.env,T0,app.fetchImpl),{job:'sample',kills:'ok'},'no sample stored yet: the first run samples');
+ const down=setup({feeds:{fail:'kills',kills:[],jumps:[],modified:T0,expires:T0+3600000}});
+ assert.deepEqual(await scheduled({cron:'*/5 * * * *'},down.env,T0,down.fetchImpl),{job:'sample',kills:'failed'});
+ const failing=setup({revoked:true});await connect(failing);sampled(failing);
+ failing.env.DB.raw.prepare('UPDATE pilots SET sync_lock_until = 0, updated_at = 0, last_error = NULL, credentials = ?').run(await encrypt({accessToken:'a',refreshToken:'r',expires:1,scopes:[]},failing.env.TOKEN_ENCRYPTION_KEY,P));
+ assert.deepEqual(await scheduled({cron:'*/5 * * * *'},failing.env,Date.now(),failing.fetchImpl),{job:'sync',pilot:'failed'});
+ const text=LOGS.join('\n');for(const secret of [String(id),'Fiofka','30000142','private-rotating','Bearer'])assert.ok(!text.includes(secret),`${secret} stays out of the logs`);
+ const empty=setup();sampled(empty);assert.deepEqual(await scheduled({cron:'*/5 * * * *'},empty.env,Date.now(),empty.fetchImpl),{job:'sync',pilot:'none'});
+ const boom=setup();boom.env.DB={prepare(){throw new Error('db down');},batch(){throw new Error('db down');}};LOGS.length=0;
+ await assert.rejects(scheduled({cron:DAILY_CRON},boom.env));assert.equal(JSON.parse(LOGS[0]).failed,true);
+});
+test('each request logs its route, status and duration, and nothing about who or where',async()=>{
+ const app=setup();const {bearer}=await connect(app);LOGS.length=0;
+ await app.request('/health');await app.request(`/api/journal?since=0&secret=zzz`,{headers:{Authorization:`Bearer ${bearer}`,'CF-Connecting-IP':'203.0.113.7'}});await app.request('/api/session',{headers:{Authorization:'Bearer nope'}});await app.request('/some/odd/path/with-token-abc');
+ const events=LOGS.map(l=>JSON.parse(l));
+ assert.deepEqual(events.map(e=>[e.route,e.status]),[['/health',200],['/api/journal',200],['/api/session',401],['other',404]]);
+ for(const e of events){assert.deepEqual(Object.keys(e).sort(),['e','method','ms','route','status']);assert.equal(typeof e.ms,'number');}
+ const text=LOGS.join('\n');for(const secret of [bearer,'zzz','203.0.113.7','token-abc',String(id)])assert.ok(!text.includes(secret),`${secret} stays out`);
+});
+test('migration 0008 indexes the cleanup and Delete my data lookups',async()=>{
+ const app=setup();const names=app.env.DB.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(r=>r.name);
+ for(const n of ['oauth_states_expiry','sessions_character','journal_owner','journal_tombstones'])assert.ok(names.includes(n),n);
 });

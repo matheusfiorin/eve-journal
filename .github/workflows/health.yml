@@ -1,0 +1,52 @@
+name: Backend health
+# Calls the Worker's public /health/freshness every hour. Unhealthy: one issue labelled "health" is opened or updated with
+# the ages; healthy again: it is closed. GitHub skips some scheduled runs, so this is a nudge, not a pager.
+on:
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: backend-health
+  cancel-in-progress: false
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Ask the Worker how fresh its data is
+        id: check
+        run: node scripts/check-health.mjs
+      - name: Open, update or close the health issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          HEALTHY: ${{ steps.check.outputs.healthy }}
+        with:
+          script: |
+            const fs = require('fs');
+            const healthy = process.env.HEALTHY === 'true';
+            const report = fs.existsSync('health-report.md') ? fs.readFileSync('health-report.md', 'utf8') : 'The health check did not run.';
+            const {owner, repo} = context.repo;
+            const run = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            try { await github.rest.issues.createLabel({owner, repo, name: 'health', color: 'd93f0b', description: 'Backend data is stale'}); }
+            catch (error) { if (error.status !== 422) throw error; } // already exists
+            const open = (await github.rest.issues.listForRepo({owner, repo, labels: 'health', state: 'open', per_page: 1})).data[0];
+            if (healthy) {
+              if (open) {
+                await github.rest.issues.createComment({owner, repo, issue_number: open.number, body: `Healthy again.\n\n${report}\n\n${run}`});
+                await github.rest.issues.update({owner, repo, issue_number: open.number, state: 'closed', state_reason: 'completed'});
+              }
+              return;
+            }
+            const body = `${report}\n\nChecked ${new Date().toISOString()} by ${run}`;
+            if (open) await github.rest.issues.createComment({owner, repo, issue_number: open.number, body});
+            else await github.rest.issues.create({owner, repo, title: 'Backend data is stale', labels: ['health'], body});
+      - name: Fail the run when unhealthy
+        if: steps.check.outputs.healthy != 'true'
+        run: exit 1

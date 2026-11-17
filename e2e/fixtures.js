@@ -116,6 +116,7 @@ export async function mockApp(page,options={}) {
    return json(privateRecord(id,state));
   }
   if(path==='/api/disconnect')return json({disconnected:true});
+  if(path==='/api/forget'){state.forgotten=(state.forgotten||0)+1;return json({forgotten:true,revoked:true,goals:false});}
   if(path==='/api/session/revoke')return json({revoked:true});
   if(path==='/api/wing'){if(state.expired)return json({error:'Backend session expired.'},401);return json({pilots:IDS.map(id=>wingRecord(id,state)).filter(r=>r.characterId===IDS[0]||!state.wingPrivate).map(r=>r.characterId===IDS[1]&&state.wingPrivate?{...r,sharing:false}:r)});}
   if(path==='/api/market/universe')return json(universeDoc(state.universeVersion||'u1'));

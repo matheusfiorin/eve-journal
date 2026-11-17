@@ -66,3 +66,19 @@ test('disconnect removes private data from the page',async({page})=>{
  const {calls}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');page.once('dialog',d=>d.accept());await page.locator('.me-banner').getByRole('button',{name:'Disconnect'}).click();await expect(overview).not.toContainText('12,500,000.25');expect(calls.some(c=>c.path==='/api/disconnect')).toBe(true);
  await tab(page,'wallet');await expect(page.locator('#ledger-content')).toContainText('Connect this pilot');
 });
+test('Delete my data asks twice, then removes the pilot’s data from the backend and the page',async({page})=>{
+ const {calls,state}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');
+ const button=page.locator('.me-banner').getByRole('button',{name:'Delete my data'});
+ // Each click answers the dialogs it raises from this queue; declining either question changes nothing.
+ const answers=[];page.on('dialog',d=>answers.shift()(d));
+ answers.push(d=>d.dismiss());await button.click();
+ answers.push(d=>d.accept(),d=>{expect(d.type()).toBe('prompt');return d.accept('nope');});await button.click();
+ await page.waitForTimeout(300);expect(calls.some(c=>c.path==='/api/forget')).toBe(false);await expect(overview).toContainText('12,500,000.25');
+ answers.push(d=>d.accept(),d=>d.accept('DELETE'));await button.click();await expect(overview).not.toContainText('12,500,000.25');
+ expect(calls.filter(c=>c.path==='/api/forget'&&c.method==='POST').length).toBe(1);expect(state.forgotten).toBe(1);
+});
+test('the page refuses to render inside another page',async({page})=>{
+ await mockApp(page,{connected:'first'});await openApp(page);
+ const text=await page.evaluate(()=>new Promise(resolve=>{const f=document.createElement('iframe');f.src='/';f.onload=()=>setTimeout(()=>resolve(f.contentDocument.body.innerText),1500);document.body.append(f);}));
+ expect(text).toContain('will not run inside another page');expect(text).not.toContain('12,500,000.25');
+});

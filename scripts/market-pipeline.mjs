@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {createHmac} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
+import {signPipelineRequest} from '../worker/pipeline-auth.js';
 
 // Unversioned ESI routes answer as of the compatibility date each request sends (developers.eveonline.com/docs/services/esi/overview).
 // Checked against ESI's changelog: none of the routes used here changed after it. Keep it equal to the Worker's ESI_COMPAT.
@@ -185,13 +186,16 @@ export function ores(types, typeMaterials) {
 }
 
 async function main() {
-  const secret = process.env.EVE_CLIENT_SECRET?.trim();
-  if (!secret) throw new Error('EVE_CLIENT_SECRET is required to sign pipeline uploads.');
-  const token = createHmac('sha256', secret).update('market-pipeline').digest('base64url');
+  // PIPELINE_SECRET signs every request (worker/pipeline-auth.js). Without it the pipeline falls back to the old fixed
+  // token derived from the EVE client secret, which the Worker accepts only while it has no PIPELINE_SECRET either.
+  const pipelineSecret = process.env.PIPELINE_SECRET?.trim(), secret = process.env.EVE_CLIENT_SECRET?.trim();
+  if (!pipelineSecret && !secret) throw new Error('PIPELINE_SECRET (or, until it is set up, EVE_CLIENT_SECRET) is required to sign pipeline uploads.');
+  if (!pipelineSecret) console.log('::warning title=Pipeline secret::PIPELINE_SECRET is not set; using the legacy fixed token. See worker/README.md.');
+  const token = pipelineSecret ? '' : createHmac('sha256', secret).update('market-pipeline').digest('base64url');
   const site = process.env.SITE_URL || 'https://matheusfiorin.github.io/eve-journal/';
   const backend = (await (await fetch(new URL('config.json', site), {signal:AbortSignal.timeout(30000)})).json()).backendUrl;
   if (!backend) throw new Error('The published config.json has no backendUrl yet.');
-  const api = (path, init = {}) => fetch(`${backend}${path}`, {...init, headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json', ...init.headers}, signal:AbortSignal.timeout(60000)});
+  const api = async (path, init = {}) => fetch(`${backend}${path}`, {...init, headers:{...(pipelineSecret ? await signPipelineRequest(pipelineSecret, init.method || 'GET', path, init.body || '') : {Authorization:`Bearer ${token}`}), 'Content-Type':'application/json', ...init.headers}, signal:AbortSignal.timeout(60000)});
 
   const {items} = JSON.parse(await readFile(new URL('../market/watchlist.json', import.meta.url), 'utf8'));
   const ids = (await esi('/universe/ids/?language=en', {method:'POST', body:JSON.stringify(items)})).body.inventory_types || [];

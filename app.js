@@ -24,6 +24,10 @@ import * as logbook from './ui/screens/logbook.js';
 // The small screens load with the page. Earn and Navigate (the planners, the Star map and its drawing, gesture and state
 // code) load on the first visit to one of their views, or when the page is idle, so the first paint doesn't wait for them.
 // Every screen's markup is in the page from the start either way.
+// A page that only runs in its own window: framed by another site it could be made to look like something else, so it
+// refuses to render (the Worker's own pages send frame-ancestors 'none'; a meta CSP cannot).
+if (window.top !== window.self) { document.body.replaceChildren(Object.assign(document.createElement('p'), {textContent: 'Echelon will not run inside another page. Open it in its own tab.'})); throw new Error('Framed'); }
+
 const SCREENS = [bridge, wing, pilot, jobs, ledger, logbook];
 const MARKUP = [bridge.markup, wing.markup, pilot.markup, earnMarkup, jobs.markup, mapMarkup, haulMarkup, ledger.markup, logbook.markup];
 const LOADERS = {earn:() => import('./ui/screens/earn.js'), navigate:() => import('./ui/screens/navigate.js')};
@@ -98,6 +102,15 @@ document.addEventListener('click', async event => {
       await S.backend.disconnect(id);
       const p = S.pilots.find(p => p.id === id); if (p) { p.shared = null; clearPrivate(p); }
       renderAll();
+    }
+    // Delete my data: removes everything the backend stores about this pilot (journal, settings, EVE authorization, sessions).
+    if (b.dataset.forget) {
+      const id = Number(b.dataset.forget);
+      if (!confirm('Delete all of this pilot’s data from the backend?\n\nThis removes their journal entries, settings, stored EVE authorization and every signed-in device. It cannot be undone. Wing goals shared with your wingmate stay. Entries saved in this browser stay too.')) return;
+      if (prompt('Type DELETE to confirm.') !== 'DELETE') return;
+      await S.backend.forget(id);
+      const p = S.pilots.find(p => p.id === id); if (p) { p.shared = null; clearPrivate(p); }
+      renderAll(); notice('Your data was deleted from the backend.');
     }
   } catch (error) { notice(error.message); }
 });

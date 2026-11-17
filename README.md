@@ -81,6 +81,15 @@ Pushing to `main` runs the tests, deploys the Worker and Pages, then runs live s
 
 The page is static ES modules with no build step. `app.js` boots the app and routes between views; `ui/` holds the shell and shared helpers, and each destination owns `ui/screens/<name>.js` (its markup, renderers and listeners) and `styles/<name>.css`. Design tokens live in `styles/tokens.css`. The pure planning modules (`model.js`, `market.js`, `industry.js`, `route.js`, …) stay at the root with their unit tests. Earn and Navigate (the planners, the Star map and its 3D drawing) load on the first visit to one of their views or when the page is idle; their markup is split into `ui/screens/*-markup.js` so the page can build every screen at boot, and `index.html` preloads the boot graph (`tests/package.test.js` keeps the two in step). The Haul plan's route searches run in a module Worker (`ui/haulworker.js`, driven by `ui/haulplan.js`) and fall back to the page if a Worker can't start. `tests/planners.test.js` checks the optimised planners against reference versions and carries time budgets on a 5,400-system payload.
 
+## Security and observability
+
+- **Pipeline signing.** Market uploads are signed with a `PIPELINE_SECRET` GitHub secret (create it once; see `worker/README.md`), so a captured request can't be replayed. Without it the old fixed token still works, with a warning.
+- **Delete my data.** Beside Disconnect, **Delete my data** removes everything the backend stores about a pilot (journal entries and settings, EVE authorization, sessions) after two confirmations. Entries saved in your browser stay there. Wing goals belong to both pilots and stay.
+- **Rate limits, body caps and a framing guard.** Cloudflare rate limits protect login start, the public market and the journal. The page won't render inside another site's frame. The published page's Content-Security-Policy allows only this deployment's Worker; the source keeps `*.workers.dev` so local and browser tests can run, and `scripts/configure-frontend.mjs` pins it at deploy time.
+- **Health.** `GET /health/freshness` publishes ages only. `.github/workflows/health.yml` checks it hourly, opens one issue labelled `health` while data is stale and closes it when it recovers. Workers Logs hold one JSON line per request and cron run, with no tokens, ids or locations.
+- **Supply chain.** Every workflow action is pinned to a commit SHA, and the jobs that use the `github-pages` environment's secrets run only from `main` (also set a branch rule on the environment in Settings → Environments).
+- EVE Online's trademark notice (CCP licence §7.1) is in the page footer.
+
 ## Staying signed in and keeping your data
 
 - **Sessions are per device and per browser.** Connecting a pilot stores an opaque dashboard session in this browser's `localStorage`; it lasts 30 days from its last use, and every tab of that browser shares it. Another phone, another browser, a private window or a Home Screen copy of the app (it has its own storage, separate from Safari's) needs its own **Connect**.

@@ -42,7 +42,7 @@ export function connectButtons(p, index) {
   if (!S.backend) return '<p class="hint">Private data needs the backend, which is not configured here.</p>';
   // A wingmate who connected on their own device is already connected: offer "Connect here too", never a bare Connect.
   const label = p.private ? 'Reconnect' : viaWing(p) ? 'Connect here too' : 'Connect with EVE';
-  return `<div class="actions"><button data-connect="${index}" class="${p.private || viaWing(p) ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${label}</button>${S.backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button>` : ''}</div>`;
+  return `<div class="actions"><button data-connect="${index}" class="${p.private || viaWing(p) ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${label}</button>${S.backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button><button data-forget="${p.id}" class="secondary small">Delete my data</button>` : ''}</div>`;
 }
 // Why a wingmate's shared data is thin: an older consent (level 1 shares only wallet and assets) or a failing sync.
 export function wingNote(p) {
