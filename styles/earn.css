@@ -124,13 +124,22 @@
 .drawer__foot .hint{margin:0;align-self:center}
 .drawer__foot .trip-link{margin:0}
 
-@media (min-width:721px){ .earn-bar .tf--m{display:none} }
+@media (min-width:721px){ .earn-bar .tf--m{display:none} .unit{display:none} }
 @media (max-width:1100px){ .earn-bar{position:static} }
 @media (max-width:720px){
-  .earn-bar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-top:-20px;gap:8px 12px}
-  .earn-bar::-webkit-scrollbar{display:none}
-  .earn-bar .tf-filter{margin-left:0;width:150px;flex:none}
-  .earn-bar .bands{flex:none}
+  /* Every control stays on screen: a two-column grid of labelled fields, the filter and switches on their own rows. */
+  .earn-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px;margin-top:-20px}
+  .earn-bar .tf{display:grid;gap:3px;align-items:start}
+  .earn-bar .tf--m{display:grid}
+  .earn-bar select,.earn-bar input{width:100%;max-width:none;min-width:0}
+  .earn-bar input[type=number]{width:100%}
+  .earn-bar .sw input{width:30px;flex:none}
+  .earn-bar .sw{width:auto;justify-self:start}
+  .earn-bar .bands{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:6px 18px;border:0;padding:6px 0}
+  .earn-bar .bands .sw{grid-column:auto}
+  .earn-bar .tf-filter,.earn-bar .bands,.earn-bar .sw{grid-column:1/-1;margin-left:0;width:100%}
+  .earn-bar .bands{justify-content:space-between;padding:6px 0}
+  .unit{display:inline}
   .earn-sum{grid-template-columns:1fr}
   .earn-sum__acts--quiet,.earn-sum>.earn-sum__acts:last-child:not(.earn-sum__acts--quiet){grid-column:1;grid-row:auto;justify-content:flex-start}
   .earn-main__head{padding:0 14px 10px}
@@ -148,3 +157,4 @@
   .earn-sum .readout dd,.ed .readout dd{font-size:var(--fs-lg)}
   .earn-sum .readout dd small,.ed .readout dd small{display:block}
 }
+@media (pointer:coarse){ .earn-bar select,.earn-bar input:not([type=checkbox]){min-height:44px} .earn-bar .sw{min-height:44px} .earn details>summary{min-height:44px} }

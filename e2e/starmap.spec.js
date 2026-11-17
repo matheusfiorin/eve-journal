@@ -118,7 +118,7 @@ test('phone: fingers pan and pinch the map, taps select, and the details sheet p
  const {errors}=await mockApp(page,{connected:'first'});await openApp(page);await tab(page,'map');const svg=await mapReady(page);
  const vp=page.viewportSize(),stage=await page.locator('#map-stage').boundingBox(),tabbar=await page.locator('#tabbar').boundingBox(),sheet=page.locator('#map-panel');
  // Map first: the stage reaches down to the peeking sheet, the sheet sits on the tab bar, nothing scrolls sideways.
- const peek=await sheet.boundingBox();expect(peek.height).toBeCloseTo(112,0);expect(peek.y+peek.height).toBeCloseTo(tabbar.y,0);expect(stage.y+stage.height).toBeLessThanOrEqual(peek.y+1);
+ const peek=await sheet.boundingBox();expect(peek.height).toBeCloseTo(84,0);expect(peek.y+peek.height).toBeCloseTo(tabbar.y,0);expect(stage.y+stage.height).toBeLessThanOrEqual(peek.y+1);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await expect(sheet.locator('h3')).toHaveText('Jita');
  // Touch targets: zoom buttons and the Layers button are at least 44 px.
@@ -142,7 +142,7 @@ test('phone: fingers pan and pinch the map, taps select, and the details sheet p
  const handle=page.locator('#map-sheet-handle');
  await handle.click();await expect(sheet).toHaveAttribute('data-snap','half');await expect.poll(async()=>(await sheet.boundingBox()).height).toBeCloseTo(vp.height*0.5,-1);
  await handle.click();await expect(sheet).toHaveAttribute('data-snap','full');await expect(handle).toHaveAttribute('aria-expanded','true');
- await handle.click();await expect(sheet).toHaveAttribute('data-snap','peek');await expect.poll(async()=>(await sheet.boundingBox()).height).toBeCloseTo(112,0);
+ await handle.click();await expect(sheet).toHaveAttribute('data-snap','peek');await expect.poll(async()=>(await sheet.boundingBox()).height).toBeCloseTo(84,0);
  const h=await handle.boundingBox();await page.mouse.move(h.x+h.width/2,h.y+10);await page.mouse.down();await page.mouse.move(h.x+h.width/2,h.y-vp.height*0.4,{steps:6});await page.mouse.up();
  await expect(sheet).toHaveAttribute('data-snap','half');
  // Layers: the toolbar opens as a sheet and goes home when it closes.

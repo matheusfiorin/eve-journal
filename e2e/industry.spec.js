@@ -48,7 +48,7 @@ test('industry ranks starter blueprints with research plans, payback and pilot a
  await page.locator('#industry-category').selectOption('');await page.locator('#industry-sort').selectOption('near');await expect(picks.first()).toContainText('Hobgoblin I');
  await page.locator('#industry-sort').selectOption('cheap');await expect(picks.first()).toContainText('Hobgoblin I');await page.locator('#industry-sort').selectOption('');
  if(!isMobile(page)){
-  const head=industry.locator('.sort[data-sort="invest"]');await head.click();await expect(page.locator('#industry-sort')).toHaveValue('invest');await expect(industry.locator('.sort[data-sort="invest"]')).toHaveAttribute('aria-sort','ascending');
+  const head=industry.locator('.sort[data-sort="invest"]');await head.click();await expect(page.locator('#industry-sort')).toHaveValue('invest');await expect(industry.locator('[role=columnheader]:has(.sort[data-sort="invest"])')).toHaveAttribute('aria-sort','ascending');
   await industry.locator('.sort[data-sort="invest"]').click();await expect(page.locator('#industry-sort')).toHaveValue('');
  }
  await page.locator('#industry-budget').fill('1000000');await page.locator('#industry-budget').blur();

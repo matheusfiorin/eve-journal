@@ -1,7 +1,7 @@
 // The Echelon shell: the information architecture (7 destinations and their views), the rail, the mobile tab bar,
 // the view bar with sub-view tabs, the status strip, the command palette, keyboard shortcuts and the boot sequence.
 import {S, mine, summary} from './state.js';
-import {$, esc, format, openDrawer, closeDrawer, go} from './shared.js';
+import {$, esc, format, openDrawer, closeDrawer, go, wireIsk} from './shared.js';
 import {mapGraph} from './routes.js';
 import {openMap, showOnMap} from './mapmodal.js';
 import {loadMarket} from './marketdata.js';
@@ -19,7 +19,7 @@ const DEST = Object.fromEntries(DESTS.map(d => [d.id, d]));
 export const VIEWS = Object.fromEntries(DESTS.flatMap(d => d.views.map(v => [v.id, {...v, dest:d}])));
 // Tab ids and hashes from before the redesign.
 const OLD = {overview:'bridge', empire:'strengths', wallet:'ledger', operations:'ledger', notes:'logbook', journal:'logbook'};
-const TABBAR = ['bridge', 'wing', 'earn', 'navigate'];
+const TABBAR = ['bridge', 'pilot', 'earn', 'navigate'];
 const store = {get:k => { try { return localStorage.getItem(k); } catch { return null; } }, set:(k, v) => { try { localStorage.setItem(k, v); } catch { /* Per-browser convenience only. */ } }};
 
 // A view id, an old tab id, a destination ("earn", its last-used view) or "earn/mine" → a view id, or null.
@@ -40,7 +40,7 @@ export const currentView = () => document.querySelector('.view:not([hidden])')?.
 
 const icon = name => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 export function build() {
-  $('#rail-list').innerHTML = DESTS.map((d, i) => `${d.sep ? '<li class="rail__sep" role="separator"></li>' : ''}<li><button class="rail__item" data-go="${d.id}" data-dest="${d.id}" data-key="${d.key}" data-label="${d.label}" aria-label="${d.label}" aria-keyshortcuts="G ${d.key.toUpperCase()}" style="--i:${i}">${icon(d.id)}<span>${d.label}</span><kbd>G ${d.key.toUpperCase()}</kbd></button></li>`).join('');
+  $('#rail-list').innerHTML = DESTS.map((d, i) => `${d.sep ? '<li class="rail__sep" aria-hidden="true"></li>' : ''}<li><button class="rail__item" data-go="${d.id}" data-dest="${d.id}" data-key="${d.key}" data-label="${d.label}" aria-label="${d.label}" aria-keyshortcuts="G ${d.key.toUpperCase()}" style="--i:${i}">${icon(d.id)}<span>${d.label}</span><kbd>G ${d.key.toUpperCase()}</kbd></button></li>`).join('');
   $('#tabbar').insertAdjacentHTML('afterbegin', TABBAR.map(id => `<button class="tabbar__item" data-go="${id}" data-dest="${id}">${icon(id)}<span>${DEST[id].label}</span></button>`).join(''));
   if (store.get('eve.rail') === 'collapsed') toggleRail(true);
 }
@@ -57,7 +57,8 @@ export function mark(id) {
 }
 export function renderStrip() {
   const u = S.universeStatus, w = summary(mine()).wallet;
-  $('#server-status').innerHTML = u ? `<span class="dot ${u.stale ? '' : 'on'}"></span><span><span class="num">${Number(u.players).toLocaleString()}</span> pilots online${u.vip ? ' · VIP only' : ''}${u.stale ? ' · last known' : ''}</span>` : '<span class="dot"></span><span>Tranquility status unavailable</span>';
+  // Until the first status answer arrives the strip says it is connecting, not that EVE is down.
+  $('#server-status').innerHTML = u ? `<span class="dot ${u.stale ? '' : 'on'}"></span><span><span class="num">${Number(u.players).toLocaleString()}</span> pilots online${u.vip ? ' · VIP only' : ''}${u.stale ? ' · last known' : ''}</span>` : S.statusTried ? '<span class="dot"></span><span>Tranquility status unavailable</span>' : '<span class="dot"></span><span>Connecting to Tranquility…</span>';
   $('#strip-wallet').innerHTML = w === undefined ? '' : `<span class="num">${format(w, 'isk').replace(' ISK', '')}</span> ISK`;
   $('#strip-wallet').hidden = w === undefined;
 }
@@ -79,7 +80,7 @@ const SHORTCUTS = [['Ctrl K', 'Search or jump anywhere'], ['G then B W P E N L J
   ['/', 'Focus the search on this view'], ['J K', 'Next or previous row'], ['R', 'Refresh EVE data'], ['[', 'Collapse or expand the navigation'], ['?', 'Show these shortcuts'], ['Esc', 'Close the open dialog']];
 export const openShortcuts = () => openDrawer({title:'Keyboard shortcuts', body:`<dl class="keys">${SHORTCUTS.map(([k, what]) => `<div><dt>${k.split(' ').map(x => x === 'then' ? '<span>then</span>' : `<kbd>${x}</kbd>`).join(' ')}</dt><dd>${what}</dd></div>`).join('')}</dl>`});
 function openMore() {
-  const items = DESTS.filter(d => !TABBAR.includes(d.id)).flatMap(d => d.views.map(v => [v.id, v.label, d.label])).concat([['goals', 'Goals', 'Wing']]);
+  const items = DESTS.filter(d => !TABBAR.includes(d.id)).flatMap(d => d.views.map(v => [v.id, v.label, d.label]));
   openDrawer({title:'More', body:`<ul class="sheet-list">${items.map(([id, label, group]) => `<li><button class="sheet-item" data-go="${id}"><span>${label}</span><small>${group === label ? '' : group}</small></button></li>`).join('')}<li><button class="sheet-item" data-palette><span>Search or jump</span><small>Screens, systems, actions</small></button></li></ul>`});
 }
 
@@ -90,7 +91,7 @@ function sources() {
   const actions = [
     {kind:'Action', label:'Refresh EVE data', run:() => $('#refresh').click()},
     {kind:'Action', label:'Switch pilot', run:() => $('#switch-pilot').click()},
-    {kind:'Action', label:'New logbook entry', run:() => { go('logbook'); $('#journal-form [name=title]')?.focus(); }},
+    {kind:'Action', label:'New logbook entry', run:() => { go('logbook'); $('#new-entry')?.click(); }},
     {kind:'Action', label:'Add shared goal', run:() => { go('goals'); $('#goal-form [name=title]')?.focus(); }},
     {kind:'Action', label:'Export backup', run:() => $('#export')?.click()},
     {kind:'Action', label:'Collapse navigation', run:() => toggleRail()},
@@ -134,6 +135,11 @@ function moveRow(view, d) {
 export function wire() {
   $('#rail-toggle').onclick = () => toggleRail();
   $('#palette-open').onclick = openPalette;
+  wireIsk();
+  // The skip link moves focus past the rail and strip; the address stays as the router set it.
+  document.querySelector('.skip').addEventListener('click', event => { event.preventDefault(); $('#views').focus({preventScroll:true}); $('#views').scrollIntoView(); });
+  // The "/" focus hint means nothing on a touch screen.
+  if (matchMedia('(pointer:coarse)').matches) document.querySelectorAll('input[placeholder$=" /"]').forEach(el => { el.placeholder = el.placeholder.replace(/\s+\/$/, ''); });
   $('#tabbar-more').onclick = openMore;
   $('#drawer').addEventListener('click', event => {
     if (event.target === $('#drawer') || event.target.closest('[data-close]')) closeDrawer();

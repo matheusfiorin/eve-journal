@@ -1,7 +1,7 @@
 // Loading both pilots: public profile, private backend record or shared snapshot, wingmate summary and holdings.
 import {S, mine, summary, assetsOf} from './state.js';
 import {esi, corporation, resolveNames, loadSkillGroups, loadPrices, loadAssetCategories} from './esi.js';
-import {$, notice} from './shared.js';
+import {$, notice, setSync, clock} from './shared.js';
 
 function referencedIds(p) {
   const o = p.ops || {}, v = key => o[key]?.value;
@@ -25,6 +25,9 @@ async function loadProfile(p) {
     } catch (error) { p.careerError = error.message; }
   } catch (error) { p.error = `Public profile: ${error.message}`; }
 }
+// Why a pilot's private data is missing: their sign-in ended (401), or EVE or the backend isn't answering (5xx, offline).
+// The two need different words and buttons: Reconnect fixes the first, only waiting or Retry fixes the second.
+export const problemOf = error => ({kind:error.status === 401 || /Connect this pilot again/.test(error.message) ? 'expired' : 'outage', message:error.message});
 async function loadPrivate(p, force, shared) {
   p.shared = shared.find(row => row.characterId === p.id) || null;
   if (S.backend?.has(p.id)) {
@@ -35,7 +38,7 @@ async function loadPrivate(p, force, shared) {
       Object.assign(p, {skills:record.skills, queue:record.queue, ops:record.operations || {}, synced:record.fetchedAt, private:true});
       if (record.lastError) p.error = record.lastError;
       return;
-    } catch (error) { p.error = error.message; }
+    } catch (error) { p.error = error.message; p.problem = problemOf(error); }
   }
   Object.assign(p, {skills:p.shared?.skills, queue:p.shared?.queue, ops:undefined, synced:p.shared?.fetchedAt, private:false});
   if (p.shared?.stale && !p.error) p.error = 'The shared training snapshot could not be refreshed. This pilot may need to reconnect.';
@@ -48,16 +51,23 @@ export function dataTime() {
   return times.length ? Math.min(...times) : null;
 }
 export const STALE_MS = 10 * 60000;
-const clock = t => new Date(t).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+// The strip's sync line says what is true: synced, EVE not answering (with the time of the data on screen), or a sign-in
+// that ended. Problems get the warning tone and the button that fixes them.
+export function syncStatus(at) {
+  const bad = S.pilots.filter(p => p.problem), expired = bad.filter(p => p.problem.kind === 'expired'), tell = list => list.map(p => `${p.name}’s`).join(' and ');
+  if (expired.length) return setSync(`${tell(expired)} sign-in${expired.length > 1 ? 's' : ''} expired.`, 'warn', `<button type="button" class="small" data-connect="${S.pilots.indexOf(expired[0])}">Reconnect</button>`);
+  if (bad.length) return setSync(`EVE isn’t answering.${at ? ` Showing data from ${clock(at)}.` : ''}`, 'warn', '<button type="button" class="small secondary" data-retry>Retry</button>');
+  setSync(at && Date.now() - at > STALE_MS ? `EVE data from ${clock(at)}` : `Synced ${clock(at || Date.now())}`);
+}
 // render() redraws the page; it runs at the start (to show "refreshing") and once everything has settled.
 export async function loadPilots(force, render) {
   const request = ++S.generation;
-  const statusTask = esi('status/').then(value => { S.universeStatus = {...value, fetched:Date.now()}; }).catch(() => { if (S.universeStatus) S.universeStatus.stale = true; });
+  const statusTask = esi('status/').then(value => { S.universeStatus = {...value, fetched:Date.now()}; }).catch(() => { if (S.universeStatus) S.universeStatus.stale = true; }).finally(() => { S.statusTried = true; });
   const sharedTask = S.backend ? S.backend.publicPilots().catch(error => { notice(`Shared training snapshots: ${error.message}`); return []; }) : Promise.resolve([]);
-  const next = S.config.pilots.map(n => ({...S.pilots.find(p => p.name.toLowerCase() === n.toLowerCase()), name:n, error:null, refreshing:true}));
+  const next = S.config.pilots.map(n => ({...S.pilots.find(p => p.name.toLowerCase() === n.toLowerCase()), name:n, error:null, problem:null, refreshing:true}));
   S.pilots = next;
   $('#refresh').disabled = true; $('#refresh').setAttribute('aria-busy', 'true');
-  $('#sync-status').textContent = 'Syncing…';
+  S.settling = true; setSync('Syncing…');
   render();
   let ok = false;
   try {
@@ -65,7 +75,7 @@ export async function loadPilots(force, render) {
     const shared = await sharedTask;
     await Promise.all(next.map(async p => {
       const match = (result.characters || []).find(c => c.name.toLowerCase() === p.name.toLowerCase());
-      if (!match) { p.error = 'Character not found. Check the exact name in config.json.'; return; }
+      if (!match) { p.error = `Couldn’t find ${p.name} in EVE.`; return; }
       p.id = match.id; p.name = match.name;
       await Promise.all([loadProfile(p), loadPrivate(p, force, shared)]);
       p.queue?.sort((a,b) => a.queue_position - b.queue_position);
@@ -76,14 +86,15 @@ export async function loadPilots(force, render) {
     if (next.some(p => p.skills?.skills) || [...S.wing.values()].some(w => w.skills?.skills)) await loadSkillGroups();
     await loadHoldings();
     const at = dataTime();
-    $('#sync-status').textContent = at && Date.now() - at > STALE_MS ? `EVE data from ${clock(at)}` : `Synced ${clock(at || Date.now())}`;
+    S.settling = false; syncStatus(at);
     ok = true;
   } catch (error) {
     if (request !== S.generation) return false;
-    next.forEach(p => p.error = error.message);
-    $('#sync-status').textContent = 'Refresh failed. Previously loaded data is kept; press Refresh to retry.';
+    S.settling = false;
+    next.forEach(p => { p.error = error.message; p.problem = problemOf(error); });
+    syncStatus(dataTime());
   } finally {
-    await statusTask;
+    await statusTask; S.settling = false;
     if (request === S.generation) { next.forEach(p => p.refreshing = false); $('#refresh').disabled = false; $('#refresh').removeAttribute('aria-busy'); render(); }
   }
   return ok;

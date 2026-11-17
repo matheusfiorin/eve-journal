@@ -15,6 +15,8 @@ test('hauling plans a risk-weighted route with live gate camps and sends it to t
  expect(ctx.state.waypoints).toEqual([30000144,30003504,30002187]);
  // A refresh re-plans with the live camps still priced in.
  await page.locator('#refresh').click();await expect(page.locator('#sync-status')).toContainText('Synced');await expect(page.locator('#haul-status')).toContainText('Live: 3 kills');await expect(niarja).toContainText('3 on your gates');
+ // On a phone the settings fold away once there is a plan; open them to change it.
+ if(!await page.locator('#haul-setup').evaluate(d=>d.open))await page.locator('#haul-setup > summary').click();
  await page.locator('#haul-add').click();await stops.nth(1).fill('Niarja');await page.locator('#haul-optimize').check();await page.locator('#haul-end').selectOption('free');
  await stops.nth(2).fill('Perimeter');await page.locator('#haul-plan').click();
  await expect(haul.locator('.card h3')).toContainText('Jita → Perimeter → Niarja');

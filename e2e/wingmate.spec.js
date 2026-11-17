@@ -9,7 +9,7 @@ test('a wingmate connected on another device shows what he shares, not a Connect
  await expect(wallet.locator('.readout')).toContainText('40,000,000');
  await expect(wallet.locator('.jobs-line')).toContainText('1 job running');
  await expect(wallet).toContainText('Shared with the wing.');await expect(wallet).toContainText('journal and trades stay on their own device');
- await expect(wallet.getByRole('button',{name:'Connect here too'})).toBeVisible();await expect(wallet.getByRole('button',{name:'Connect with EVE'})).toHaveCount(0);
+ await expect(wallet.getByRole('button',{name:'Connect Decxus on this device'})).toBeVisible();await expect(wallet.getByRole('button',{name:'Connect with EVE'})).toHaveCount(0);
  await tab(page,'clones');await page.locator('#clones [data-show-pilot="Decxus"]').click();
  await expect(page.locator('#clones-content')).toContainText('these stay on their own device');
  expect(privateEsi).toEqual([]);expect(errors).toEqual([]);

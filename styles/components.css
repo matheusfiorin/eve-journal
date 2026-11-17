@@ -160,7 +160,7 @@ tbody{display:block;max-height:360px;overflow-y:auto}tbody tr{display:table;widt
 .modal-canvas{height:420px;border-radius:var(--r-panel);background:radial-gradient(ellipse at 50% 40%,#121d33,var(--surface-sunk) 70%)}
 .star-map{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.star-map:active{cursor:grabbing}
 .hop-strip{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap:4px 10px}.hop-strip li{font-size:var(--fs-sm)}
-.sys-head{display:flex;justify-content:space-between;align-items:start;gap:8px}.sys-head h3{font-size:var(--fs-xl);margin:0}
+.sys-head{display:flex;justify-content:space-between;align-items:start;gap:8px}.sys-head h2,.sys-head h3{font-size:var(--fs-xl);margin:0}
 .sys-panel .facts{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.tagline{margin:6px 0;font-size:var(--fs-sm)}
 .neighbors{list-style:none;padding:0;margin:0;display:grid;gap:2px}.neighbors small{color:var(--text-muted);font-size:11px;margin-left:4px}
 
@@ -184,3 +184,13 @@ tbody{display:block;max-height:360px;overflow-y:auto}tbody tr{display:table;widt
   .modal-head .secondary{min-height:44px}
   .bill td small{display:none}
 }
+
+/* States that name their cause: one action banner, "needs permission" in place of a value, skeleton badges, ISK echo. */
+.alert--action{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+.alert--action span{min-width:0;flex:1 1 240px}
+.hint--needs{margin:0;color:var(--warn)}
+.role-badge--skel{width:110px;border-color:var(--line);background:linear-gradient(90deg,var(--surface-2) 0 40%,var(--surface-3) 50%,var(--surface-2) 60% 100%) 0 0/300% 100%;animation:skel 1.4s linear infinite}
+.role-badge--skel::before{display:none}
+.isk-echo{display:block;margin:-8px 0 0;min-height:0;color:var(--text-faint);font-size:var(--fs-xs)}
+.isk-echo:empty{display:none}
+.earn-bar .isk-echo{margin:0}

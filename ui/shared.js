@@ -1,17 +1,48 @@
 // Rendering helpers every screen uses: formatting, pilot headers, toasts, the drawer, skeletons and the tab scaffold.
-import {escapeHTML as esc, remaining, queueState, compactNumber} from '../model.js';
+import {escapeHTML as esc, queueState, compactNumber} from '../model.js';
 import {S, ROMAN, reduced, counters, viaWing, opsOf} from './state.js';
-import {name} from './esi.js';
+import {name, named} from './esi.js';
 import {loadMarket} from './marketdata.js';
 
 export {esc};
 export const $ = selector => document.querySelector(selector);
 export const isk = value => `${Number(value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} ISK`;
+// One date style everywhere: "Nov 13, 2026" for days, with "3:58 AM" appended for moments.
+export const day = date => new Date(date).toLocaleDateString(undefined,{dateStyle:'medium'});
 export const when = date => new Date(date).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});
+export const clock = t => new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+// One duration style everywhere ("1d 6h", "5h 20m", "40 min"), from seconds.
+export const duration = sec => {
+  const m = Math.max(1, Math.round(sec / 60)), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  return d ? `${d}d ${h % 24}h` : h ? `${h}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m} min`;
+};
+// "12.5m", "2b", "750k", "1,000,000" → a number; null when it isn't one.
+export function parseIsk(text) {
+  const t = String(text).trim().toLowerCase().replace(/[,\s_]/g, '').replace(/isk$/, '');
+  const m = /^(\d*\.?\d+)([kmbt]?)$/.exec(t);
+  return m ? Math.round(Number(m[1]) * {'':1, k:1e3, m:1e6, b:1e9, t:1e12}[m[2]]) : null;
+}
+// ISK fields are text boxes that take shorthand; the box keeps the plain number (so code reading it needs no parsing)
+// and a note beside it shows the readable form.
+export function iskEcho(input) {
+  const note = input.parentElement.querySelector('.isk-echo'), n = input.value === '' ? null : Number(input.value);
+  if (note) note.textContent = Number.isFinite(n) && n >= 1000 ? `${compactNumber(n)} ISK` : '';
+}
+export function wireIsk() {
+  const normalize = input => { const n = parseIsk(input.value); input.setCustomValidity(input.value.trim() === '' || n !== null ? '' : 'Enter an amount like 12.5m or 750000'); if (n !== null && input.value.trim() !== '') input.value = String(n); iskEcho(input); };
+  document.addEventListener('change', event => { if (event.target.matches?.('input[data-isk]')) normalize(event.target); }, true);
+  document.addEventListener('input', event => { const el = event.target; if (!el.matches?.('input[data-isk]')) return; const n = parseIsk(el.value), note = el.parentElement.querySelector('.isk-echo'); if (note) note.textContent = n !== null && el.value.trim() !== '' && String(n) !== el.value.trim() ? `= ${compactNumber(n)} ISK` : ''; });
+}
+// The strip's sync line: text, a tone ('' or 'warn') and an optional button that fixes the problem.
+export function setSync(text, tone = '', action = '') {
+  $('#sync-status').innerHTML = `<span>${esc(text)}</span>${action}`;
+  $('#sync-status').dataset.tone = tone; document.querySelector('.strip').dataset.tone = tone;
+}
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export const pct = v => `${(v * 100).toFixed(v < 0.1 ? 2 : 1)}%`;
-export const duration = sec => sec >= 86400 ? `${(sec / 86400).toFixed(1)} d` : sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(sec / 60))} min`;
 export const scannedAgo = () => S.marketData?.regions?.length ? `scanned ${Math.max(1, Math.round((Date.now() - Math.min(...S.marketData.regions.map(r => r.updatedAt))) / 60000))} min ago` : 'no recent scan';
+// Time until a date, in the shared duration style.
+export const left = (date, now = Date.now()) => { const ms = new Date(date).getTime() - now; return !Number.isFinite(ms) ? 'Not scheduled' : ms <= 0 ? 'Finished' : duration(ms / 1000); };
 export function format(value, kind) {
   if (!Number.isFinite(value)) return '—';
   if (kind === 'isk') return `${compactNumber(value)} ISK`;
@@ -40,10 +71,17 @@ export const portrait = (p, size, cls = '') => p?.id ? `<img class="portrait ${c
 export const corpLine = p => p.corp ? `${esc(p.corp.name)} [${esc(p.corp.ticker)}]` : p.refreshing ? 'Loading…' : '';
 export function connectButtons(p, index) {
   if (!S.backend) return '<p class="hint">Private data needs the backend, which is not configured here.</p>';
-  // A wingmate who connected on their own device is already connected: offer "Connect here too", never a bare Connect.
-  const label = p.private ? 'Reconnect' : viaWing(p) ? 'Connect here too' : 'Connect with EVE';
-  return `<div class="actions"><button data-connect="${index}" class="${p.private || viaWing(p) ? 'secondary' : ''} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${label}</button>${S.backend.has(p.id) ? `<button data-disconnect="${p.id}" class="secondary small">Disconnect</button>` : ''}</div>`;
+  if (p.private && p.problem?.kind !== 'expired') return '';
+  const expired = p.problem?.kind === 'expired', label = expired ? `Reconnect ${p.name}` : viaWing(p) ? `Connect ${p.name} on this device` : 'Connect with EVE';
+  return `<div class="actions"><button data-connect="${index}" class="${expired || !viaWing(p) ? '' : 'secondary'} small" ${!p.id || p.refreshing ? 'disabled' : ''}>${esc(label)}</button></div>`;
 }
+// One banner for every permission a screen needs and doesn't have (never a line per field), with the fix beside it.
+export function permissionBanner(p, what) {
+  if (!what.length || !S.backend || !p.private) return '';
+  const list = what.length < 2 ? what[0] : `${what.slice(0, -1).join(', ')} and ${what.at(-1)}`;
+  return `<div class="alert warn alert--action"><span>Permission not granted for ${esc(list)}. Reconnect ${esc(p.name)} and allow ${what.length > 1 ? 'them' : 'it'}.</span><button type="button" class="small" data-connect="${S.pilots.indexOf(p)}">Reconnect</button></div>`;
+}
+export const noPermission = (p, keys) => p.private ? keys.filter(k => p.ops?.[k] && !p.ops[k].permission) : [];
 // Why a wingmate's shared data is thin: an older consent (level 1 shares only wallet and assets) or a failing sync.
 export function wingNote(p) {
   const w = !p.private && S.wing.get(p.id);
@@ -53,16 +91,21 @@ export function wingNote(p) {
   return '';
 }
 export function head(p, index, extra = '') {
-  return `<div class="pilot-head" data-pilot="${esc(p.name.toLowerCase())}">${portrait(p, 56)}<div><h2>${esc(p.name)}</h2><p class="hint">${corpLine(p) || 'Corporation unavailable'}</p></div><span class="pill ${p.private || viaWing(p) ? 'ok' : ''}">${p.private ? 'Connected' : viaWing(p) ? 'Shared with the wing' : p.shared ? 'Shared' : 'Public'}</span></div>${extra}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}${wingNote(p)}`;
+  return `<div class="pilot-head" data-pilot="${esc(p.name.toLowerCase())}">${portrait(p, 56)}<div><h2>${esc(p.name)}</h2><p class="hint">${corpLine(p) || 'Corporation unavailable'}</p></div><span class="pill ${p.private || viaWing(p) ? 'ok' : ''}">${p.private ? 'Connected' : viaWing(p) ? 'Shared with the wing' : p.shared ? 'Shared' : 'Public'}</span></div>${extra}${p.error && !p.problem ? `<p class="error">${esc(p.error)}</p>` : ''}${wingNote(p)}`;
 }
 export function trainingAlert(p) {
   const state = queueState(p.queue);
-  if (!state) return `<p class="alert muted">Training is private until ${esc(p.name)} connects.</p>`;
+  if (!state) {
+    if (p.problem?.kind === 'outage') return '<p class="alert warn">EVE isn’t answering, so training can’t load. It shows here once EVE is back.</p>';
+    if (p.problem?.kind === 'expired') return `<p class="alert warn">${esc(p.name)}’s sign-in expired. Reconnect to see training.</p>`;
+    return p.refreshing ? '<p class="alert muted">Loading training…</p>' : `<p class="alert muted">Training is private until ${esc(p.name)} connects.</p>`;
+  }
   if (state.kind === 'empty') return '<p class="alert danger">Not training. The skill queue is empty.</p>';
   if (state.kind === 'paused') return '<p class="alert warn">Training is paused. Start the queue in game.</p>';
+  if (S.settling && !named(state.active.skill_id)) return '<p class="alert muted">Loading training…</p>';
   const active = `<b>${esc(name(state.active.skill_id))} ${ROMAN[state.active.finished_level]}</b>`;
-  if (state.kind === 'ending') return `<p class="alert warn">Queue runs out in ${esc(remaining(state.end).replace(' remaining',''))}. Add skills soon. Training ${active}.</p>`;
-  return `<p class="alert ok">Training ${active} · queue ends in ${esc(remaining(state.end).replace(' remaining',''))}</p>`;
+  if (state.kind === 'ending') return `<p class="alert warn">Queue runs out in ${esc(left(state.end))}. Add skills soon. Training ${active}.</p>`;
+  return `<p class="alert ok">Training ${active} · queue ends in ${esc(left(state.end))}</p>`;
 }
 export function pilotsOrEmpty(render) {
   return S.pilots.length ? [...S.pilots].sort((a,b) => (b.name === S.me) - (a.name === S.me)).map(p => render(p, S.pilots.indexOf(p))).join('') : '<div class="empty">No pilots configured in config.json.</div>';
@@ -76,7 +119,7 @@ export function field(p, key, render) {
   if (!p.private) return '<p class="hint">Connect this pilot to load this data.</p>';
   const f = p.ops?.[key];
   if (!f) return '<p class="hint">Not synced yet. Press Refresh.</p>';
-  if (!f.permission) return '<p class="hint">Permission not granted. Reconnect this pilot to allow it.</p>';
+  if (!f.permission) return '<p class="hint hint--needs">Needs permission</p>';
   return `${f.value !== undefined ? render(f.value) : ''}${f.error ? `<p class="error">${esc(f.error)}${f.value !== undefined ? ' Showing the previous data.' : ''}</p>` : ''}`;
 }
 // "Train next" list: [{name, level, from, why, omega}].

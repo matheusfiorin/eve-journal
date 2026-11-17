@@ -1,13 +1,12 @@
 // Ledger: where the ISK came from and went. One sortable table merges the wallet journal, market transactions and
 // the 30-day mining ledger; industry jobs get one summary line that links to Earn → Jobs.
-import {remaining} from '../../model.js';
 import {jobState} from '../../jobs.js';
 import {oreValue} from '../../mining.js';
 import {S, opsOf, viaWing} from '../state.js';
 import {mapGraph} from '../routes.js';
 import {loadMarket} from '../marketdata.js';
 import {name, place} from '../esi.js';
-import {$, esc, isk, format, plural, connectButtons, openDrawer, wingNote} from '../shared.js';
+import {$, esc, isk, day, when, left, format, plural, connectButtons, openDrawer, wingNote, permissionBanner} from '../shared.js';
 import {readout, pilotSeg, shownPilot, whenPilotChanges, sorter, sortBy, rowsHead, reveal, rowAttrs} from './pilot.js';
 
 const KINDS = [['all', 'All'], ['bounty', 'Bounty'], ['market', 'Market'], ['industry', 'Industry'], ['tax', 'Tax'], ['transfer', 'Transfer'], ['mining', 'Mining']];
@@ -42,10 +41,10 @@ function drawRows() {
   const host = document.getElementById('ledger-table'); if (!host) return; // rendered with the view, not in the static markup
   const shown = sortBy(rows.filter(r => (kind === 'all' ? r.kind !== 'mining' : r.kind === kind) && (!q || `${r.what} ${r.sub}`.toLowerCase().includes(q))), st, (r, k) => k === 'date' ? Date.parse(r.date) : k === 'amount' ? r.amount ?? r.worth : r[k]);
   host.innerHTML = shown.length ? `<div class="rows ${reveal('ledger')}" role="table" aria-label="Wallet entries" style="--cols:96px minmax(0,1fr) 150px">${rowsHead('ledger', [['Date', 'date'], ['Entry', 'what'], ['Amount', 'amount']])}
-    ${shown.slice(0, 200).map((r, i) => `<div ${rowAttrs(i, `data-ledger-row="${rows.indexOf(r)}"`)}><span role="cell" class="num rows__date">${esc(new Date(r.date).toLocaleDateString(undefined, {month:'short', day:'numeric'}))}</span><span role="cell" class="rows__main"><span class="kind" data-kind="${r.kind}">${KINDS.find(k => k[0] === r.kind)?.[1] || 'Other'}</span><b>${esc(r.what)}</b>${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span>${amountCell(r)}</div>`).join('')}</div>`
+    ${shown.slice(0, 200).map((r, i) => `<div ${rowAttrs(i, `data-ledger-row="${rows.indexOf(r)}"`)}><span role="cell" class="num rows__date">${esc(day(r.date))}</span><span role="cell" class="rows__main"><span class="kind" data-kind="${r.kind}">${KINDS.find(k => k[0] === r.kind)?.[1] || 'Other'}</span><b>${esc(r.what)}</b>${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span>${amountCell(r)}</div>`).join('')}</div>`
     : `<div class="state"><p>${rows.length ? '<b>Nothing matches.</b> Try another type or clear the search.' : shownPilot()?.private === false ? '<b>No shared entries yet.</b> Mining shows up here after the wingmate’s next sync; bounties and trades stay on their own device.' : '<b>No wallet activity yet.</b> Bounties, trades and mining show up here after the next sync.'}</p></div>`;
 }
-const lineOf = (f, what) => !f ? 'Not synced yet. Press Refresh.' : !f.permission ? 'Permission not granted. Reconnect this pilot to allow it.' : f.error ? `${esc(f.error)}${f.value !== undefined ? ` Showing the previous ${what}.` : ''}` : '';
+const lineOf = (f, what) => !f ? 'Not synced yet. Press Refresh.' : !f.permission ? '' : f.error ? `${esc(f.error)}${f.value !== undefined ? ` Showing the previous ${what}.` : ''}` : '';
 export function render() {
   $('#ledger-pilots').innerHTML = pilotSeg();
   const p = shownPilot(), content = $('#ledger-content');
@@ -60,13 +59,16 @@ export function render() {
   // A job past its end time is ready even while ESI still calls it active.
   const states = (jobs || []).map(j => jobState(j)), running = states.filter(st => st.active), ready = states.filter(st => st.ready).length;
   const next = running.length ? Date.now() + Math.min(...running.map(st => st.remaining)) : undefined;
-  const problems = (shared ? [['wallet', 'balance']] : [['wallet', 'balance'], ['journal', 'journal'], ['transactions', 'transactions']]).map(([k, w]) => [w, lineOf(ops[k], w)]).filter(([, m]) => m);
+  const wanted = shared ? [['wallet', 'balance']] : [['wallet', 'balance'], ['journal', 'journal'], ['transactions', 'transactions']];
+  const problems = wanted.map(([k, w]) => [w, lineOf(ops[k], w)]).filter(([, m]) => m);
+  const lacking = wanted.filter(([k]) => ops[k] && !ops[k].permission).map(([, w]) => w);
   content.innerHTML = `
-  ${readout([['Balance', Number.isFinite(wallet?.value) ? `<span class="num" title="${esc(isk(wallet.value))}">${Math.floor(wallet.value).toLocaleString()}</span>` : '—', Number.isFinite(wallet?.value) ? 'ISK' : ''], ['Net, last 7 days', ops.journal?.value ? `<span class="num ${net < 0 ? 'neg' : 'pos'}">${net > 0 ? '+' : ''}${format(net, 'isk')}</span>` : '—'], ['Industry jobs running', Array.isArray(jobs) ? `<span class="num">${running.length}</span>` : '—']])}
+  ${readout([['Balance', Number.isFinite(wallet?.value) ? `<span class="num" title="${esc(isk(wallet.value))}">${Math.floor(wallet.value).toLocaleString()}</span>` : `<span class="hint">${wallet && !wallet.permission ? 'Needs permission' : '—'}</span>`, Number.isFinite(wallet?.value) ? 'ISK' : ''], ['Net, last 7 days', ops.journal?.value ? `<span class="num ${net < 0 ? 'neg' : 'pos'}">${net > 0 ? '+' : ''}${format(net, 'isk')}</span>` : `<span class="hint">${ops.journal && !ops.journal.permission ? 'Needs permission' : '—'}</span>`], ['Industry jobs running', Array.isArray(jobs) ? `<span class="num">${running.length}</span>` : `<span class="hint">${ops.jobs && !ops.jobs.permission ? 'Needs permission' : '—'}</span>`]])}
+  ${permissionBanner(p, lacking)}
   ${problems.map(([w, m]) => `<p class="alert warn">${w[0].toUpperCase() + w.slice(1)}: ${m}</p>`).join('')}
   ${shared ? `${wingNote(p)}<div class="state"><p><b>Shared with the wing.</b> ${esc(p.name)}’s journal and trades stay on their own device; the balance, mining and jobs come from what ${esc(p.name)} shares.</p>${connectButtons(p, S.pilots.indexOf(p))}</div>` : ''}
   <section class="card panel--primary ledger" data-pilot="${esc(p.name.toLowerCase())}" aria-label="${esc(p.name)}’s ledger"><div id="ledger-table"></div></section>
-  <button type="button" class="card jobs-line" data-go="earn/jobs"><span><b>Industry jobs</b><small>${!ops.jobs ? 'Not synced yet' : !ops.jobs.permission ? 'Permission not granted' : jobs?.length ? `${plural(running.length, 'job')} running${ready ? `, ${ready} ready to deliver` : ''}${next ? `, next done in ${esc(remaining(next).replace(' remaining', ''))}` : ''} · ${jobs.slice(0, 3).map(j => `${esc(name(j.product_type_id || j.blueprint_type_id))} (${Number(j.runs)} runs)`).join(', ')}` : 'No current industry jobs'}</small></span><span class="jobs-line__go">Open Jobs</span></button>`;
+  <button type="button" class="card jobs-line" data-go="earn/jobs"><span><b>Industry jobs</b><small>${!ops.jobs ? 'Not synced yet' : !ops.jobs.permission ? 'Needs permission' : jobs?.length ? `${plural(running.length, 'job')} running${ready ? `, ${ready} ready to deliver` : ''}${next ? `, next done in ${esc(left(next))}` : ''} · ${jobs.slice(0, 3).map(j => `${esc(name(j.product_type_id || j.blueprint_type_id))} (${Number(j.runs)} runs)`).join(', ')}` : 'No current industry jobs'}</small></span><span class="jobs-line__go">Open Jobs</span></button>`;
   drawRows();
 }
 function rowDrawer(i) {
@@ -74,9 +76,9 @@ function rowDrawer(i) {
   const kv = list => `<dl class="kv">${list.filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   const {type, r:j, t, m} = r.src;
   openDrawer({title:r.what[0].toUpperCase() + r.what.slice(1), body:`${r.amount !== null ? `<p class="drawer-amount num ${r.amount < 0 ? 'neg' : 'pos'}">${esc(isk(r.amount))}</p>` : r.worth ? `<p class="drawer-amount num">${format(r.worth, 'isk')} <small>at today’s prices</small></p>` : ''}
-    ${type === 'journal' ? kv([['When', esc(new Date(j.date).toLocaleString())], ['Type', esc(label(j.ref_type))], ['Description', esc(j.description)], ['Balance after', Number.isFinite(j.balance) ? esc(isk(j.balance)) : ''], ['Reason', esc(j.reason)]])
-    : type === 'tx' ? kv([['When', esc(new Date(t.date).toLocaleString())], ['Item', esc(name(t.type_id))], ['Quantity', Number(t.quantity).toLocaleString()], ['Unit price', esc(isk(t.unit_price))], ['Where', esc(place(t.location_id))], ['Side', t.is_buy ? 'Bought' : 'Sold']])
-    : kv([['Day', esc(m.date)], ['Ore', esc(r.what.replace(/^Mined /, ''))], ["System", esc(mapGraph()?.systems.get(m.solar_system_id)?.name || name(m.solar_system_id))]]) + '<p class="hint">Valued at the best of selling raw, compressed or reprocessed in the hubs today. Earn → Mine plans the next trip.</p>'}`});
+    ${type === 'journal' ? kv([['When', esc(when(j.date))], ['Type', esc(label(j.ref_type))], ['Description', esc(j.description)], ['Balance after', Number.isFinite(j.balance) ? esc(isk(j.balance)) : ''], ['Reason', esc(j.reason)]])
+    : type === 'tx' ? kv([['When', esc(when(t.date))], ['Item', esc(name(t.type_id))], ['Quantity', Number(t.quantity).toLocaleString()], ['Unit price', esc(isk(t.unit_price))], ['Where', esc(place(t.location_id))], ['Side', t.is_buy ? 'Bought' : 'Sold']])
+    : kv([['Day', esc(day(m.date))], ['Ore', esc(r.what.replace(/^Mined /, ''))], ["System", esc(mapGraph()?.systems.get(m.solar_system_id)?.name || name(m.solar_system_id))]]) + '<p class="hint">Valued at the best of selling raw, compressed or reprocessed in the hubs today. Earn → Mine plans the next trip.</p>'}`});
 }
 export function wire() {
   document.getElementById('ledger').classList.add('vk');

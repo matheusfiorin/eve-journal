@@ -143,7 +143,8 @@ export async function mockApp(page,options={}) {
  },{options,KEY,IDS,API,opaque});
  return {state,errors,calls,privateEsi};
 }
-export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText('Synced');}
+// The strip settles on Synced, or on the warning that names why it could not (EVE not answering, a sign-in that ended).
+export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText(/Synced|EVE data from|answering|expired/);}
 // The Echelon IA: old tab ids map to a view, and each view lives in one of seven destinations.
 const VIEW={overview:'bridge',empire:'strengths',wallet:'ledger',notes:'logbook',journal:'logbook'};
 export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
@@ -157,7 +158,8 @@ export async function tab(page,name){
  if(await sub.count()&&await sub.getAttribute('aria-selected')!=='true')await sub.click();
  await expect(page.locator(`#${id}`)).toBeVisible();
 }
+export async function openDesk(page){const f=page.locator('#journal-form');if(!await f.isVisible())await page.locator('#new-entry').click();return f;}
 export async function addEntry(page,{title='First expedition',body='We found a quiet wormhole.',pilot='Fiofka',category='Adventure',date='2026-10-30'}={}){
- await tab(page,'journal');const f=page.locator('#journal-form');await f.getByLabel('Entry title').fill(title);await f.getByLabel('Private notes').fill(body);await f.getByRole('combobox',{name:'Pilot',exact:true}).selectOption(pilot);await f.getByLabel('Date',{exact:true}).fill(date);await f.getByRole('combobox',{name:'Focus',exact:true}).selectOption(category);await f.getByRole('button',{name:'Save entry locally'}).click();await expect(page.locator('#entries')).toContainText(title);
+ await tab(page,'journal');const f=await openDesk(page);await f.getByLabel('Entry title').fill(title);await f.getByLabel('Private notes').fill(body);await f.getByRole('combobox',{name:'Pilot',exact:true}).selectOption(pilot);await f.getByLabel('Date',{exact:true}).fill(date);await f.getByRole('combobox',{name:'Focus',exact:true}).selectOption(category);await f.getByRole('button',{name:'Save entry locally'}).click();await expect(page.locator('#entries')).toContainText(title);
 }
 export const data={version:1,goals:[{id:'goal-one',title:'Fly a cruiser',pilot:'Both pilots',done:false,due:'2026-12-01',category:'Ships'}],entries:[{id:'entry-one',title:'A first flight',body:'A careful journey home.',pilot:'Fiofka',date:'2026-10-29',category:'Milestone'},{id:'entry-two',title:'Wormhole discovery',body:'Decxus found a connection.',pilot:'Decxus',date:'2026-10-30',category:'Adventure'}]};

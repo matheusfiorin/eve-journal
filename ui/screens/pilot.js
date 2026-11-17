@@ -1,19 +1,19 @@
 // Pilot: the training queue, the skill sheet and clones, for whichever pilot of the wing you pick.
 // It also holds the small view kit (pilot picker, readout, sortable row tables) the Navigate, Ledger and Logbook views share.
-import {remaining, queueState, trainingProgress, levelOf} from '../../model.js';
+import {queueState, trainingProgress, levelOf} from '../../model.js';
 import {nextSkills as buildNext, isAlpha, skillLevels} from '../../industry.js';
 import {nextSkills as exploreNext} from '../../exploration.js';
 import {SKILL as MINING} from '../../mining.js';
 import {S, ROMAN, typeGroup, mine, ordered, summary, viaWing} from '../state.js';
 import {name, place} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
-import {$, esc, when, plural, portrait, connectButtons, trainingAlert, field, openDrawer} from '../shared.js';
+import {$, esc, when, plural, portrait, connectButtons, trainingAlert, field, openDrawer, permissionBanner, noPermission, left} from '../shared.js';
 import {mapGraph, route} from '../routes.js';
 
 // ── View kit ──
 const store = {get:k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set:(k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* Per-browser convenience only. */ } }};
 export const readout = items => `<dl class="readout">${items.map(([label, value, unit]) => `<div><dt>${label}</dt><dd>${value}${unit ? ` <small>${unit}</small>` : ''}</dd></div>`).join('')}</dl>`;
-export const short = date => remaining(date).replace(' remaining', '');
+export const short = date => left(date);
 // One pilot is on screen at a time in Pilot and Ledger; it starts as the pilot who's flying.
 let shownName = null;
 const onPilot = new Set();
@@ -35,11 +35,13 @@ export const sortBy = (list, {key, dir}, get = (x, k) => x[k]) => [...list].sort
   return (typeof x === 'string' ? x.localeCompare(y) : (x ?? -Infinity) - (y ?? -Infinity)) * dir;
 });
 // cols: [label, sortKey?]; the first column is the main one (left aligned), the rest right aligned.
-export function rowsHead(table, cols) {
+export function rowsHead(table, cols, roles = true) {
   const st = sorts[table];
-  return `<div class="rows__head" role="row">${cols.map(([label, key]) => key
-    ? `<button type="button" role="columnheader" class="sort" data-sort="${table}:${key}" aria-sort="${st?.key === key ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}</button>`
+  const html = `<div class="rows__head" role="row">${cols.map(([label, key]) => key
+    ? `<span role="columnheader" aria-sort="${st?.key === key ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="sort" data-sort="${table}:${key}">${label}${roles || st?.key !== key ? '' : `<span class="sr-only"> (sorted ${st.dir > 0 ? 'ascending' : 'descending'})</span>`}</button></span>`
     : `<span role="columnheader">${label}</span>`).join('')}</div>`;
+  // Grouped sheets (disclosure widgets, not a table) take a plain header: sort buttons without table roles.
+  return roles ? html : html.replace(/ role="(row|columnheader)"/g, '').replace(/ aria-sort="[^"]*"/g, '');
 }
 // The first draw of a table animates its rows in; later redraws (sorting, filtering) don't.
 export const reveal = table => revealed.has(table) ? '' : (revealed.add(table), 'rows--reveal');
@@ -97,14 +99,14 @@ export function renderTraining() {
   const items = state.pending.map((q, n) => {
     const s = Date.parse(q.start_date), f = Date.parse(q.finish_date), on = q === a;
     const bar = Number.isFinite(s) && Number.isFinite(f) ? `<span class="bar"><i class="${on ? 'is-active' : ''}" style="left:${Math.max(0, (Math.max(s, start) - start) / span * 100).toFixed(2)}%;width:${Math.max(0.6, (f - Math.max(s, start)) / span * 100).toFixed(2)}%"></i></span>` : '<span class="bar bar--paused"></span>';
-    return `<li ${rowAttrs(n, `data-queue="${n}"`).replace('class="rows__row"', `class="rows__row${on ? ' is-active' : ''}"`)}><span class="q-n num">${n + 1}</span><span class="q-name">${esc(name(q.skill_id))} <b>${ROMAN[q.finished_level]}</b></span>${bar}${q.finish_date ? `<small class="num">${esc(short(q.finish_date))}</small>` : '<small>Paused / not scheduled</small>'}</li>`;
+    return `<li ${rowAttrs(n, `data-queue="${n}"`).replace('class="rows__row"', `class="rows__row${on ? ' is-active' : ''}"`).replace(' role="row"', '')}><span class="q-n num">${n + 1}</span><span class="q-name">${esc(name(q.skill_id))} <b>${ROMAN[q.finished_level]}</b></span>${bar}${q.finish_date ? `<small class="num">${esc(short(q.finish_date))}</small>` : '<small>Paused / not scheduled</small>'}</li>`;
   }).join('');
   const next = suggestions(p);
   $('#training-content').innerHTML = `
-  ${readout([['Training now', a ? `<span class="readout__text">${esc(name(a.skill_id))} ${ROMAN[a.finished_level]}</span>` : '<span class="readout__text">Nothing</span>'], ['Queue ends in', state.end ? `<span class="num">${esc(short(state.end))}</span>` : '—'], sp ? ['Training speed', `<span class="num">${Math.round(sp).toLocaleString()}</span>`, 'SP/h'] : ['Skills queued', `<span class="num">${state.pending.length}</span>`]])}
-  ${trainingAlert(p)}
+  ${readout([a ? ['Skills queued', `<span class="num">${state.pending.length}</span>`] : ['Training now', '<span class="readout__text">Nothing</span>'], ['Queue ends in', state.end ? `<span class="num">${esc(short(state.end))}</span>` : '—'], sp ? ['Training speed', `<span class="num">${Math.round(sp).toLocaleString()}</span>`, 'SP/h'] : ['Skills queued', `<span class="num">${state.pending.length}</span>`]])}
+  ${a && state.kind === 'ok' ? '' : trainingAlert(p)}
   <section class="card panel--primary queue" data-pilot="${esc(p.name.toLowerCase())}" aria-label="${esc(p.name)}’s training queue">
-    ${a ? `<div class="active"><div><span class="label">Training now</span><h3>${esc(name(a.skill_id))} ${ROMAN[a.finished_level]}</h3></div><p class="active__left"><span class="num">${esc(short(a.finish_date))}</span><small>ends ${esc(when(a.finish_date))}</small></p><progress max="100" value="${trainingProgress(a, now).toFixed(1)}" aria-label="Current skill progress"></progress></div>` : ''}
+    ${a ? `<div class="active"><div><span class="label">Training now</span><h2>${esc(name(a.skill_id))} ${ROMAN[a.finished_level]}</h2></div><p class="active__left"><span class="num">${esc(short(a.finish_date))}</span><small>ends ${esc(when(a.finish_date))}</small></p><progress max="100" value="${trainingProgress(a, now).toFixed(1)}" aria-label="Current skill progress"></progress></div>` : ''}
     <div class="ruler" aria-hidden="true">${ticks.map(x => `<i style="left:${x.toFixed(2)}%"></i>`).join('')}<span class="ruler__now" style="left:${Math.min(100, nowAt).toFixed(2)}%">now</span><span class="ruler__end">${state.end ? esc(new Date(state.end).toLocaleDateString(undefined, {month:'short', day:'numeric'})) : ''}</span></div>
     <ol class="timeline rows ${reveal(`training-${p.name}`)}" aria-label="${plural(state.pending.length, 'skill')} queued">${items || '<li class="timeline__empty">Your training queue is empty. Add a skill in EVE Online.</li>'}</ol>
     ${p.private || viaWing(p) ? '' : connectButtons(p, i)}
@@ -139,9 +141,9 @@ export function renderSkills() {
   $('#skills-content').innerHTML = `
   ${readout([['Total skill points', `<span class="num">${Number(skills.total_sp).toLocaleString()}</span>`], ['Skills at V', `<span class="num">${list.filter(s => s.trained_skill_level === 5).length}</span>`, `of ${list.length}`], ['Unallocated', `<span class="num">${Number(skills.unallocated_sp || 0).toLocaleString()}</span>`, 'SP']])}
   <section class="card panel--primary sheet" data-pilot="${esc(p.name.toLowerCase())}" aria-label="${esc(p.name)}’s skill sheet">
-    <div class="rows sheet__rows" role="table" aria-label="Skills">${rowsHead('skills', [['Skill', 'name'], ['Level', 'level'], ['Skill points', 'sp']])}
+    <div class="rows sheet__rows" aria-label="Skills">${rowsHead('skills', [['Skill', 'name'], ['Level', 'level'], ['Skill points', 'sp']], false)}
     ${[...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, skills]) => { const total = skills.reduce((t, s) => t + (s.skillpoints_in_skill || 0), 0); return `<details class="skill-group" ${open ? 'open' : ''}><summary><b>${esc(group)}</b><span class="skill-group__bar" aria-hidden="true"><i style="width:${(total / maxGroup * 100).toFixed(1)}%"></i></span><span class="hint">${plural(skills.length, 'skill')} · <span class="num">${total.toLocaleString()}</span> SP</span></summary>
-      ${sortBy(skills, st, get).map(s => { const q = queued.get(s.skill_id); return `<div class="skill rows__row" role="row" data-row tabindex="-1" data-skill="${s.skill_id}" data-five="${s.trained_skill_level === 5}" data-queue="${Boolean(q)}"><span role="cell" class="skill__name rows__main">${esc(name(s.skill_id))}${q ? ` <span class="chip chip--accent">to ${ROMAN[q.finished_level]}${q.finish_date ? ` · ${esc(short(q.finish_date))}` : ''}</span>` : ''}</span><span role="cell" class="skill__lvl rows__key">${pips(s)}<small>${s.active_skill_level < s.trained_skill_level ? `Active ${s.active_skill_level} of ${s.trained_skill_level}` : `Level ${s.trained_skill_level}`}</small></span><span role="cell" class="num">${s.skillpoints_in_skill ? `${s.skillpoints_in_skill.toLocaleString()} SP` : '—'}</span></div>`; }).join('')}</details>`; }).join('')}
+      ${sortBy(skills, st, get).map(s => { const q = queued.get(s.skill_id); return `<div class="skill rows__row" data-row tabindex="-1" data-skill="${s.skill_id}" data-five="${s.trained_skill_level === 5}" data-queue="${Boolean(q)}"><span class="skill__name rows__main">${esc(name(s.skill_id))}${q ? ` <span class="chip chip--accent">to ${ROMAN[q.finished_level]}${q.finish_date ? ` · ${esc(short(q.finish_date))}` : ''}</span>` : ''}</span><span class="skill__lvl rows__key">${pips(s)}<small>${s.active_skill_level < s.trained_skill_level ? `Active ${s.active_skill_level} of ${s.trained_skill_level}` : `Level ${s.trained_skill_level}`}</small></span><span class="num">${s.skillpoints_in_skill ? `${s.skillpoints_in_skill.toLocaleString()} SP` : '—'}</span></div>`; }).join('')}</details>`; }).join('')}
     </div><p id="skills-none" class="state" hidden>No skills match. Clear the search or pick All.</p>
   </section>`;
   filterSkills();
@@ -194,13 +196,17 @@ function jumpsTo(p, locationId) {
 export function renderClones() {
   const p = personal('clones');
   if (!p) { $('#clones-content').innerHTML = '<div class="state"><p>No pilots configured in config.json.</p></div>'; return; }
-  const i = S.pilots.indexOf(p), ops = p.ops || {}, c = ops.clones?.value, implants = ops.implants?.value, jump = nextJump(p, c);
+  const i = S.pilots.indexOf(p), ops = p.ops || {}, c = ops.clones?.value, implants = ops.implants?.value;
   const home = c?.home_location ? place(c.home_location.location_id, c.home_location.location_type) : null;
+  // Without the clones scope there is nothing to compute from: say so instead of showing "Available now" or "Unknown".
+  const known = Boolean(ops.clones?.permission && c), jump = known ? nextJump(p, c) : {ready:false, text:ops.clones && !ops.clones.permission ? 'Needs permission' : 'Not synced yet'};
+  const lacking = noPermission(p, ['clones', 'implants', 'attributes']).map(k => ({clones:'clones', implants:'implants', attributes:'attributes'})[k]);
   const jcs = c?.jump_clones || [];
   $('#clones-content').innerHTML = `
-  ${p.private ? readout([['Home station', `<span class="readout__text">${esc(home || 'Unknown')}</span>`], ['Next clone jump', `<span class="readout__text ${jump.ready ? 'pos' : ''}">${esc(jump.text)}</span>`], ['Active implants', Array.isArray(implants) ? `<span class="num">${implants.length}</span>` : '—']]) : ''}
+  ${permissionBanner(p, lacking)}
+  ${p.private ? readout([['Home station', `<span class="readout__text">${esc(known ? home || 'Not set' : jump.text)}</span>`], ['Next clone jump', `<span class="readout__text ${jump.ready ? 'pos' : ''}">${esc(jump.text)}</span>`], ['Active implants', Array.isArray(implants) ? `<span class="num">${implants.length}</span>` : '—']]) : ''}
   <div class="card panel--primary clones" data-pilot="${esc(p.name.toLowerCase())}">
-    <div class="panel__head"><h2>Jump clones</h2><p class="panel__sub">${c ? `Home: ${esc(home || 'Unknown')}` : ''}</p></div>
+    <div class="panel__head"><h2>Jump clones</h2><p class="panel__sub">${known ? `Home: ${esc(home || 'Not set')}` : ''}</p></div>
     ${field(p, 'clones', () => jcs.length ? `<div class="rows" role="table" aria-label="Jump clones" style="--cols:minmax(0,1.6fr) minmax(0,2fr) 90px">${rowsHead('clones', [['Clone'], ['Implants'], ['From here']])}${jcs.map((j, n) => { const jumps = jumpsTo(p, j.location_id); return `<div ${rowAttrs(n)}><span role="cell" class="rows__main"><b>${esc(j.name || place(j.location_id, j.location_type))}</b>${j.name ? `<small>${esc(place(j.location_id, j.location_type))}</small>` : ''}</span><span role="cell" class="cell--wrap">${j.implants?.length ? j.implants.map(id => `<span class="chip">${esc(name(id))}</span>`).join(' ') : '<span class="hint">No implants</span>'}</span><span role="cell" class="num">${jumps === null ? '—' : jumps ? plural(jumps, 'jump') : 'here'}</span></div>`; }).join('')}</div>` : '<p class="hint">No jump clones.</p>')}
   </div>
   <div class="clones-grid">

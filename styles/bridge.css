@@ -75,3 +75,13 @@
   .pilot-line .screen-title{font-size:22px}
   .pilot-line__side{grid-column:1/-1;justify-items:start}
 }
+
+/* Reserved heights: the cards fill in as data arrives without pushing the page around. */
+.pilot-line__main{min-height:112px}
+.next-up{min-height:360px}
+.wing-card{min-height:330px}
+.ship-card{min-height:196px}
+.together{min-height:150px}
+.pilot-line .readout{min-height:50px}
+.next-up__idle{margin:12px 0 0}
+@media (max-width:900px){.next-up{min-height:280px}.wing-card{min-height:0}.together{min-height:0}.ship-card{min-height:0}}

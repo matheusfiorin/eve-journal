@@ -29,7 +29,7 @@ test('mining ranks nearby belts by ISK per hour with kills, traffic, ships and t
  const sortBy=async key=>isMobile(page)?page.locator('#mining-sort').selectOption(key):mining.locator(`.sort[data-sort="${key}"]`).click();
  await sortBy('kills');await expect(page.locator('#mining-sort')).toHaveValue('kills');await expect(sites.first()).toContainText('Perimeter');
  await sortBy('traffic');await expect(page.locator('#mining-sort')).toHaveValue('traffic');await expect(sites.first()).toContainText('Niarja');
- if(!isMobile(page)){await expect(mining.locator('.sort[data-sort="traffic"]')).toHaveAttribute('aria-sort','ascending');await expect(page.locator('#mining-sort')).toBeHidden();}
+ if(!isMobile(page)){await expect(mining.locator('[role=columnheader]:has(.sort[data-sort="traffic"])')).toHaveAttribute('aria-sort','ascending');await expect(page.locator('#mining-sort')).toBeHidden();}
  isMobile(page)?await page.locator('#mining-sort').selectOption(''):await mining.locator('.sort[data-sort="traffic"]').click();await expect(page.locator('#mining-sort')).toHaveValue('');await expect(sites.first()).toContainText('Perimeter');
  await page.locator('#mining-filter').fill('pyrox');await expect(sites.filter({visible:true})).toHaveCount(1);await page.locator('#mining-filter').fill('');
  // The system link opens the map.

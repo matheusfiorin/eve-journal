@@ -51,6 +51,12 @@
 .desk__meta{display:grid;grid-template-columns:minmax(0,1fr) 150px minmax(0,1fr);gap:0 10px}
 .desk .actions{margin-top:4px}
 .backup{margin-top:16px}
+/* The logbook's writing desk opens on request; the backup status rides in the toolbar. */
+.logbook:not(.logbook--writing){grid-template-columns:minmax(0,1fr)}
+.backup-chip{display:inline-flex;flex-wrap:wrap;align-items:center;gap:0 4px;margin:0;font-size:var(--fs-xs);color:var(--text-muted)}
+.backup-chip.is-stale #backup-age{color:var(--warn)}
+.backup-chip .btn--link{min-height:28px;font-size:var(--fs-xs)}
+.entry__actions .small{min-width:44px}
 .backup__actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px}
 .backup__actions .import{flex:none;display:inline-flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border:1px dashed var(--line-strong);border-radius:var(--r-ctl);font-size:var(--fs-sm);color:var(--text-muted)}
 .backup__actions .import input{margin:0;width:auto;padding:4px;border:0;background:none;font-size:var(--fs-xs)}
@@ -72,3 +78,4 @@
   .desk .panel__head{display:block}.desk .panel__head .hint{text-align:left;margin-top:2px}
 }
 .sync-toggle{margin-top:14px;padding-bottom:4px;font-weight:600}
+.vk .sync-toggle.switch{display:flex;color:var(--text)}

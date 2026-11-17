@@ -5,7 +5,7 @@ import {secClass, dotlanRoute} from '../../route.js';
 import {S, mine} from '../state.js';
 import {name, resolveNames} from '../esi.js';
 import {regionKills, gateTargets} from '../killfeed.js';
-import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go} from '../shared.js';
+import {$, esc, format, plural, mapButton, routeAttrs, tabReady, go, iskEcho} from '../shared.js';
 import {mapGraph, fillSystemList, sendable, autopilotButton} from '../routes.js';
 import {haulSaved, haulSave} from '../prefs.js';
 import {markup as mapMarkup, renderMap, wire as wireMap} from './starmap.js';
@@ -13,12 +13,13 @@ export {renderMap};
 
 export const markup = {
   map:mapMarkup,
-  hauling:`<form id="haul-form" class="card market-controls">
-  <div class="card-head"><div><h2>Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
+  hauling:`<form id="haul-form" class="card market-controls"><details id="haul-setup" class="haul-setup" open>
+  <summary><span class="haul-setup__title">Plan settings</span><span id="haul-brief" class="hint"></span></summary>
+  <div class="card-head"><div><h2 class="sr-only">Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
   <div id="haul-stops" class="stops"></div>
   <div class="actions"><button type="button" id="haul-add" class="secondary small">+ Add stop</button></div>
   <div class="row">
-   <label>Cargo value (ISK)<input id="haul-value" type="number" min="0" step="1000000" value="100000000"></label>
+   <label>Cargo value (ISK)<input id="haul-value" type="text" inputmode="decimal" data-isk value="100000000" autocomplete="off"><span class="isk-echo hint" aria-live="polite"></span></label>
    <label>Cargo volume (m³)<input id="haul-volume" type="number" min="0" step="100" value="5000"></label>
    <label>Ship<select id="haul-hull"><option value="">Suggest from cargo</option><option value="br">Blockade runner</option><option value="t1">T1 industrial</option><option value="dst">Deep space transport</option><option value="freighter">Freighter</option></select></label>
   </div>
@@ -31,13 +32,13 @@ export const markup = {
    <label class="check"><input id="haul-lowsec" type="checkbox"> Allow low-sec</label>
    <button id="haul-plan">Plan route</button>
   </div>
- </form>
+ </details></form>
  <div id="haul-content"></div>`
 };
 
 // ── Haul plan: risk-weighted routes through any number of stops, using live zKillboard kills along the way. ──
 // The plan is saved in ui/prefs.js; touched says a person changed the form since it was last filled from the saved plan.
-let haulMode = 'balanced', haulPlans = null, touched = false;
+let haulMode = 'balanced', haulPlans = null, touched = false, haulFolded = false, planned = false;
 function haulRow(value = '') {
   const row = document.createElement('div');
   row.className = 'stop-row';
@@ -62,6 +63,8 @@ export async function renderHauling() {
   const value = Math.max(0, Number($('#haul-value').value) || 0), volume = Math.max(0, Number($('#haul-volume').value) || 0);
   const hull = $('#haul-hull').value || suggestHull(volume, value);
   haulSave({stops:names, value:$('#haul-value').value, volume:$('#haul-volume').value, avoid:$('#haul-avoid').value}, touched);
+  iskEcho($('#haul-value'));
+  $('#haul-brief').textContent = names.length ? `${names.join(' → ')} · ${format(value, 'isk')} · ${Math.round(volume).toLocaleString()} m³` : '';
   if (unknown.length || stops.length < 2) {
     status.textContent = unknown.length ? `Unknown system: ${unknown.join(', ')}` : 'Add at least two stops.';
     content.innerHTML = ''; return;
@@ -74,6 +77,9 @@ export async function renderHauling() {
   const draw = () => {
     if (stale()) return;
     const plans = haulPlans, chosen = plans[haulMode];
+    // On a phone the answer comes first: once there is a plan the settings fold away and the result moves to the top.
+    $('#hauling').dataset.planned = '1';
+    if (planned && !haulFolded && matchMedia('(max-width:720px)').matches) { $('#haul-setup').open = false; haulFolded = true; }
     const days = meta.risk?.since ? Math.max(1, Math.round((Date.now() - meta.risk.since) / 86400000)) : 0;
     status.textContent = `${liveNote} Kill history: ${days ? `${plural(days, 'day')} of hourly ESI data` : 'starting'} · traffic from the last hour.`;
     if (chosen.unreachable) { content.innerHTML = `<article class="card"><p class="alert warn">No route from ${esc(g.systems.get(chosen.unreachable[0]).name)} to ${esc(g.systems.get(chosen.unreachable[1]).name)} with these settings.${options.lowsec ? '' : ' Allow low-sec, or drop an avoided system.'}</p></article>`; return; }
@@ -175,5 +181,5 @@ export function wire() {
     if (event.target.closest('button')) touched = true;
     haulNumber();
   };
-  $('#haul-form').onsubmit = event => { event.preventDefault(); renderHauling(); };
+  $('#haul-form').onsubmit = event => { event.preventDefault(); planned = true; renderHauling(); };
 }

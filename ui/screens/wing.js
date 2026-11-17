@@ -21,7 +21,7 @@ export const markup = {
    <div id="goal-list"></div>
    <p class="hint">Shared goals are stored only in this browser. Export a backup from the Logbook to keep them.</p>
   </div>
-  <aside class="panel milestones" aria-labelledby="ms-title"><h3 id="ms-title">Milestones</h3><ol id="milestones" class="ms-list"></ol></aside>
+  <section class="panel milestones" aria-labelledby="ms-title"><h3 id="ms-title">Milestones</h3><ol id="milestones" class="ms-list"></ol></section>
   </div>`
 };
 
@@ -31,6 +31,8 @@ const WHY = cap => cap.score < 25
   ? `Nobody’s set up for ${cap.label.toLowerCase()} yet. The quickest start: ${cap.next.label.replace(': train', ' trains')}.`
   : `${cap.score >= 50 ? 'You’re ready here' : 'This is coming together'} because ${list(shown(cap).slice(0, 3).map(c => c.label.replace(/^(\w+): /, '$1 has ')))}.`;
 const list = items => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+// When every activity lands in the same tier the word says nothing, so the tier label is dropped and the scores speak.
+const sameTier = () => new Set(crew.caps.map(c => c.word)).size === 1, tier = cap => sameTier() ? '' : cap.word;
 const strength = s => s >= 75 ? 'strong' : s >= 50 ? 'ready' : s >= 25 ? 'getting' : 'open';
 const partialNote = () => {
   const hidden = crew.pilots.filter(p => !p.known || !p.holdings).map(p => p.name), shown = crew.pilots.filter(p => !hidden.includes(p.name)).map(p => p.name);
@@ -82,7 +84,7 @@ function mapSvg(layout) {
   const nodes = branches.map((b, i) => `<g class="cm-node" data-act="${b.activity}" data-strength="${strength(b.cap.score)}" tabindex="${i ? -1 : 0}" role="button" aria-pressed="${active === b.activity}"
       aria-label="${esc(`${b.cap.label}, readiness ${b.cap.score}, ${b.cap.word}. ${b.cap.contributors.length} contributors. Press Enter for details.`)}" transform="translate(${b.x} ${b.y})">
       <g class="cm-node__body" style="--i:${i}"><circle class="cm-node__halo" r="${b.r + 6}"/><circle class="cm-node__disc" r="${b.r}"/><text class="cm-node__score num" dy="6">${b.cap.score}</text>
-      <text class="cm-node__label" dy="${b.r + 18}">${esc(b.cap.label)}</text><text class="cm-node__word" dy="${b.r + 32}">${esc(b.cap.word)}</text></g></g>`).join('');
+      <text class="cm-node__label" dy="${b.r + 18}">${esc(b.cap.label)}</text><text class="cm-node__word" dy="${b.r + 32}">${esc(tier(b.cap))}</text></g></g>`).join('');
   const leaves = branches.flatMap(b => b.leaves.map(l => `<g class="cm-leaf" data-act="${b.activity}" data-key="${b.cap.contributors.indexOf(l.contributor)}" ${l.contributor.pilot === 'wing' ? '' : `data-pilot="${l.contributor.pilot}"`} tabindex="-1" role="button"
       aria-label="${esc(`${l.contributor.label}. Part of ${b.cap.label}.`)}" transform="translate(${l.x} ${l.y})" style="--i:${l.index}"><circle r="5"/><text text-anchor="${l.anchor}">${tspans(l)}</text></g>`)).join('');
   return `<svg id="cm-svg" class="cm__svg" viewBox="-60 -14 1120 668" role="group" aria-label="Wing readiness by activity. Use arrow keys to move between activities, down for what makes each one strong, Enter for details.">
@@ -94,15 +96,15 @@ function mapSvg(layout) {
     <g class="cm__branches">${nodes}</g><g class="cm__leaves">${leaves}</g></svg>`;
 }
 function listView() {
-  return `<div class="cm-list" role="list">${crew.caps.map((cap, i) => `<details class="cm-branch" data-act="${cap.activity}" role="listitem" ${i ? '' : 'open'}>
-    <summary><span class="cm-dot" aria-hidden="true"></span><b>${cap.label}</b><span class="cm-bar" style="--v:${cap.score}" aria-hidden="true"><i></i></span><span class="num">${cap.score}</span><small>${cap.word}</small></summary>
+  return `<div class="cm-list">${crew.caps.map((cap, i) => `<details class="cm-branch" data-act="${cap.activity}" ${i ? '' : 'open'}>
+    <summary><span class="cm-dot" aria-hidden="true"></span><b>${cap.label}</b><span class="cm-bar" style="--v:${cap.score}" aria-hidden="true"><i></i></span><span class="num">${cap.score}</span><small>${tier(cap)}</small></summary>
     ${capDetails(cap)}<button class="small" data-plan="${cap.activity}">Plan this</button></details>`).join('')}</div>`;
 }
 function tonight() {
   const top = crew.caps.slice(0, 3), p = crew.plan;
   const reason = cap => shown(cap).slice(0, 2).map(c => c.label).join(' · ') || cap.next.label;
   return `<h2 id="tonight-title">Tonight we’re best at</h2>
-    <ol class="tonight__top">${top.map(cap => `<li class="tonight__act" data-act="${cap.activity}"><span class="tonight__name">${cap.label}</span><span class="num tonight__score">${cap.score}</span><span class="tonight__word">${cap.word}</span><p>${esc(reason(cap))}</p></li>`).join('')}</ol>
+    <ol class="tonight__top">${top.map(cap => `<li class="tonight__act" data-act="${cap.activity}"><span class="tonight__name">${cap.label}</span><span class="num tonight__score">${cap.score}</span><span class="tonight__word">${tier(cap)}</span><p>${esc(reason(cap))}</p></li>`).join('')}</ol>
     ${p ? `<div class="tonight__plan"><p><b>Group plan:</b> ${esc(p.sentence)}</p>
       <ul class="tonight__roles" role="list">${crew.pilots.map(x => p.roles[x.key] ? `<li class="role-badge" data-pilot="${esc(x.key)}">${esc(x.name)} · ${esc(p.roles[x.key].join(', '))}</li>` : '').join('')}</ul>
       <button data-plan-session>Plan this session</button></div>` : ''}`;
