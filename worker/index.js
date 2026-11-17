@@ -1,8 +1,16 @@
 import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} from '../auth.js';
 import {validateBackup,validatePref} from '../model.js';
+import {history,lastHour} from './activity.js';
 
 const EVE='https://login.eveonline.com';
-const ESI='https://esi.evetech.net/latest';
+// Unversioned ESI routes answer as they did on the compatibility date sent with each request
+// (developers.eveonline.com/docs/services/esi/overview). Checked against ESI's changelog: none of the routes the
+// Worker uses changed after this date. Move it forward only after reading the changelog again.
+const ESI='https://esi.evetech.net';
+export const ESI_COMPAT='2025-12-16';
+// Below this many errors (X-ESI-Error-Limit-Remain) or rate-limit tokens (X-Ratelimit-Remaining) left, a sync stops
+// asking and keeps the last good data for what it did not reach.
+export const ESI_FLOOR=20;
 const UA='Echelon wing console (Cloudflare Worker)';
 const ALLOWED=new Map([[2124810474,'Fiofka'],[2124815118,'Decxus']]);
 // The pipeline's trade hubs (scripts/market-pipeline.mjs HUBS). Any other market region is where a pilot is flying.
@@ -68,29 +76,56 @@ export function retryAt(header,now=Date.now()){
  if(!header)return 0;const s=Number(header),at=Number.isFinite(s)?now+s*1000:Date.parse(header);
  return Number.isFinite(at)&&at>now?Math.min(at,now+3600000):0;
 }
-async function fetchOk(url,options,fetchImpl){
+// gauge (optional) collects what ESI says about its limits during one sync or sample: stop once either budget runs low.
+async function fetchOk(url,options,fetchImpl,gauge){
+ const esi=url.startsWith(ESI);
  // ESI asks every client to identify itself; Workers send no User-Agent of their own.
- const r=await fetchImpl(url,{...options,headers:{'User-Agent':UA,...options?.headers},signal:AbortSignal.timeout(20000)});
+ const r=await fetchImpl(url,{...options,headers:{'User-Agent':UA,...(esi?{'X-Compatibility-Date':ESI_COMPAT}:{}),...options?.headers},signal:AbortSignal.timeout(20000)});
+ if(esi&&gauge&&['X-ESI-Error-Limit-Remain','X-Ratelimit-Remaining'].some(h=>{const v=r.headers.get(h);return v!==null&&v!==''&&Number(v)<ESI_FLOOR;}))gauge.stop=true;
+ if(r.status===304)return r;
  // The token endpoint answers a revoked or expired refresh token (or a reused code) with 400 invalid_grant: only reconnecting helps.
  if(r.status===400&&(await r.clone().json().catch(()=>null))?.error==='invalid_grant')throw new ServiceError(REVOKED,502,{revoked:true});
- if(r.status===429)throw new ServiceError(LIMITED,502,{retryAt:retryAt(r.headers.get('Retry-After'))});
- if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':r.status===429||r.status===420?'EVE rate limit reached. Try again later.':'EVE service is temporarily unavailable.',502);
+ // 429 is ESI's (or login's) rate limit, 420 ESI's error limit. Retry-After says when; ESI's 420 says it in
+ // X-ESI-Error-Limit-Reset, and an ESI limit without either waits a minute.
+ if(r.status===429||r.status===420){
+  if(gauge)gauge.stop=true;
+  throw new ServiceError(LIMITED,502,{retryAt:retryAt(r.headers.get('Retry-After'))||(esi?retryAt(r.headers.get('X-ESI-Error-Limit-Reset'))||Date.now()+60000:0)});
+ }
+ if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':'EVE service is temporarily unavailable.',502);
  return r;
 }
 async function remote(url,options,fetchImpl){return (await fetchOk(url,options,fetchImpl)).json();}
-// Assets come in pages of 1000; store only quantity per type so the snapshot stays small.
-async function assetSummary(url,options,fetchImpl){
- const first=await fetchOk(url,options,fetchImpl);
+// ESI's cache rules (developers.eveonline.com/docs/services/esi/best-practices): don't ask again before Expires, and
+// after it send the stored ETag, so an unchanged answer is a body-less 304 (fewer rate-limit tokens, nothing to parse).
+function hintOf(r){
+ const expires=Date.parse(r.headers.get('Expires')||''),etag=r.headers.get('ETag');
+ return {...(etag?{etag}:{}),...(Number.isFinite(expires)?{expires:Math.min(expires,Date.now()+86400000)}:{})};
+}
+// value is undefined on a 304: the caller keeps what it has.
+async function esiJson(url,options,fetchImpl,gauge){
+ const r=await fetchOk(url,options,fetchImpl,gauge);
+ return {value:r.status===304?undefined:await r.json(),hint:hintOf(r)};
+}
+// Assets come in pages of 1000; store only quantity per type so the snapshot stays small. Pages are summed one at a
+// time rather than all held and parsed together.
+async function assetSummary(url,options,fetchImpl,gauge){
+ const first=await fetchOk(url,options,fetchImpl,gauge);
+ // All pages of a paged route share one cache entry (one Last-Modified), so an unchanged first page means an
+ // unchanged set: the stored summary stands, and no page is downloaded or parsed.
+ if(first.status===304)return {value:undefined,hint:hintOf(first)};
  // shortcut: 20 pages (20k items) covers our two pilots; raise it if a pilot outgrows that.
- const pages=Math.min(20,Number(first.headers.get('X-Pages'))||1);
- const rows=[await first.json()];
- for(let page=2;page<=pages;page++)rows.push(await remote(`${url}?page=${page}`,options,fetchImpl));
- const types=new Map(),locations=new Set();let items=0;
- for(const a of rows.flat()){
-  if(a.is_blueprint_copy)continue;
-  items++;locations.add(a.location_id);types.set(a.type_id,(types.get(a.type_id)||0)+a.quantity);
+ const total=Number(first.headers.get('X-Pages'))||1,pages=Math.min(20,total),modified=first.headers.get('Last-Modified');
+ const {'If-None-Match':_,...headers}=options.headers,types=new Map(),locations=new Set();let items=0;
+ const add=rows=>{for(const a of rows){if(a.is_blueprint_copy)continue;items++;locations.add(a.location_id);types.set(a.type_id,(types.get(a.type_id)||0)+a.quantity);}};
+ add(await first.json());
+ for(let page=2;page<=pages;page++){
+  if(gauge?.stop)throw new ServiceError('EVE asked for fewer requests. Previous asset summary retained.',502);
+  const r=await fetchOk(`${url}?page=${page}`,{headers},fetchImpl,gauge);
+  // A page from a newer copy than page 1 would mix two inventories: keep the last summary and read again next time.
+  if(modified&&r.headers.get('Last-Modified')&&r.headers.get('Last-Modified')!==modified)throw new ServiceError('EVE assets changed while they were read. Previous summary retained.',502);
+  add(await r.json());
  }
- return {items,locations:locations.size,truncated:pages<(Number(first.headers.get('X-Pages'))||1),types:[...types].sort((a,b)=>b[1]-a[1]).slice(0,1500)};
+ return {value:{items,locations:locations.size,truncated:pages<total,types:[...types].sort((a,b)=>b[1]-a[1]).slice(0,1500)},hint:hintOf(first)};
 }
 async function exchange(env,fields,fetchImpl){
  return remote(`${EVE}/v2/oauth/token`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:`Basic ${btoa(`${env.EVE_CLIENT_ID}:${env.EVE_CLIENT_SECRET}`)}`},body:new URLSearchParams(fields)},fetchImpl);
@@ -120,7 +155,8 @@ async function session(request,env){
 }
 function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {};}}
 function privatePayload(row,sessionRow){
- return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...parseSnapshot(row),lastError:row.last_error};
+ const {esi,...snapshot}=parseSnapshot(row); // ESI's cache hints are the Worker's bookkeeping
+ return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...snapshot,lastError:row.last_error};
 }
 // Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
 async function freshCredentials(row,env,fetchImpl,lockUntil){
@@ -234,7 +270,7 @@ async function setWaypoints(id,systems,env,fetchImpl){
   const credentials=await freshCredentials(row,env,fetchImpl,lock);
   if(!credentials.scopes.includes(OPERATIONS_SCOPES.waypoints))throw new ServiceError('Permission not granted. Reconnect to allow setting autopilot waypoints.',403);
   for(const [i,system] of systems.entries()){
-   const res=await fetchImpl(`${ESI}/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${i===0}&destination_id=${system}`,{method:'POST',headers:{Authorization:`Bearer ${credentials.accessToken}`},signal:AbortSignal.timeout(15000)});
+   const res=await fetchImpl(`${ESI}/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${i===0}&destination_id=${system}`,{method:'POST',headers:{'User-Agent':UA,'X-Compatibility-Date':ESI_COMPAT,Authorization:`Bearer ${credentials.accessToken}`},signal:AbortSignal.timeout(15000)});
    if(!res.ok)throw new ServiceError(`EVE refused waypoint ${i+1} (HTTP ${res.status}). Is the pilot logged in to the game?`,502);
   }
   return {waypoints:systems.length};
@@ -247,40 +283,80 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
  const previous=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
  if(!previous)return null;
  if(!force&&previous.updated_at&&now-previous.updated_at<60000)return previous;
+ // ESI said to back off (429/420): ask nothing, not even for a token, until its Retry-After. The last data stays.
+ if(previous.esi_after>now)return previous;
  const row=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(now+90000,id,now).first();
  if(!row)return previous;
  try {
   const credentials=await freshCredentials(row,env,fetchImpl,now+90000);
-  const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{}};
+  const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{},esi:{}};
   const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/',mining:'mining/'};
   // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
   const trim={journal:50,transactions:50,mining:400};
-  const prior=parseSnapshot(row);
-  await Promise.all(Object.entries(paths).map(async([key,path])=>{
+  // snapshot.esi keeps each endpoint's ETag and Expires; gauge stops the sync when ESI's budgets run low.
+  const prior=parseSnapshot(row),hints=prior.esi||{},gauge={stop:false};
+  const work=Object.entries(paths).map(([key,path])=>async()=>{
    const optional=OPERATIONS_SCOPES[key];
    if(optional&&!credentials.scopes.includes(optional)){snapshot.operations[key]={permission:false};return;}
+   const old=optional?prior.operations?.[key]?.value:prior[key],hint=hints[key];
+   const keep=error=>{
+    if(optional)snapshot.operations[key]={...prior.operations?.[key],permission:true,...(error?{error}:{})};
+    else {if(old!==undefined)snapshot[key]=old;if(error)snapshot.errors[key]=error;}
+    if(hint)snapshot.esi[key]=hint;
+   };
+   // Not expired: ESI would hand back its cached copy, which is what is stored already.
+   if(old!==undefined&&hint?.expires>Date.now()){if(optional)snapshot.operations[key]=prior.operations[key];else snapshot[key]=old;snapshot.esi[key]=hint;return;}
+   // Stopped early: keep the last good data; the next sync asks again.
+   if(gauge.stop)return keep();
    try {
-    const request=[`${ESI}/characters/${id}/${path}`,{headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'}},fetchImpl];
-    let value=key==='assets'?await assetSummary(...request):await remote(...request);
+    const options={headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json',...(old!==undefined&&hint?.etag?{'If-None-Match':hint.etag}:{})}};
+    const got=await(key==='assets'?assetSummary:esiJson)(`${ESI}/characters/${id}/${path}`,options,fetchImpl,gauge);
+    let value=got.value===undefined?old:got.value;
     if(trim[key]&&Array.isArray(value))value=value.slice(0,trim[key]);
     if(optional)snapshot.operations[key]={permission:true,value,fetched:snapshot.fetchedAt};
     else snapshot[key]=value;
+    snapshot.esi[key]=got.value===undefined?{...hint,...got.hint}:got.hint; // a 304 may leave out the ETag
    }catch(error){
-    if(optional)snapshot.operations[key]={...prior.operations?.[key],permission:true,error:error.message};
-    else {if(prior[key]!==undefined)snapshot[key]=prior[key];snapshot.errors[key]=error.message;}
+    if(error.retryAt)gauge.hold=Math.max(gauge.hold||0,error.retryAt);
+    keep(error.message);
    }
-  }));
+  });
+  // Four at a time rather than all at once, so a low budget seen in one answer stops the requests not yet sent.
+  await Promise.all(Array.from({length:4},async()=>{while(work.length)await work.shift()();}));
   // A trail of systems the pilot was seen in (newest last, 7 days, at most 200): the Exploration tab skips them.
   const here=snapshot.operations.location?.value?.solar_system_id,trail=(prior.operations?.trail?.value||[]).filter(([,at])=>Date.now()-at<604800000);
   if(Number.isSafeInteger(here)&&trail.at(-1)?.[0]!==here)trail.push([here,Date.now()]);
   if(snapshot.operations.location?.permission)snapshot.operations.trail={permission:true,value:trail.slice(-200)};
-  if(!snapshot.skills&&!snapshot.queue&&Object.keys(snapshot.errors).length)throw new ServiceError('Training data could not be refreshed. Previous snapshot retained.',502);
+  if(!snapshot.skills&&!snapshot.queue&&Object.keys(snapshot.errors).length)throw Object.assign(new ServiceError('Training data could not be refreshed. Previous snapshot retained.',502),{hold:gauge.hold});
   const errors=Object.values(snapshot.errors);
-  await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,id,now+90000).run();
+  await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,gauge.hold||0,id,now+90000).run();
  }catch(error){
-  await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0, last_error = ? WHERE character_id = ? AND sync_lock_until = ?').bind(error instanceof ServiceError?error.message:'Synchronization failed. Reconnect if the problem persists.',id,now+90000).run();
+  await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(error instanceof ServiceError?error.message:'Synchronization failed. Reconnect if the problem persists.',error.hold||0,id,now+90000).run();
  }
  return env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
+}
+// The parts of the pipeline's meta (region 0) that only change with CCP's static data: served in the universe document.
+export const STATIC_META=['ores','combat','skills'];
+// The parts the cron keeps (market_docs 'activity'): last hour's kills and jumps, and their decayed history.
+const LIVE_META=['risk','traffic','activity'];
+// Splice JSON object texts into one object without parsing them. A key in a later part wins when the result is read.
+export const joinObjects=(...parts)=>`{${parts.filter(Boolean).map(p=>p.trim().slice(1,-1).trim()).filter(Boolean).join(',')}}`;
+function etagMatch(request,tag){
+ const given=request.headers.get('If-None-Match');if(!given)return false;
+ const bare=t=>t.trim().replace(/^W\//,'');
+ return given.split(',').some(t=>t.trim()==='*'||bare(t)===bare(tag));
+}
+const notModified=headers=>new Response(null,{status:304,headers:{'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...headers}});
+// The universe version changes only when the map or the static meta does: each part's hash is kept in hints, so an
+// upload of one part does not reread the other.
+async function saveUniverse(env,{map,meta}){
+ const doc=await env.DB.prepare("SELECT version, data, hints FROM market_docs WHERE name = 'universe'").first();
+ const hints=JSON.parse(doc?.hints||'{}'),data=meta?JSON.stringify({...JSON.parse(doc?.data||'{}'),...meta}):doc?.data||'{}';
+ if(map!==undefined)hints.map=await hash(map);
+ else if(!hints.map){const row=await env.DB.prepare('SELECT data FROM market_snapshots WHERE region_id = 1').first();hints.map=row?await hash(row.data):'';}
+ hints.meta=await hash(data);
+ const version=(await hash(`${hints.map}|${hints.meta}`)).slice(0,16);
+ await env.DB.prepare("INSERT INTO market_docs (name, version, data, hints, updated_at) VALUES ('universe', ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET version = excluded.version, data = excluded.data, hints = excluded.hints, updated_at = CASE WHEN market_docs.version = excluded.version THEN market_docs.updated_at ELSE excluded.updated_at END").bind(version,data,JSON.stringify(hints),Date.now()).run();
 }
 async function route(request,env,ctx,fetchImpl){
  const url=new URL(request.url),front=frontend(env);
@@ -348,22 +424,59 @@ async function route(request,env,ctx,fetchImpl){
   const text=await request.text();if(text.length>1900000)throw new ServiceError('Market snapshot is too large.',413); // D1 rows top out at 2 MB
   let body;try{body=JSON.parse(text);}catch{throw new ServiceError('Market snapshot is not JSON.');}
   if(!Number.isSafeInteger(body?.region)||body.region<0||!body.data||typeof body.data!=='object')throw new ServiceError('Market snapshot needs a region and data.');
-  await env.DB.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(region_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').bind(body.region,JSON.stringify(body.data),Date.now()).run();
+  const data=body.data,now=Date.now();
+  if(body.region===0){
+   // Kill and jump history is the cron's now. A pipeline from before the switch still sends its copy: keep it only if
+   // it is newer than the cron's, so nothing is lost while both run.
+   if(data.risk?.at){
+    const live=await env.DB.prepare("SELECT json_extract(data, '$.risk.at') AS at FROM market_docs WHERE name = 'activity'").first();
+    if(!(live?.at>=data.risk.at))await env.DB.prepare("INSERT INTO market_docs (name, data, updated_at) VALUES ('activity', ?, ?) ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at").bind(JSON.stringify({risk:data.risk,traffic:data.traffic,activity:data.activity}),now).run();
+   }
+   for(const key of LIVE_META)delete data[key];
+   // The static parts go to the universe document; a run that could not read the static data keeps the last ones.
+   const fixed=Object.fromEntries(STATIC_META.filter(k=>data[k]!=null).map(k=>[k,data[k]]));for(const k of STATIC_META)delete data[k];
+   if(Object.keys(fixed).length)await saveUniverse(env,{meta:fixed});
+  }
+  const stored=JSON.stringify(data);
+  await env.DB.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(region_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').bind(body.region,stored,now).run();
+  if(body.region===1)await saveUniverse(env,{map:stored});
   return response({stored:body.region});
+ }
+ // The static universe document: the gate map (region 1) and STATIC_META. A request naming the current version is
+ // cached for a year; the browser asks again only when /api/market names a new one.
+ if(url.pathname==='/api/market/universe'&&request.method==='GET'){
+  const doc=await env.DB.prepare("SELECT version, data FROM market_docs WHERE name = 'universe'").first();
+  if(!doc)throw new ServiceError('The universe map is not stored yet.',404);
+  const tag=`"u-${doc.version}"`,headers={ETag:tag,'Cache-Control':url.searchParams.get('v')===doc.version?'public, max-age=31536000, immutable':'public, max-age=300'};
+  if(etagMatch(request,tag))return notModified(headers);
+  const map=await env.DB.prepare('SELECT data FROM market_snapshots WHERE region_id = 1').first();
+  return jsonText(`{"version":${JSON.stringify(doc.version)},"universe":${map?.data||'null'},"meta":${doc.data}}`,200,headers);
  }
  if(url.pathname==='/api/market'&&request.method==='GET'){
   // Pilot regions reveal where the pilots fly, so only a signed-in dashboard session sees them; everyone else gets the hubs.
   let signedIn=false;
   if(request.headers.has('Authorization'))try{await session(request,env);signedIn=true;}catch{/* Serve the public view. */}
-  // Region 0 holds item names, recipes and skill IDs; region 1 the gate map and NPC industry stations; region 2 (the
-  // pipeline's blueprint survey) is not served. Region rows the pipeline stopped scanning (a pilot flew home) go stale;
-  // serve only the last 6 hours of them.
-  const rows=(await env.DB.prepare('SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id < 2 OR (region_id > 2 AND updated_at > ?)').bind(Date.now()-6*3600000).all()).results;
-  // Stored data is already JSON (ingest wrote it), so splice it in rather than parsing megabytes per request.
-  const meta=rows.find(r=>r.region_id===0),universe=rows.find(r=>r.region_id===1);
-  const regions=rows.filter(r=>r.region_id>2&&(signedIn||HUB_REGIONS.has(r.region_id))).map(r=>`{"region":${r.region_id},"updatedAt":${r.updated_at},"data":${r.data}}`);
-  const text=`{"meta":${meta?`{"region":0,"updatedAt":${meta.updated_at},"data":${meta.data}}`:'null'},"universe":${universe?universe.data:'null'},"regions":[${regions.join(',')}]}`;
-  return jsonText(text,200,{'Cache-Control':`${signedIn?'private':'public'}, max-age=300`,Vary:'Authorization'});
+  // Region 0 holds item names, recipes and the starter blueprints; region 1 the gate map and NPC stations; region 2
+  // (the pipeline's blueprint survey) is not served. Region rows the pipeline stopped scanning (a pilot flew home) go
+  // stale; serve only the last 6 hours of them. ?v=2 clients take the static parts from /api/market/universe; older
+  // ones get everything inline, as before.
+  const split=url.searchParams.get('v')==='2';
+  const heads=(await env.DB.prepare('SELECT region_id, updated_at FROM market_snapshots WHERE region_id < 2 OR (region_id > 2 AND updated_at > ?)').bind(Date.now()-6*3600000).all()).results;
+  const docs=(await env.DB.prepare('SELECT name, version, updated_at FROM market_docs').all()).results,universe=docs.find(d=>d.name==='universe');
+  const shown=heads.filter(r=>r.region_id===0||(r.region_id===1&&!(split&&universe))||(r.region_id>2&&(signedIn||HUB_REGIONS.has(r.region_id))));
+  // Answer from the row timestamps alone when the browser already has this exact view, before reading megabytes.
+  const tag=`W/"${(await hash([split?2:1,signedIn?1:0,...shown.map(r=>`${r.region_id}:${r.updated_at}`),...docs.map(d=>`${d.name}:${d.version}:${d.updated_at}`)].join('|'))).slice(0,27)}"`;
+  const headers={'Cache-Control':`${signedIn?'private':'public'}, max-age=300`,Vary:'Authorization',ETag:tag};
+  if(etagMatch(request,tag))return notModified(headers);
+  const ids=shown.map(r=>r.region_id);
+  const rows=ids.length?(await env.DB.prepare(`SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id IN (${ids.map(()=>'?').join(',')}) ORDER BY region_id`).bind(...ids).all()).results:[];
+  const parts=docs.length?(await env.DB.prepare(`SELECT name, data FROM market_docs WHERE name IN ('activity'${split?'':", 'universe'"})`).all()).results:[];
+  // Stored data is already JSON, so splice it in rather than parsing megabytes per request.
+  const meta=rows.find(r=>r.region_id===0),map=rows.find(r=>r.region_id===1),part=name=>parts.find(p=>p.name===name)?.data;
+  const regions=rows.filter(r=>r.region_id>2).map(r=>`{"region":${r.region_id},"updatedAt":${r.updated_at},"data":${r.data}}`);
+  const metaText=meta?`{"region":0,"updatedAt":${meta.updated_at},"data":${joinObjects(meta.data,split?null:part('universe'),part('activity'))}}`:'null';
+  const text=`{"meta":${metaText},"universe":${map?map.data:'null'},${split?`"universeVersion":${JSON.stringify(map?null:universe?.version??null)},`:''}"regions":[${regions.join(',')}]}`;
+  return jsonText(text,200,headers);
  }
  if(url.pathname==='/api/wing'&&request.method==='GET'){
   const s=await session(request,env);
@@ -432,18 +545,68 @@ export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))key==='Vary'?headers.append(key,value):headers.set(key,value);
  return new Response(result.body,{status:result.status,headers});
 }
-// One pilot per run, taking turns: a sync makes about 13 ESI calls plus up to 19 more asset pages and a token refresh,
-// and the free plan allows 50 subrequests per invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs),
-// so with two pilots each one refreshes every 10 minutes, about as often as ESI's own caches turn over. Turns follow the clock rather than the last sync, so a
+// Last hour's kills and jumps per system, and their decayed history (worker/activity.js), sampled by the cron. ESI
+// refreshes both feeds hourly and says when in Expires; a sample waits for both, and for SAMPLE_EVERY since the last.
+export const SAMPLE_EVERY=55*60000;
+// Before the switch the pipeline kept this history in its meta row. Its copy is the starting point while it is newer.
+async function pipelineHistory(env,prev){
+ const at=(await env.DB.prepare("SELECT json_extract(data, '$.risk.at') AS at FROM market_snapshots WHERE region_id = 0").first())?.at;
+ if(!(at>(prev?.risk?.at||0)))return prev;
+ const r=await env.DB.prepare("SELECT json_extract(data, '$.risk') AS risk, json_extract(data, '$.traffic') AS traffic, json_extract(data, '$.activity') AS activity FROM market_snapshots WHERE region_id = 0").first();
+ const read=t=>{try{return t?JSON.parse(t):undefined;}catch{return undefined;}};
+ return {risk:read(r.risk),traffic:read(r.traffic)??prev?.traffic,activity:read(r.activity)??prev?.activity};
+}
+// High- and low-sec systems from the stored gate map, as the Mining tab's reach. SQLite reads the map, not the Worker.
+async function empire(env){
+ const rows=(await env.DB.prepare("SELECT CAST(s.key AS INTEGER) AS id FROM market_snapshots m, json_each(m.data, '$.systems') s WHERE m.region_id = 1 AND json_extract(s.value, '$[1]') > 0").all()).results;
+ if(!rows.length)return ()=>true;
+ const ids=new Set(rows.map(r=>r.id));return id=>ids.has(id);
+}
+export async function sampleActivity(env,fetchImpl=fetch,now=Date.now()){
+ const doc=await env.DB.prepare("SELECT data, hints FROM market_docs WHERE name = 'activity'").first();
+ let hints={};try{hints=JSON.parse(doc?.hints||'{}');}catch{/* Ask without validators. */}
+ const gauge={},get=async(key,path)=>{
+  const hint=hints[key]||{};
+  try{
+   const r=await fetchOk(`${ESI}/universe/${path}/`,{headers:{Accept:'application/json',...(hint.etag?{'If-None-Match':hint.etag}:{})}},fetchImpl,gauge);
+   const modified=Date.parse(r.headers.get('Last-Modified')||''),next={...hint,...hintOf(r),...(Number.isFinite(modified)?{modified}:{})};
+   // The same hour again (a 304, or a copy no newer than the last one) adds nothing: counting it twice would double it.
+   if(r.status===304||(Number.isFinite(modified)&&modified<=hint.modified))return {hint:next};
+   return {rows:await r.json(),hint:next};
+  }catch(error){return {error,hint};}
+ };
+ const [kills,jumps]=await Promise.all([get('kills','system_kills'),get('jumps','system_jumps')]);
+ const failed=kills.error||jumps.error,fresh=kills.rows||jumps.rows;
+ // A failed feed is asked again after its Retry-After, or in 10 minutes; otherwise once both feeds have a new hour.
+ const expires=failed?Math.max(now+2*SYNC_EVERY,kills.error?.retryAt||0,jumps.error?.retryAt||0):Math.max(now+SAMPLE_EVERY,kills.hint.expires||0,jumps.hint.expires||0);
+ let data=null;
+ if(fresh){
+  let prev=null;try{prev=doc?JSON.parse(doc.data):null;}catch{/* Start the history again. */}
+  prev=await pipelineHistory(env,prev);
+  const next=history(prev,kills.rows||null,jumps.rows||null,now);
+  data=JSON.stringify({risk:next.risk,traffic:next.traffic,activity:lastHour(prev?.activity,kills.rows||null,jumps.rows||null,await empire(env))});
+ }
+ // updated_at moves only with new data: /api/market's ETag is built from it.
+ await env.DB.prepare(`INSERT INTO market_docs (name, data, hints, updated_at, expires_at, turns) VALUES ('activity', ?, ?, ?, ?, 1) ON CONFLICT(name) DO UPDATE SET ${data?'data = excluded.data, updated_at = excluded.updated_at, ':''}hints = excluded.hints, expires_at = excluded.expires_at, turns = market_docs.turns + 1`)
+  .bind(data||'{}',JSON.stringify({kills:kills.hint,jumps:jumps.hint}),now,expires).run();
+ return {sampled:Boolean(fresh),expires};
+}
+// One ESI job per run, taking turns: a pilot sync makes about 13 ESI calls plus up to 19 more asset pages and a token
+// refresh (fewer now that unexpired endpoints are skipped), and the free plan allows 50 subrequests and 10 ms of CPU per
+// invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs), so with two pilots each one refreshes every
+// 10 minutes, about as often as ESI's own caches turn over. Turns follow the clock rather than the last sync, so a
 // pilot whose sync keeps failing cannot starve the other. A pilot whose grant EVE refused gets no turn until they
-// reconnect: it could not reach EVE anyway.
+// reconnect: it could not reach EVE anyway. Once an hour a run samples kills and jumps (2 calls) instead of syncing;
+// the turn counter it bumps hands the skipped turn to the same pilot on the next run, so neither pilot always loses it.
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Date.now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(Date.now()),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
   env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(Date.now()-180*86400000)]);
+ const sample=await env.DB.prepare("SELECT expires_at, turns FROM market_docs WHERE name = 'activity'").first();
+ if(!sample||Date.now()>=sample.expires_at){await sampleActivity(env,fetchImpl);return;}
  const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
- if(ids.length)await syncPilot(ids[Math.floor(at/SYNC_EVERY)%ids.length],env,fetchImpl);
+ if(ids.length)await syncPilot(ids[(Math.floor(at/SYNC_EVERY)+sample.turns)%ids.length],env,fetchImpl);
 }
 export default {fetch:handleRequest,async scheduled(event,env,ctx){ctx.waitUntil(scheduledSync(env,fetch,event.scheduledTime));}};

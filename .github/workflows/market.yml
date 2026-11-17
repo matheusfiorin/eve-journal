@@ -1,4 +1,6 @@
 name: Market pipeline
+# GitHub skips many scheduled runs (about 4 a day in practice), so nothing here may need to run hourly: the
+# Worker's cron samples kills and jumps itself (worker/index.js sampleActivity).
 on:
   schedule:
     - cron: '23 * * * *'

@@ -11,7 +11,13 @@ export async function json(url, options = {}) {
   }
   return response.json();
 }
-export const esi = (path, options = {}) => json(`https://esi.evetech.net/latest/${path}`, {...options, headers:{Accept:'application/json', ...(options.body ? {'Content-Type':'application/json'} : {})}});
+// Unversioned ESI routes, pinned to a compatibility date. A browser can't send ESI's X-Compatibility-Date or
+// X-User-Agent headers without a CORS preflight before every call, so both go as the query parameters ESI documents
+// for that case (developers.eveonline.com/docs/services/esi/overview and /best-practices). 2025-09-26 is before ESI
+// replaced status/ (2025-11-06) and changed the corporation and character fields this app reads (2026).
+export const ESI_COMPAT = '2025-09-26';
+const ESI_QUERY = `compatibility_date=${ESI_COMPAT}&user_agent=${encodeURIComponent('Echelon/1.0 (EVE wing console in a browser)')}`;
+export const esi = (path, options = {}) => json(`https://esi.evetech.net/${path}${path.includes('?') ? '&' : '?'}${ESI_QUERY}`, {...options, headers:{Accept:'application/json', ...(options.body ? {'Content-Type':'application/json'} : {})}});
 
 export const name = id => names.get(id) || `#${id}`;
 export const isStation = id => id >= 60000000 && id < 64000000;

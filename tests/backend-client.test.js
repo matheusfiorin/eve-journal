@@ -43,6 +43,12 @@ test('the market read carries a signed-in session when there is one so pilot reg
  await c.market();auth(c);await c.market();
  assert.deepEqual(seen,[undefined,`Bearer ${'a'.repeat(43)}`]);
 });
+test('the market read asks for the split view, and the universe document is fetched by version without a session',async()=>{
+ const seen=[];const c=client(async(url,options)=>{seen.push([new URL(url).pathname+new URL(url).search,options.headers.Authorization]);return Response.json(url.includes('universe')?{version:'abc',universe:{systems:{}},meta:{ores:[]}}:{meta:null,universe:null,universeVersion:'abc',regions:[]});});
+ auth(c);await c.market();const doc=await c.universe('abc');
+ assert.deepEqual(seen,[['/api/market?v=2',`Bearer ${'a'.repeat(43)}`],['/api/market/universe?v=abc',undefined]]);assert.deepEqual(doc.universe,{systems:{}});
+ const bad=client(async()=>Response.json({universe:{}}));await assert.rejects(bad.universe('abc'),/invalid universe/);
+});
 test('an HTML or empty error page reports the HTTP status, not a JSON parse error',async()=>{
  const html=client(async()=>new Response('<!doctype html><h1>502 Bad Gateway</h1>',{status:502,headers:{'Content-Type':'text/html'}}));
  await assert.rejects(html.publicPilots(),{message:'Backend returned 502.'});

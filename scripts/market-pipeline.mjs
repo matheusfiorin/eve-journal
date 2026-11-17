@@ -8,10 +8,13 @@ import {createHmac} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
-const ESI = 'https://esi.evetech.net/latest';
+// Unversioned ESI routes answer as of the compatibility date each request sends (developers.eveonline.com/docs/services/esi/overview).
+// Checked against ESI's changelog: none of the routes used here changed after it. Keep it equal to the Worker's ESI_COMPAT.
+export const ESI_COMPAT = '2025-12-16';
+const ESI = 'https://esi.evetech.net';
 export const HUBS = [10000002, 10000043, 10000032, 10000030, 10000042]; // The Forge, Domain, Sinq Laison, Heimatar, Metropolis
 const SDE = 'https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip';
-const HEADERS = {Accept:'application/json', 'User-Agent':'eve-journal market pipeline (github.com/matheusfiorin/eve-journal)'};
+const HEADERS = {Accept:'application/json', 'X-Compatibility-Date':ESI_COMPAT, 'User-Agent':'eve-journal market pipeline (github.com/matheusfiorin/eve-journal)'};
 const TOP = 6;
 const isStation = id => id >= 60000000 && id < 64000000;
 
@@ -99,27 +102,6 @@ export function mergeRegion(sellers, region, ids, found, perRegion = 2) {
     if (kept.length || added.length) sellers[id] = [...kept, ...added].sort((a, b) => a[2] - b[2]); else delete sellers[id];
   }
   return sellers;
-}
-// Ship kills per system as exponentially decayed sums over ~24 h and ~7 days, updated from ESI's last-hour counts.
-// shortcut: hours the pipeline missed are filled with the latest hour's rate (at most 6).
-export function decayRisk(prev, kills, now) {
-  const hours = prev?.at ? Math.max(0, (now - prev.at) / 3600000) : 1, weight = Math.min(hours, 6), s = {};
-  for (const [id, [d, w]] of Object.entries(prev?.s || {})) s[id] = [d * Math.exp(-hours / 24), w * Math.exp(-hours / 168)];
-  for (const k of kills) if (k.ship_kills) { const v = s[k.system_id] ||= [0, 0]; v[0] += k.ship_kills * weight; v[1] += k.ship_kills * weight; }
-  for (const id of Object.keys(s)) { s[id] = s[id].map(x => Math.round(x * 100) / 100); if (s[id][1] < 0.05) delete s[id]; }
-  return {at:now, since:prev?.since || now, s};
-}
-// Jumps per system as a ~24-hour decayed sum: how busy a system is over a day, not just this hour.
-export function decayTraffic(prev, jumps, now) {
-  const hours = prev?.at ? Math.max(0, (now - prev.at) / 3600000) : 1, weight = Math.min(hours, 6), s = {};
-  for (const [id, d] of Object.entries(prev?.s || {})) s[id] = d * Math.exp(-hours / 24);
-  for (const j of jumps) if (j.ship_jumps) s[j.system_id] = (s[j.system_id] || 0) + j.ship_jumps * weight;
-  for (const id of Object.keys(s)) { s[id] = Math.round(s[id]); if (s[id] < 1) delete s[id]; }
-  return {at:now, since:prev?.since || now, s};
-}
-// This run's kill and traffic sums. Missing ESI data (null) carries the previous sums forward unchanged.
-export function history(previous, kills, jumps, now) {
-  return {risk:kills ? decayRisk(previous?.risk, kills, now) : previous?.risk, traffic:jumps ? decayTraffic(previous?.traffic, jumps, now) : previous?.traffic};
 }
 // Weapon and hull types that mark a gate camp: smartbombs and interdiction ships.
 export function combatTypes(types, groups) {
@@ -276,23 +258,8 @@ async function main() {
   }
   const scan = [...new Set([...wanted, ...(meta.ores || []).flatMap(o => [o.ore, o.comp].filter(Boolean)), ...(meta.ores || []).flatMap(o => o.m.map(([id]) => id)), ...Object.values(meta.recipes).flatMap(r => r.m.map(([id]) => id)), ...meta.starters.flatMap(s => [s.type, ...s.m.map(([id]) => id)])])];
 
-  // Last hour's kills and jumps per known-space system: danger and crowding for the Mining tab.
-  // Read last run's meta first: the kill and traffic sums build on it, so a failed read must not restart them.
-  let previous;
-  try {
-    const r = await fetch(`${backend}/api/market`, {signal:AbortSignal.timeout(60000)});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    previous = (await r.json()).meta?.data || null;
-  } catch (error) { console.log(`::warning title=Previous meta::${error.message}; metadata upload skipped to keep the kill history.`); }
-  let kills = null, jumps = null;
-  try {
-    [kills, jumps] = (await Promise.all([esi('/universe/system_kills/'), esi('/universe/system_jumps/')])).map(r => r.body);
-    const activity = {};
-    for (const k of kills) if (!map || map.systems[k.system_id]?.[1] > 0) activity[k.system_id] = [k.ship_kills + k.pod_kills, k.npc_kills, 0];
-    for (const j of jumps) if (!map || map.systems[j.system_id]?.[1] > 0) (activity[j.system_id] ||= [0, 0, 0])[2] = j.ship_jumps;
-    meta.activity = activity;
-  } catch (error) { kills = jumps = null; console.log(`::warning title=Activity::${error.message}; kill and traffic history carried forward.`); }
-  Object.assign(meta, history(previous, kills, jumps, Date.now()));
+  // Kills and jumps per system (meta.activity, meta.risk, meta.traffic) are sampled hourly by the Worker's cron
+  // (worker/activity.js): GitHub runs this workflow only a few times a day, too seldom for an hourly history.
 
   const SKILLS = {accounting:'Accounting', brokerRelations:'Broker Relations', industry:'Industry', advancedIndustry:'Advanced Industry', massProduction:'Mass Production',
     advancedMassProduction:'Advanced Mass Production', science:'Science', labOperation:'Laboratory Operation', advancedLabOperation:'Advanced Laboratory Operation', metallurgy:'Metallurgy', research:'Research',
@@ -343,11 +310,9 @@ async function main() {
     if (!stored.ok) throw new Error(`Universe upload failed: HTTP ${stored.status} ${await stored.text()}`);
     report.push(`map ${Object.keys(map.systems).length} systems/${Object.keys(map.regions).length} regions/${map.stations.length} stations (${map.stations.filter(s => s[2] & 1).length} factories, ${map.stations.filter(s => s[2] & 2).length} labs), ${(JSON.stringify(map).length / 1e6).toFixed(2)} MB`);
   }
-  // shortcut: a read that keeps failing freezes meta at the last good run; shrink /api/market if that happens.
-  if (previous === undefined) throw new Error('Metadata not uploaded: the previous snapshot could not be read.');
   const stored = await api('/api/market/ingest', {method:'POST', body:JSON.stringify({region:0, data:meta})});
   if (!stored.ok) throw new Error(`Metadata upload failed: HTTP ${stored.status} ${await stored.text()}`);
   // Annotations show up in the run summary, so a failed scan is visible without opening the log.
-  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${Object.keys(meta.activity || {}).length} active systems, kill history for ${Object.keys(meta.risk?.s || {}).length} systems, traffic history for ${Object.keys(meta.traffic?.s || {}).length}, ${meta.combat?.sb.length ?? 0} smartbombs/${meta.combat?.dictor.length ?? 0} interdictors, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
+  console.log(`::notice title=Market snapshot::${wanted.size} watchlist items, ${Object.keys(meta.recipes).length} recipes, ${meta.starters.length} starter blueprints, ${(meta.ores || []).length} ores, ${meta.combat?.sb.length ?? 0} smartbombs/${meta.combat?.dictor.length ?? 0} interdictors, ${scan.length} items scanned, ${pilotSystems.length} pilot locations${stats.limited ? `, ${stats.limited} rate-limit waits` : ''}. ${report.join('; ')}`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

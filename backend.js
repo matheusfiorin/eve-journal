@@ -73,7 +73,12 @@ export class BackendClient {
  authURL(id){return `${this.url}/auth/start?pilot=${encodeURIComponent(id)}`;}
  async wing(id){const data=await this.call('/api/wing',{id});if(!Array.isArray(data.pilots))throw new Error('Backend returned an invalid wing summary.');return data.pilots;}
  // Any signed-in pilot unlocks the regions the pilots fly in; without one the backend serves the trade hubs only.
- async market(){const id=[...this.sessions.keys()].find(id=>this.has(id));return this.call('/api/market',id?{id}:{});}
+ // v=2 leaves the static universe out and names its version instead (see universe()); a Worker from before that ignores
+ // it and sends everything inline. The browser's HTTP cache revalidates with the ETag, so an unchanged market is a 304.
+ async market(){const id=[...this.sessions.keys()].find(id=>this.has(id));return this.call('/api/market?v=2',id?{id}:{});}
+ // The static universe document (gate map, stations, ore and skill IDs): public, the same for every visitor, and
+ // cached for a year under its version, so it is sent without a session.
+ async universe(version){const data=await this.call(`/api/market/universe?v=${encodeURIComponent(version)}`);if(typeof data.version!=='string'||!data.meta||typeof data.meta!=='object')throw new Error('Backend returned an invalid universe map.');return data;}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  // Journal sync: records after a rev, and changes sent against the rev each was based on (see worker/index.js).
  // prefs=1: this client understands pilot preferences; older clients aren't sent them, as they'd take them for entries.
