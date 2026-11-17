@@ -94,8 +94,8 @@ function routePop(target, event) {
   if (!target || !g) { pop.hidden = true; return; }
   const ids = target.dataset.route.split(',').map(Number).filter(id => g.systems.has(id));
   if (ids.length < 2) { pop.hidden = true; return; }
-  // The sketch comes from mapview.js, fetched on the first hover; until it arrives the preview has no picture.
-  if (!sketcher) import('../mapview.js').then(m => { sketcher = m.routeSketch; }, () => {});
+  // The sketch comes from mapview.js, fetched on the first hover. Redraw when it arrives: the pointer may not move again.
+  if (!sketcher) import('../mapview.js').then(m => { sketcher = m.routeSketch; if (!pop.hidden && target.isConnected) routePop(target, event); }, () => {});
   const key = `${target.dataset.route}|${target.dataset.label}|${sketcher ? 1 : 0}`;
   if (pop.dataset.key !== key) {
     pop.dataset.key = key;
