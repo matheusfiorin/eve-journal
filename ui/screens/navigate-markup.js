@@ -1,12 +1,13 @@
 // The Haul plan's static markup, apart from ui/screens/navigate.js so the page can build every screen's DOM at boot and
 // load the Navigate code only when the Star map or Haul plan first opens.
 export const markup = {
-  hauling:`<form id="haul-form" class="card market-controls">
-  <div class="card-head"><div><h2>Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
+  hauling:`<form id="haul-form" class="card market-controls"><details id="haul-setup" class="haul-setup" open>
+  <summary><span class="haul-setup__title">Plan settings</span><span id="haul-brief" class="hint"></span></summary>
+  <div class="card-head"><div><h2 class="sr-only">Haul plan</h2><p id="haul-status" class="hint">Add stops to plan a route.</p></div></div>
   <div id="haul-stops" class="stops"></div>
   <div class="actions"><button type="button" id="haul-add" class="secondary small">+ Add stop</button></div>
   <div class="row">
-   <label>Cargo value (ISK)<input id="haul-value" type="number" min="0" step="1000000" value="100000000"></label>
+   <label>Cargo value (ISK)<input id="haul-value" type="text" inputmode="decimal" data-isk value="100000000" autocomplete="off"><span class="isk-echo hint" aria-live="polite"></span></label>
    <label>Cargo volume (m³)<input id="haul-volume" type="number" min="0" step="100" value="5000"></label>
    <label>Ship<select id="haul-hull"><option value="">Suggest from cargo</option><option value="br">Blockade runner</option><option value="t1">T1 industrial</option><option value="dst">Deep space transport</option><option value="freighter">Freighter</option></select></label>
   </div>
@@ -19,6 +20,6 @@ export const markup = {
    <label class="check"><input id="haul-lowsec" type="checkbox"> Allow low-sec</label>
    <button id="haul-plan">Plan route</button>
   </div>
- </form>
+ </details></form>
  <div id="haul-content"></div>`
 };

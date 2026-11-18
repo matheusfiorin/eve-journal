@@ -14,7 +14,7 @@ const wrap = (bar, status, content) => `<div class="earn">${bar}<p ${status} cla
 export const markup = {
   industry:wrap(bar('Build options', `
    ${tf('From', '<select id="industry-system"></select>')}
-   ${tf('Budget', '<input id="industry-budget" type="number" min="0" step="1000000" placeholder="Your wallet" inputmode="numeric">')}
+   ${tf('Budget', '<input id="industry-budget" type="text" data-isk placeholder="Your wallet" inputmode="decimal" autocomplete="off"><span class="isk-echo"></span>')}
    ${tf('Category', '<select id="industry-category"><option value="">All</option></select>')}
    ${sortBox('id="industry-sort"', [['', 'Best overall'], ['profit', 'Profit per day'], ['payback', 'Fastest payback'], ['margin', 'Highest margin'], ['invest', 'Lowest start cost'], ['cheap', 'Cheapest blueprint'], ['near', 'Closest seller']])}
    ${sw('id="industry-over"', 'Over budget')}
@@ -38,7 +38,7 @@ export const markup = {
    ${tf('From', '<select id="market-origin"></select>')}
    ${tf('Buy within', '<select id="market-jumps"><option value="5">5 jumps</option><option value="10" selected>10 jumps</option><option value="20">20 jumps</option><option value="99">Any distance</option></select>')}
    ${tf('Cargo m³', '<input id="market-cargo" type="number" min="1" step="100" value="5000" inputmode="numeric">')}
-   ${tf('Budget', '<input id="market-budget" type="number" min="0" step="1000000" placeholder="Your wallet" inputmode="numeric">')}
+   ${tf('Budget', '<input id="market-budget" type="text" data-isk placeholder="Your wallet" inputmode="decimal" autocomplete="off"><span class="isk-echo"></span>')}
    ${sortBox('id="market-sort"', [['', 'Best first']], 'tf--m')}
    ${filterBox('id="market-filter"', 'items')}`), 'id="market-status"', 'id="market-content"')
 };

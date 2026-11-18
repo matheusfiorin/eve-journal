@@ -24,7 +24,7 @@ test('connected pilots show wallet, journal, transactions, mining, industry and 
  await ledger.getByRole('button',{name:'Market',exact:true}).click();await expect(rows).toHaveCount(1);await expect(rows.first()).toContainText('Tritanium');
  await ledger.getByRole('button',{name:'Mining',exact:true}).click();await expect(rows).toHaveCount(2);await expect(rows.first()).toContainText('Veldspar');await expect(rows.first()).toContainText('Perimeter');await expect(rows.first()).toContainText('worth');
  await ledger.getByRole('button',{name:'All',exact:true}).click();await page.keyboard.press('/');await expect(page.locator('#ledger-search')).toBeFocused();await page.keyboard.type('bounty');await expect(rows).toHaveCount(1);await page.locator('#ledger-search').fill('');
- if(testInfo.project.name!=='mobile'){const amount=wallet.locator('[data-sort="ledger:amount"]');await amount.click();await expect(amount).toHaveAttribute('aria-sort','descending');await expect(rows.first()).toContainText('1,500,000.00');await amount.click();await expect(rows.first()).toContainText('-5,500.00');await wallet.locator('[data-sort="ledger:date"]').click();}
+ if(testInfo.project.name!=='mobile'){const amount=wallet.locator('[data-sort="ledger:amount"]');await amount.click();await expect(amount.locator('xpath=..')).toHaveAttribute('aria-sort','descending');await expect(rows.first()).toContainText('1,500,000.00');await amount.click();await expect(rows.first()).toContainText('-5,500.00');await wallet.locator('[data-sort="ledger:date"]').click();}
  await rows.filter({hasText:'Bounty prizes in Jita'}).locator('b').click();await expect(page.locator('#drawer-title')).toHaveText('Bounty prizes');await expect(page.locator('#drawer')).toContainText('Balance after');await expect(page.locator('#drawer')).toContainText('12,500,000.25 ISK');await page.keyboard.press('Escape');
  // The wingmate's ledger sits one tap away.
  await ledger.locator('[data-show-pilot="Decxus"]').click();await expect(ledger.locator('.ledger')).toHaveAttribute('data-pilot','decxus');
@@ -63,18 +63,19 @@ test('a connection link the browser did not start cannot replace a connected pil
  expect(calls.filter(c=>c.authorization).every(c=>c.authorization===`Bearer ${opaque.slice(0,42)}0`)).toBe(true);
 });
 test('disconnect removes private data from the page',async({page})=>{
- const {calls}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');page.once('dialog',d=>d.accept());await page.locator('.me-banner').getByRole('button',{name:'Disconnect'}).click();await expect(overview).not.toContainText('12,500,000.25');expect(calls.some(c=>c.path==='/api/disconnect')).toBe(true);
+ const {calls}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');page.once('dialog',d=>d.accept());await page.locator('#switch-pilot').click();await page.locator('#hero-conn').getByRole('button',{name:'Disconnect'}).first().click();await page.keyboard.press('Escape');await expect(overview).not.toContainText('12,500,000.25');expect(calls.some(c=>c.path==='/api/disconnect')).toBe(true);
  await tab(page,'wallet');await expect(page.locator('#ledger-content')).toContainText('Connect this pilot');
 });
 test('Delete my data asks twice, then removes the pilot’s data from the backend and the page',async({page})=>{
  const {calls,state}=await mockApp(page,{connected:'first'});await openApp(page);const overview=page.locator('#bridge');await expect(overview).toContainText('12,500,000.25');
- const button=page.locator('.me-banner').getByRole('button',{name:'Delete my data'});
+ // Delete my data sits with Disconnect in the pilot switcher's Connections list.
+ const press=async()=>{if(!await page.locator('#hero-conn').isVisible())await page.locator('#switch-pilot').click();await page.locator('#hero-conn').getByRole('button',{name:'Delete my data'}).first().click();};
  // Each click answers the dialogs it raises from this queue; declining either question changes nothing.
  const answers=[];page.on('dialog',d=>answers.shift()(d));
- answers.push(d=>d.dismiss());await button.click();
- answers.push(d=>d.accept(),d=>{expect(d.type()).toBe('prompt');return d.accept('nope');});await button.click();
+ answers.push(d=>d.dismiss());await press();
+ answers.push(d=>d.accept(),d=>{expect(d.type()).toBe('prompt');return d.accept('nope');});await press();
  await page.waitForTimeout(300);expect(calls.some(c=>c.path==='/api/forget')).toBe(false);await expect(overview).toContainText('12,500,000.25');
- answers.push(d=>d.accept(),d=>d.accept('DELETE'));await button.click();await expect(overview).not.toContainText('12,500,000.25');
+ answers.push(d=>d.accept(),d=>d.accept('DELETE'));await press();await expect(overview).not.toContainText('12,500,000.25');
  expect(calls.filter(c=>c.path==='/api/forget'&&c.method==='POST').length).toBe(1);expect(state.forgotten).toBe(1);
 });
 test('the page refuses to render inside another page',async({page})=>{

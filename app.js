@@ -4,7 +4,7 @@ import {JournalStore} from './storage.js';
 import {S, KEY, ME, home, counters} from './ui/state.js';
 import {json} from './ui/esi.js';
 import {$, countUps, notice, toast, pilotOptions, landOn} from './ui/shared.js';
-import {loadPilots, clearPrivate, dataTime, STALE_MS} from './ui/pilots.js';
+import {loadPilots, clearPrivate, dataTime, STALE_MS, syncStatus} from './ui/pilots.js';
 import * as routes from './ui/routes.js';
 import * as mapmodal from './ui/mapmodal.js';
 import * as hero from './ui/hero.js';
@@ -81,8 +81,8 @@ function expireSessions() {
   if (!S.backend) return;
   const expired = S.backend.expire();
   if (!expired.length) return;
-  for (const id of expired) { const p = S.pilots.find(p => p.id === id); if (p) clearPrivate(p); }
-  renderAll(); notice('A pilot session expired. Connect again to see private data.');
+  for (const id of expired) { const p = S.pilots.find(p => p.id === id); if (p) { clearPrivate(p); p.problem = {kind:'expired', message:'Sign-in expired.'}; } }
+  renderAll(); syncStatus(dataTime());
 }
 
 document.addEventListener('go', event => selectTab(event.detail, true));
@@ -91,6 +91,7 @@ document.addEventListener('click', async event => {
   try {
     if (b.dataset.go) selectTab(b.dataset.go, true);
     if (b.id === 'switch-pilot') hero.openHero();
+    if (b.dataset.retry !== undefined) $('#refresh').click();
     if (b.dataset.connect !== undefined) {
       const p = S.pilots[Number(b.dataset.connect)];
       if (!S.backend || !p?.id) throw new Error('Wait for the pilot lookup before connecting.');

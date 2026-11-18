@@ -13,7 +13,7 @@ export const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const home = new URL('./', location.href).href;
 
 export const S = {
-  config:{pilots:[]}, data:emptyData(), store:null, backend:null, universeStatus:null, generation:0,
+  config:{pilots:[]}, data:emptyData(), store:null, backend:null, universeStatus:null, statusTried:false, generation:0, settling:false,
   pilots:[], me:null, wing:new Map(),
   prices:null, adjusted:new Map(), marketData:null, marketBook:null, costIndices:null,
   marketTask:null, pricesTask:null, costTask:null, // in-flight loads, shared by concurrent callers
@@ -48,5 +48,6 @@ export function summary(p) {
   const known = wallet !== undefined || holdings;
   return {skills, sp:skills?.total_sp, maxed:skills?.skills?.filter(s => s.trained_skill_level === 5).length, wallet, holdings,
     assets:holdings?.total, worth:known ? (wallet || 0) + (holdings?.total || 0) : undefined,
-    title:skills?.skills ? pilotTitle(skills, id => typeGroup.get(id)) : null};
+    // The rank needs the skill groups; without them every pilot reads "Rookie" until they load, then the badge flips.
+    title:skills?.skills && typeGroup.size ? pilotTitle(skills, id => typeGroup.get(id)) : null};
 }

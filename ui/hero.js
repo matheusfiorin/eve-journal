@@ -17,6 +17,10 @@ export function renderHero() {
   };
   const tether = '<svg class="tether" viewBox="0 0 120 20" aria-hidden="true"><line x1="0" y1="10" x2="120" y2="10"/><circle cx="60" cy="10" r="3"/></svg>';
   $('#hero-pilots').innerHTML = S.pilots.map(plate).join(tether);
+  // Connection controls live here, with the pilot switcher, rather than on the Bridge: shown only once a pilot is flying.
+  const linked = S.me && S.backend ? S.pilots.filter(p => p.id && S.backend.has(p.id)) : [];
+  $('#hero-conn').hidden = !linked.length;
+  $('#hero-conn').innerHTML = linked.length ? `<h2>Connections</h2><ul>${linked.map(p => `<li data-pilot="${esc(p.name.toLowerCase())}"><span class="who">${esc(p.name)}</span><span class="hint">${p.problem?.kind === 'expired' ? 'Sign-in expired' : 'Connected'}</span><button type="button" class="secondary small" data-connect="${S.pilots.indexOf(p)}" ${p.refreshing ? 'disabled' : ''}>Reconnect</button><button type="button" class="secondary small" data-disconnect="${p.id}">Disconnect</button><button type="button" class="secondary small" data-forget="${p.id}">Delete my data</button></li>`).join('')}</ul>` : '';
 }
 function startStars() {
   cancelAnimationFrame(starsFrame);
@@ -41,7 +45,7 @@ function startStars() {
   draw();
 }
 // While the picker is up, everything behind it is inert: no focus, clicks or screen-reader browsing escape the dialog.
-const behind = () => document.querySelectorAll('#rail, .shell__main, #tabbar');
+const behind = () => document.querySelectorAll('#rail, .shell__main, #tabbar, .skip');
 export function openHero() {
   warp = false; $('#hero').classList.remove('warp'); $('#hero').hidden = false;
   behind().forEach(el => { el.inert = true; });

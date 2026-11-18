@@ -89,13 +89,17 @@
 /* Phones: map first. The toolbar lives in the Layers sheet; the system panel is a bottom sheet that peeks above the
    tab bar and snaps to half or nearly full height; zoom, Fit and Locate float as a 44 px stack. */
 @media (max-width:720px){
-  #map{--peek:112px;--tabbar-h:calc(61px + env(safe-area-inset-bottom))}
+  #map{--peek:84px;--tabbar-h:calc(61px + env(safe-area-inset-bottom))}
   /* The sheet is position:fixed inside #map, and a transformed ancestor becomes its containing block: view-in's
      translateY would pin it to the view (halfway up the screen) until the animation ends. Fade the map in instead. */
   #map.view--enter{animation-name:fade}
   .map-controls-home .map-toolbar{display:none}
   #drawer .map-toolbar{display:grid;gap:12px}#drawer .map-selects{display:grid;margin:0}#drawer .map-crumbs{order:-1}
-  .map-status{margin:0 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .map-status{margin:0 0 6px}
+  /* Phones: the stats line lives in the Layers sheet; security values sit under each box so neighbours' labels never collide. */
+  #drawer .map-status{white-space:normal;order:9;margin:4px 0 0}
+  .region-map .sys .sv{transform:translate(0,38px)}
+  .region-map .exit text{font-size:9px}.region-map .exit .exit-region{font-size:7.5px}
   .map-layout{display:block}
   .map-stage{height:calc(100dvh - var(--map-top,150px) - var(--tabbar-h) - var(--peek));min-height:240px;margin:0 calc(-1 * var(--gutter));border-radius:0;border-width:1px 0}
   .map-find{left:10px;top:10px;width:auto;right:118px}
@@ -129,3 +133,17 @@
   #map{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
 }
 @media (max-width:720px){ .modes{grid-template-columns:1fr} .stop-row{grid-template-columns:40px 1fr auto auto auto} }
+
+/* Haul plan: the settings fold into a summary once there is a plan, and on phones the result comes first. */
+.haul-setup{margin:0}.haul-setup>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;list-style:none;cursor:pointer;color:var(--text)}
+.haul-setup>summary::-webkit-details-marker{display:none}
+.haul-setup__title{font:600 var(--fs-md) var(--ff-ui)}
+.haul-setup>summary .hint{margin:0;min-width:0;overflow-wrap:anywhere}
+.haul-setup>summary::after{content:"Edit";margin-left:auto;color:var(--accent-strong);font:600 var(--fs-xs) var(--ff-ui)}
+.haul-setup[open]>summary::after{content:"Hide"}
+.haul-setup[open]>summary{margin-bottom:12px}
+@media (max-width:720px){
+  #hauling[data-planned]{display:flex;flex-direction:column}
+  #hauling[data-planned]>#haul-content{order:-1;margin:0 0 16px}
+  #hauling[data-planned]>#haul-form{margin-top:0}
+}

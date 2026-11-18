@@ -49,7 +49,7 @@ test('picking a pilot in one tab switches the other tabs to them',async({page,co
 });
 test('Reconnect is accepted when EVE answers in another tab, and the replaced session is ended',async({page,context})=>{
  await mockApp(page,{connected:'first'});await openApp(page);
- await page.locator('.me-banner [data-connect]').click();await expect(page).toHaveURL(`${API}/auth/start?pilot=${IDS[0]}`);
+ await page.locator('#switch-pilot').click();await page.locator('#hero-conn [data-connect]').first().click();await expect(page).toHaveURL(`${API}/auth/start?pilot=${IDS[0]}`);
  // On a phone the EVE login often comes back in a fresh tab.
  const other=await context.newPage();const {errors,calls}=await mockApp(other,{connected:'first'});
  await other.goto(`/#backend_session=${reconnected.slice(0,42)}0&pilot=${IDS[0]}&expires=${Date.now()+3600000}`);await expect(other.locator('#sync-status')).toContainText('Synced');

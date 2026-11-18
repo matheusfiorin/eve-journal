@@ -19,7 +19,9 @@ export const ESI_COMPAT = '2025-09-26';
 const ESI_QUERY = `compatibility_date=${ESI_COMPAT}&user_agent=${encodeURIComponent('Echelon/1.0 (EVE wing console in a browser)')}`;
 export const esi = (path, options = {}) => json(`https://esi.evetech.net/${path}${path.includes('?') ? '&' : '?'}${ESI_QUERY}`, {...options, headers:{Accept:'application/json', ...(options.body ? {'Content-Type':'application/json'} : {})}});
 
-export const name = id => names.get(id) || `#${id}`;
+// While a refresh is still resolving names, a placeholder reads better than a raw ID; IDs show only once lookups have finished.
+export const named = id => names.has(id);
+export const name = id => names.get(id) || (S.settling ? '…' : `#${id}`);
 export const isStation = id => id >= 60000000 && id < 64000000;
 export const place = (id, type) => isStation(id) || type === 'station' ? name(id) : 'Player structure';
 

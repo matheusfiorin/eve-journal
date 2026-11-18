@@ -1,20 +1,22 @@
 // Bridge (home): what to do now. Alerts and the pilot line, "Next up" ranked from the planning modules, and the wing together.
 // Also owns the live inputs the Crew map scores (crewInput), so both screens read one cached computation.
-import {levelOf, queueState, remaining} from '../../model.js';
+import {levelOf, queueState} from '../../model.js';
 import {fees, hauls, stationTrades} from '../../market.js';
 import {skillLevels, isAlpha, evaluate, rank} from '../../industry.js';
 import {SHIPS, yieldRate, holdOf, canFly, oreValue, sites} from '../../mining.js';
 import {rankSystems} from '../../exploration.js';
 import {capabilities, groupPlan, ACT} from '../../capabilities.js';
-import {S, mine, wingmate, ordered, summary, assetCats, opsOf} from '../state.js';
-import {name} from '../esi.js';
+import {S, mine, wingmate, ordered, summary, assetCats, opsOf, viaWing} from '../state.js';
+import {name, named} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
-import {$, esc, isk, when, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert} from '../shared.js';
+import {$, esc, isk, when, day, left, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert} from '../shared.js';
 import {mapGraph, route} from '../routes.js';
 import {haulSaved} from '../prefs.js';
 
 export const markup = {bridge:'<div id="pilots"></div>'};
 const keyOf = p => p.name.toLowerCase();
+// A figure, or the reason it is missing, so an empty value never reads as zero or as a broken page.
+const money = (key, value, none) => Number.isFinite(value) ? count(key, value, 'isk') : `<span class="hint">${none}</span>`;
 
 // ── Live opportunities near the chosen pilot (market snapshot + pure modules), cached per data state. ──
 let opps = {key:null, value:{}}, loading = null, failed = -1;
@@ -96,15 +98,15 @@ function nextUp(p, crew) {
   const q = queueState(p.queue);
   if (q?.kind === 'empty') steps.push({kind:'alert', label:'Training', title:'Add a skill to your queue', why:'Nothing is training. Every idle hour is skill points lost.', go:'training', button:'Open training'});
   if (q?.kind === 'paused') steps.push({kind:'alert', label:'Training', title:'Start your skill queue', why:'Skills are queued but paused. Start the queue in game.', go:'training', button:'Open training'});
-  if (q?.kind === 'ending') steps.push({kind:'alert', label:'Training', title:'Queue more skills', why:`Your queue runs out in ${remaining(q.end).replace(' remaining', '')}.`, go:'training', button:'Open training'});
+  if (q?.kind === 'ending') steps.push({kind:'alert', label:'Training', title:'Queue more skills', why:`Your queue runs out in ${left(q.end)}.`, go:'training', button:'Open training'});
   // Industry jobs from either connected pilot that are done or finish within a day.
   const jobs = S.pilots.flatMap(x => (opsOf(x).jobs?.value || []).map(j => ({...j, who:x.name})))
     .filter(j => j.status === 'ready' || (j.status === 'active' && Date.parse(j.end_date) - Date.now() < 86400000));
   if (jobs.length) {
     const ready = jobs.filter(j => j.status === 'ready' || Date.parse(j.end_date) <= Date.now()), soon = jobs.find(j => !ready.includes(j));
     steps.push({kind:'alert', label:'Jobs', title:ready.length ? `Deliver ${plural(ready.length, 'finished job')}` : `${name(soon.product_type_id)} job finishes soon`,
-      why:ready.length ? `${[...new Set(ready.map(j => j.who))].join(' and ')} can collect the output and start the next run.` : `${soon.who}’s ${plural(soon.runs, 'run')} ${soon.runs === 1 ? 'is' : 'are'} done in ${remaining(soon.end_date).replace(' remaining', '')}. Have the next job ready.`,
-      figure:ready.length ? `${ready.length}` : remaining(soon.end_date).replace(' remaining', ''), note:ready.length ? 'ready' : 'left', go:'earn/jobs', button:'Open jobs'});
+      why:ready.length ? `${[...new Set(ready.map(j => j.who))].join(' and ')} can collect the output and start the next run.` : `${soon.who}’s ${plural(soon.runs, 'run')} ${soon.runs === 1 ? 'is' : 'are'} done in ${left(soon.end_date)}. Have the next job ready.`,
+      figure:ready.length ? `${ready.length}` : left(soon.end_date), note:ready.length ? 'ready' : 'left', go:'earn/jobs', button:'Open jobs'});
   }
   if (o.industry) steps.push({kind:'passive', act:'industry', label:'Industry', title:`Start ${o.industry.plan}`, why:`${format(o.industry.invest, 'isk')} to start, pays back in ${o.industry.payback < 1 ? 'under a day' : `${o.industry.payback.toFixed(1)} days`}, and it builds while you fly.`, figure:`+${format(o.industry.profitDay, 'isk').replace(' ISK', '')}`, note:'ISK/day', go:'industry', button:'Plan the build'});
   if (o.mining) steps.push({kind:'active', act:'mining', label:'Mining', title:`Mine ${o.mining.plan}`, why:`${o.mining.jumps ? plural(o.mining.jumps, 'jump') : 'Right here'} in ${o.mining.flyable ? `your ${o.mining.ship}` : `a ${o.mining.ship} (train its hull skill first)`}${o.mining.kills ? ` · ${plural(o.mining.kills, 'ship')} killed there last hour` : ' · quiet last hour'}.`, figure:format(o.mining.iskHour, 'isk').replace(' ISK', ''), note:'ISK/hour', go:'mining', button:'Show the belts'});
@@ -128,7 +130,7 @@ const stepRow = (s, i) => `<li class="course__step" data-kind="${s.kind}" ${s.ac
 function together(p, o, crew) {
   if (!o) return '<p class="together__line">Add your wingmate to config.json to plan sessions together.</p>';
   const sharing = o.private || S.wing.get(o.id)?.sharing;
-  if (!sharing) return `<p class="together__line">${esc(o.name)} hasn’t shared their sheet yet. Once they reconnect and tick “share with my wingmate”, their plans show up here.</p>`;
+  if (!sharing) return `<p class="together__line">Plans for the two of you appear here once ${esc(o.name)} shares.</p>`;
   if (crew.plan) {
     const mine = crew.plan.assign[keyOf(p)];
     return `<p class="together__line">${esc(crew.plan.sentence)}</p><ul class="tonight__roles" role="list">${crew.pilots.map(x => `<li class="role-badge" data-pilot="${esc(x.key)}">${esc(x.name)} · ${esc((crew.plan.roles[x.key] || []).join(', '))}</li>`).join('')}</ul>
@@ -145,9 +147,9 @@ function wingCard(p, s, o, crew) {
   const [a, b] = crew.caps;
   return `<section class="panel wing-card" aria-labelledby="wing-mini-title"><h2 id="wing-mini-title">Your wing</h2>
     <div class="pilot-head" data-pilot="${esc(keyOf(o))}">${portrait(o, 40, 'portrait--sm')}<div><h3>${esc(o.name)}</h3><p class="hint">${corpLine(o)}</p></div>${t.title ? `<span class="role-badge">${esc(t.title)}</span>` : ''}</div>
-    ${trainingAlert(o)}
-    <dl class="readout">${fact('Net worth', count('wing-worth', t.worth, 'isk'))}${fact('Skill points', count('wing-sp', t.sp))}</dl>
+    ${sharing || o.problem ? trainingAlert(o) : ''}
     ${sharing ? '' : `<p class="hint">${esc(o.name)} hasn’t shared their sheet yet. Once they reconnect and tick “share with my wingmate”, their plans show up here.</p>`}
+    <dl class="readout">${fact('Net worth', money('wing-worth', t.worth, sharing ? 'Not shared yet' : 'Connect to see'))}${fact('Skill points', Number.isFinite(t.sp) ? count('wing-sp', t.sp) : '<span class="hint">Connect to see</span>')}</dl>
     ${goal ? `<div class="goal-mini"><span>${esc(goal.title)}</span>${progress === null ? '' : `<span class="stack" role="img" aria-label="${Math.round(progress * 100)}% done"><i class="fill" style="width:${(progress * 100).toFixed(1)}%"></i></span>`}</div>` : ''}
     ${a ? `<p class="wing-mini__best">Tonight you’re best at <b data-act="${a.activity}">${a.label}</b> (${a.score})${b ? `, then ${b.label} (${b.score})` : ''}.</p>` : ''}
     <button class="secondary small" data-go="strengths">Open the crew map</button></section>`;
@@ -159,38 +161,41 @@ export function render() {
   const i = S.pilots.indexOf(p), s = summary(p), ops = opsOf(p), loc = ops.location?.value, ship = ops.ship?.value;
   const crew = crewInput(() => { if (!$('#bridge').hidden) render(); });
   const birthday = p.profile?.birthday, age = birthday ? Math.floor((Date.now() - Date.parse(birthday)) / 86400000) : null;
-  const where = loc ? `${loc.station_id ? 'Docked at' : loc.structure_id ? 'Docked in a structure in' : 'In space in'} <b>${esc(loc.station_id ? name(loc.station_id) : name(loc.solar_system_id))}</b>${ship ? ` in a ${esc(name(ship.ship_type_id))}` : ''}` : '';
-  const steps = nextUp(p, crew), loadingMarket = S.backend && !S.marketData && !p.refreshing;
+  const resolving = S.settling && loc && ![loc.station_id || loc.solar_system_id, ship?.ship_type_id].filter(Boolean).every(named);
+  const where = resolving ? 'Locating…' : loc ? `${loc.station_id ? 'Docked at' : loc.structure_id ? 'Docked in a structure in' : 'In space in'} <b>${esc(loc.station_id ? name(loc.station_id) : name(loc.solar_system_id))}</b>${ship ? ` in a ${esc(name(ship.ship_type_id))}` : ''}` : '';
+  const steps = nextUp(p, crew), loadingMarket = S.backend && !S.marketData && !p.refreshing, linked = p.private || viaWing(p);
+  const badge = s.title ? `<span class="role-badge">${esc(s.title)}</span>` : p.refreshing || S.settling ? '<span class="role-badge role-badge--skel" aria-hidden="true"></span>' : '';
   $('#pilots').innerHTML = `
   <header class="me-banner pilot-line" data-pilot="${esc(keyOf(p))}">
     ${portrait(p, 72, 'portrait--lg')}
     <div class="pilot-line__main"><h1 class="screen-title">${esc(p.name)}</h1>
       <p class="pilot-line__where">${where ? `${where} · ` : ''}${corpLine(p)}${age === null ? '' : ` · capsuleer for ${age.toLocaleString()} days`}</p>
-      ${trainingAlert(p)}${p.error ? `<p class="error">${esc(p.error)}</p>` : ''}${connectButtons(p, i)}</div>
-    <div class="pilot-line__side"><span class="role-badge">${esc(s.title || 'Unranked capsuleer')}</span>
-      <dl class="readout">${fact('Skill points', count('me-sp', s.sp))}${fact('Net worth', count('me-worth', s.worth, 'isk'))}</dl></div>
+      ${linked || p.problem || p.refreshing || p.error || queueState(p.queue) ? (p.error && !linked && !p.problem ? '' : trainingAlert(p)) : `<p class="alert muted">Connect ${esc(p.name)} to see training, net worth and your next moves.</p>`}${p.error && !p.problem ? `<p class="error">${esc(p.error)}</p>` : ''}${connectButtons(p, i)}</div>
+    <div class="pilot-line__side">${badge}
+      <dl class="readout">${fact('Skill points', Number.isFinite(s.sp) ? count('me-sp', s.sp) : '<span class="hint">Connect to see</span>')}${fact('Net worth', money('me-worth', s.worth, 'Connect to see'))}</dl></div>
   </header>
   <div class="bridge-grid">
     <section class="panel panel--primary next-up" aria-labelledby="next-title">
       <div class="panel__head"><h2 id="next-title">Next up</h2><p class="panel__sub">Best first, sized to your ship, skills${s.wallet === undefined ? '' : ` and ${esc(format(s.wallet, 'isk'))}`}</p></div>
       ${steps.length ? `<ol class="course">${steps.map(stepRow).join('')}</ol>` : ''}
       ${loadingMarket ? '<div class="skel-rows" aria-busy="true" aria-label="Pricing tonight’s options"><p class="skel-label">Pricing tonight’s options…</p><i></i><i></i></div>' : ''}
-      ${!steps.length && !loadingMarket ? `<div class="state"><p>Nothing to suggest yet. Connect ${esc(p.name)} to share location, wallet and skills, and the Bridge will plan your next session.</p></div>` : ''}
+      ${!steps.length && !loadingMarket && linked ? '<div class="state"><p>Nothing to suggest right now. New picks appear as the market and your sheet update.</p></div>' : ''}
+      ${!steps.length && !loadingMarket && !linked ? '<p class="hint next-up__idle">Your next moves appear here once you’re connected.</p>' : ''}
     </section>
-    <aside class="bridge-side">
+    <div class="bridge-side">
       <section class="panel together" aria-labelledby="together-title"><h2 id="together-title">Together</h2>${together(p, o, crew)}</section>
       ${wingCard(p, s, o, crew)}
-    </aside>
+    </div>
   </div>
   <section class="panel ship-card" aria-labelledby="ship-title"><h2 id="ship-title">Ship &amp; position</h2><dl class="facts">
-      ${fact('Location', loc ? `${esc(name(loc.solar_system_id))}<small>${loc.station_id ? esc(name(loc.station_id)) : loc.structure_id ? 'Docked in a structure' : 'In space'}</small>` : '—')}
-      ${fact('Ship', ship ? `${esc(name(ship.ship_type_id))}<small>${esc(ship.ship_name || '')}</small>` : '—')}
-      ${fact('Wallet', s.wallet !== undefined ? esc(isk(s.wallet)) : '—')}
+      ${fact('Location', loc ? `${esc(name(loc.solar_system_id))}<small>${loc.station_id ? esc(name(loc.station_id)) : loc.structure_id ? 'Docked in a structure' : 'In space'}</small>` : '<span class="hint">Connect to see</span>')}
+      ${fact('Ship', ship ? `${esc(name(ship.ship_type_id))}<small>${esc(ship.ship_name || '')}</small>` : '<span class="hint">Connect to see</span>')}
+      ${fact('Wallet', s.wallet !== undefined ? esc(isk(s.wallet)) : linked ? '<span class="hint">Not synced yet</span>' : '<span class="hint">Connect to see</span>')}
       ${fact('Security status', Number.isFinite(p.profile?.security_status) ? p.profile.security_status.toFixed(2) : '—')}
     </dl>
-    <details><summary>Corporation history</summary>${p.corp ? `<p class="hint">${Number(p.corp.member_count).toLocaleString()} members · ${(p.corp.tax_rate * 100).toFixed(1)}% tax</p>` : ''}${p.careerError ? `<p class="error">History unavailable: ${esc(p.careerError)}</p>` : ''}<ol class="career">${(p.career || []).map(item => `<li><b>${esc(item.name)}</b><span>Joined ${esc(new Date(item.start_date).toLocaleDateString())}</span></li>`).join('')}</ol></details>
+    <details><summary>Corporation history</summary>${p.corp ? `<p class="hint">${Number(p.corp.member_count).toLocaleString()} members · ${(p.corp.tax_rate * 100).toFixed(1)}% tax</p>` : ''}${p.careerError ? `<p class="error">History unavailable: ${esc(p.careerError)}</p>` : ''}<ol class="career">${(p.career || []).map(item => `<li><b>${esc(item.name)}</b><span>Joined ${esc(day(item.start_date))}</span></li>`).join('')}</ol></details>
   </section>
-  <p class="freshness hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : S.backend ? 'Connect to share training and see private data.' : ''}</p>`;
+  <p class="freshness hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : ''}</p>`;
 }
 // Next up names the saved haul: redraw when another tab or device changes it.
 export function wire() { document.addEventListener('pref-change', event => { if (event.detail.remote && event.detail.name === 'haul' && !$('#bridge').hidden) render(); }); }

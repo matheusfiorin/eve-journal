@@ -59,6 +59,7 @@
 <link rel="modulepreload" href="ui/universecache.js">
 </head>
 <body class="shell">
+<a class="skip" href="#views">Skip to content</a>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
  <defs>
   <symbol id="i-bridge" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="5.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3"/></symbol>
@@ -84,13 +85,14 @@
   <h1 id="hero-title">Who’s flying today?</h1>
   <p class="hero-sub">Pick your pilot. Your wingmate’s plans stay right alongside yours.</p>
   <div id="hero-pilots" class="hero-pilots"></div>
+  <div id="hero-conn" class="hero-conn" hidden></div>
   <p class="hint">This browser remembers your pick. Switch any time from the top bar.</p>
  </div>
 </div>
 
 <nav class="rail" id="rail" aria-label="Console">
  <a class="rail__brand" href="./"><svg class="emblem" width="28" height="28" aria-hidden="true"><use href="#i-emblem"/></svg><span class="rail__word">Echelon</span><span class="rail__sub">wing console</span></a>
- <ul id="rail-list" class="rail__list" role="list"></ul>
+ <ul id="rail-list" class="rail__list"></ul>
  <button id="rail-toggle" class="rail__collapse" aria-expanded="true" aria-controls="rail" aria-label="Collapse navigation" aria-keyshortcuts="["><svg class="ico" aria-hidden="true"><use href="#i-collapse"/></svg></button>
 </nav>
 
@@ -100,12 +102,12 @@
   <div id="server-status" class="strip__cell" role="status">Connecting to Tranquility…</div>
   <div id="sync-status" class="strip__cell strip__sync" role="status">Loading pilots…</div>
   <div id="strip-wallet" class="strip__cell strip__wallet" hidden></div>
-  <button id="palette-open" class="strip__search" aria-keyshortcuts="Control+K Meta+K" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><span>Search or jump</span><kbd>Ctrl K</kbd></button>
+  <button id="palette-open" class="strip__search" aria-label="Search or jump" aria-keyshortcuts="Control+K Meta+K" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><span>Search or jump</span><kbd>Ctrl K</kbd></button>
   <button id="refresh" class="icon-btn" aria-label="Refresh" aria-keyshortcuts="R"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg></button>
   <button id="switch-pilot" class="pilot-switch" aria-label="Choose pilot">Choose pilot</button>
  </header>
- <div id="viewbar" class="viewbar" hidden></div>
- <main id="views">
+ <section id="viewbar" class="viewbar" aria-label="Screen" hidden></section>
+ <main id="views" tabindex="-1">
   <aside id="install-hint" class="install-hint" aria-labelledby="install-hint-text" hidden>
    <svg class="install-hint__mark" width="28" height="28" aria-hidden="true"><use href="#i-emblem"/></svg>
    <p><span id="install-hint-text">Add Echelon to your Home Screen so Safari doesn’t clear your session and journal after a week away.</span> <small>Tap <b>Share</b>, then <b>Add to Home Screen</b>.</small></p>

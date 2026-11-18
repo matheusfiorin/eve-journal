@@ -31,8 +31,8 @@ export const markup = {map:`<div id="map-controls-home" class="map-controls-home
     <label>Overlay<select id="map-overlay">${options(Object.entries(OVERLAYS).map(([k, v]) => [k, v.label]))}</select></label>
     <label>Jump range<select id="map-jump">${options(JUMP_OPTIONS)}</select></label>
    </div>
+   <p id="map-status" class="hint map-status" role="status">Loading the map…</p>
   </div></div>
- <p id="map-status" class="hint map-status" role="status">Loading the map…</p>
  <div class="map-layout">
   <div id="map-stage" class="map-stage">
    <form id="map-find" class="map-find" role="search"><label><span class="sr-only">Find system</span><input id="map-search" list="systems" data-filter placeholder="Find a system" autocomplete="off" enterkeyhint="go"></label><button class="secondary small" aria-label="Go to system">Go</button></form>
@@ -43,5 +43,5 @@ export const markup = {map:`<div id="map-controls-home" class="map-controls-home
    <div id="map-tip" class="map-tip" role="tooltip" hidden></div>
    <div id="map-legend" class="map-legend"></div>
   </div>
-  <aside id="map-panel" class="map-panel" aria-label="System details" data-snap="peek"><button type="button" class="sheet-handle" id="map-sheet-handle" aria-label="Expand the details sheet" aria-expanded="false"></button><div id="map-panel-body" class="map-panel-body"></div></aside>
+  <section id="map-panel" class="map-panel" aria-label="System details" data-snap="peek"><h2 class="sr-only">System details</h2><button type="button" class="sheet-handle" id="map-sheet-handle" aria-label="Expand the details sheet" aria-expanded="false"></button><div id="map-panel-body" class="map-panel-body"></div></section>
  </div>`};

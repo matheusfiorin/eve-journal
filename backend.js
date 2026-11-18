@@ -56,7 +56,7 @@ export class BackendClient {
   const response=await this.fetch(`${this.url}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
   // A proxy or Cloudflare error page is HTML, not JSON: report the status rather than a parse error.
   const data=/json/i.test(response.headers.get('Content-Type')||'')?await response.json().catch(()=>null):null;
-  if(!response.ok){if(response.status===401&&id)this.drop(id,token);throw new Error(data?.error||`Backend returned ${response.status}.`);}
+  if(!response.ok){if(response.status===401&&id)this.drop(id,token);throw Object.assign(new Error(data?.error||`Backend returned ${response.status}.`),{status:response.status});}
   if(!data||typeof data!=='object')throw new Error('Backend returned an unreadable response.');
   return data;
  }

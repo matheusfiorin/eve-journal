@@ -140,9 +140,17 @@
 .attrs b{text-align:right}
 
 @media (max-width:720px){
-  .vk .toolbar{position:static;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-top:-20px;clip-path:none;box-shadow:none}
+  /* Toolbars wrap on phones so the primary action and every filter stay on screen; chip rows scroll with an edge fade. */
+  .vk .toolbar{position:static;flex-wrap:wrap;gap:8px 10px;margin-top:-20px;clip-path:none;box-shadow:none}
   .vk .toolbar>*{flex:none}
-  .vk .field--search input{min-width:180px}
+  .vk .toolbar>.field--search{flex:1 1 100%}
+  .vk .field--search input{min-width:0;width:100%}
+  .vk .toolbar>.field--inline:not(.field--search){flex:1 1 calc(50% - 6px)}
+  .vk .toolbar>.field--inline:not(.field--search) select{flex:1;min-width:0;width:100%}
+  .vk .toolbar>.chips{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-right:28px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+  .vk .toolbar>.chips::-webkit-scrollbar{display:none}
+  .chip-btn{flex:none}
+  .vk .toolbar__end{order:-1;margin-left:auto}
   .vk .rows__head{display:none}
   .vk .rows__row{grid-template-columns:minmax(0,1fr) auto;padding:10px 12px;row-gap:4px}
   .vk .rows__row>[role=cell]:not(.rows__main):not(.rows__key){display:none}
@@ -158,4 +166,12 @@
   .skill-group summary{grid-template-columns:minmax(0,1fr) auto}.skill-group__bar{display:none}
   .attrs li{grid-template-columns:84px 1fr 28px}
   .kv>div{grid-template-columns:110px 1fr}
+}
+
+/* Touch: toolbar controls and pickers reach 44 px (these rules sit after the kit's own sizes so they win). */
+@media (pointer:coarse){
+  .vk .seg--pilot button,.vk .chip-btn,.vk .toolbar .btn--link{min-height:44px}
+  .vk .toolbar .field--inline select,.vk .toolbar .field--inline input,.vk .toolbar #new-entry{min-height:44px}
+  .vk .skill-group summary{min-height:44px;align-items:center}
+  .suggest__list .btn--link,.backup-chip .btn--link{min-height:44px}
 }

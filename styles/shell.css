@@ -155,3 +155,33 @@ html{scroll-padding-top:calc(var(--strip-h) + var(--viewbar-h) + 8px)}
   .hero-pilots{gap:10px}.tether{display:none}
   .plate{width:150px;padding:14px}.hero-portrait{width:96px;height:96px}
 }
+
+/* Skip link: first stop for keyboard users, visible only while focused. */
+.skip{position:fixed;left:12px;top:-60px;z-index:80;padding:10px 14px;border-radius:var(--r-ctl);background:var(--accent);color:var(--text-on-accent);font:600 var(--fs-sm) var(--ff-ui);text-decoration:none}
+.skip:focus{top:10px}
+/* Sync problems: a warning tone on the strip and the one button that helps (Retry or Reconnect). */
+#sync-status{gap:10px}
+#sync-status[data-tone=warn]{color:var(--warn);white-space:normal;height:auto;min-height:28px;padding-block:3px}
+.strip[data-tone=warn]{background:color-mix(in srgb,var(--warn) 12%,rgb(12 20 36 / .92));border-bottom-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.strip[data-tone=warn] #sync-status button{min-height:24px}
+@media (max-width:720px){
+  .strip[data-tone=warn]{flex-wrap:wrap;height:auto;min-height:var(--strip-h);padding-block:6px}
+  .strip[data-tone=warn] .strip__sync{display:flex;order:9;flex:1 0 100%;border-left:0;padding:0}
+}
+/* Connections inside the pilot switcher. */
+.hero-conn{margin:28px auto 0;max-width:460px;text-align:left;padding:14px 16px;background:rgb(18 28 46 / .82);border:1px solid var(--line-strong);border-radius:var(--r-panel)}
+.hero-conn h2{font:500 var(--fs-xs) var(--ff-ui);color:var(--text-muted);margin:0 0 8px}
+.hero-conn ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.hero-conn li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.hero-conn li .hint{margin:0;margin-right:auto}
+.hero-conn .who{font-weight:600}
+/* Touch: every control a finger meets is at least 44 px. */
+@media (pointer:coarse){
+  .icon-btn,.strip__brand,.strip__search,.pilot-switch{min-width:44px;min-height:44px;height:44px}
+  .strip__brand{justify-content:center}
+  .seg button,.small,button.small,a.button.small,.chip-btn,.btn--link,.link-btn,.map-btn,.light-btn{min-height:44px}
+  .seg button{min-width:44px}
+  .tabbar__item,.sheet-item{min-height:48px}
+  .vk .field--inline select,.vk .field--inline input,.earn-bar select,.earn-bar input{min-height:44px}
+  .sw,.vk .switch,label.check{min-height:44px}
+}

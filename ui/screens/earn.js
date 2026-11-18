@@ -10,7 +10,7 @@ import {secLight} from '../../mapview.js';
 import {facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from '../../route.js';
 import {S, ROMAN, mine, wingmate, summary} from '../state.js';
 import {esi, json, name} from '../esi.js';
-import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast} from '../shared.js';
+import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho} from '../shared.js';
 import {explored, markExplored} from '../prefs.js';
 import {mapGraph, route, routeCache, routeIds, sendable, autopilotButton, legHtml, systemOptions, regionName} from '../routes.js';
 
@@ -33,7 +33,7 @@ function table(view, label, cols, head, rows) {
   const reveal = rows.length && !revealed.has(view);
   if (rows.length) revealed.add(view);
   return `<div class="rows${reveal ? ' rows--reveal' : ''}" role="table" aria-label="${esc(label)}" style="--cols:${cols}">
-    <div class="rows__head" role="row">${head.map(([text, key]) => key ? `<button type="button" role="columnheader" class="sort" data-sort="${key}" aria-sort="${sel === key ? DIRS[key] : 'none'}">${text}</button>` : `<span role="columnheader">${text}</span>`).join('')}</div>
+    <div class="rows__head" role="row">${head.map(([text, key]) => key ? `<span role="columnheader" aria-sort="${sel === key ? DIRS[key] : 'none'}"><button type="button" class="sort" data-sort="${key}">${text}</button></span>` : `<span role="columnheader">${text}</span>`).join('')}</div>
     ${rows.join('')}</div><p class="rows__none hint" hidden>No rows match this filter.</p>`;
 }
 const row = (i, find, cells, {dim, attrs = ''} = {}) => `<div class="rows__row${dim ? ' is-dim' : ''}" role="row" data-row tabindex="0" data-pick="${i}" data-find="${esc(find.toLowerCase())}" style="--i:${i}" ${attrs}>${cells.join('')}</div>`;
@@ -54,7 +54,7 @@ const stateButton = (label, set) => `<button type="button" class="secondary smal
 
 // ── Trade ──
 const cargo = new Map();
-const TRADE_LISTS = {haul:'Haul & flip', spread:'Station spreads', build:'Manufacturing'};
+const TRADE_LISTS = {haul:'Haul & flip', spread:'Station spreads', build:'Build'};
 const TRADE_SORTS = {haul:[['', 'Profit per jump'], ['profit', 'Total profit'], ['invest', 'Lowest investment'], ['jumps', 'Fewest jumps']],
   spread:[['', 'Best first'], ['margin', 'Highest margin'], ['daily', 'Most per day'], ['jumps', 'Fewest jumps']],
   build:[['', 'Best first'], ['profit', 'Profit per run'], ['margin', 'Highest margin'], ['materials', 'Cheapest materials']]};
@@ -86,6 +86,7 @@ export async function renderMarket() {
   // Size every suggestion to the pilot's wallet unless they type another budget.
   const budgetInput = $('#market-budget'), wallet = summary(p).wallet;
   if (!budgetInput.dataset.touched && wallet !== undefined) budgetInput.value = Math.floor(wallet);
+  iskEcho(budgetInput);
   const budget = budgetInput.value === '' ? Infinity : Math.max(0, Number(budgetInput.value));
   status.textContent = `${plural(marketData.regions.length, 'region')} · ${plural(Object.keys(meta.types).length, 'item')} · ${scannedAgo()} by the hourly pipeline`;
   const feesText = `Sales tax ${(f.salesTax * 100).toFixed(2)}% · broker fee ${(f.brokerFee * 100).toFixed(2)}% · ${skills?.skills ? `from ${p.name}’s skills` : 'base rates (connect for your skills)'} · cargo ${hold.toLocaleString()} m³ · budget ${Number.isFinite(budget) ? format(budget, 'isk') : 'unlimited'}`;
@@ -116,7 +117,7 @@ export async function renderMarket() {
       list.map((h, i) => row(i, `${item(h.type)} ${station(h.from.loc)} ${station(h.to.loc)}`, [
         cell(`<b>${esc(item(h.type))}</b>${whole(h) ? '<span class="tag">Whole budget</span>' : ''}<small class="rows__meta">${esc(sysName(sys(h.from.loc)))} → ${esc(sysName(sys(h.to.loc)))} · ${h.toA + h.ab} j · ${h.units.toLocaleString()} units</small>`, 'rows__main'),
         cell(`${esc(sysName(sys(h.from.loc)))} <em>${jumpsText(h.toA)}</em>`, 'rows__txt'), cell(`${esc(sysName(sys(h.to.loc)))} <em>+${h.ab} j</em>`, 'rows__txt'),
-        cell(short(h.invest)), cell(`+${short(h.profit)}`, 'num num--pos'), cell(short(h.perJump), 'num rows__key')], {attrs:tripIds([from, sys(h.from.loc), sys(h.to.loc)]).length > 1 ? routeAttrs(tripIds([from, sys(h.from.loc), sys(h.to.loc)]), `Haul ${item(h.type)}`) : ''})))
+        cell(short(h.invest)), cell(`+${short(h.profit)}`, 'num num--pos'), cell(`${short(h.perJump)}<span class="unit"> ISK/jump</span>`, 'num rows__key')], {attrs:tripIds([from, sys(h.from.loc), sys(h.to.loc)]).length > 1 ? routeAttrs(tripIds([from, sys(h.from.loc), sys(h.to.loc)]), `Haul ${item(h.type)}`) : ''})))
       : state(`No profitable hauls within ${maxJumps} jumps for this cargo size.`, 'Widen the buy range or raise the budget.', stateButton('Search any distance', 'market-jumps=99'));
     drawer = i => { const h = list[i], ids = tripIds([from, sys(h.from.loc), sys(h.to.loc)]);
       return {title:item(h.type), body:ed(`${readout([['Profit', `+${short(h.profit)}`, 'ISK'], ['Per jump', short(h.perJump), 'ISK'], ['Invest', short(h.invest), 'ISK']])}
@@ -180,6 +181,7 @@ export async function renderIndustry() {
   const system = Number($('#industry-system').value), idx = costIndices.get(system) || {};
   const budgetInput = $('#industry-budget');
   if (!budgetInput.dataset.touched && x.wallet !== undefined) budgetInput.value = Math.floor(x.wallet);
+  iskEcho(budgetInput);
   const budget = budgetInput.value === '' ? undefined : Number(budgetInput.value);
   // Plan around the cheapest safe NPC factory and lab near the starting system.
   const g = mapGraph(), here = g?.systems.get(system);
