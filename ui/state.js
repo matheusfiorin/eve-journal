@@ -28,9 +28,9 @@ export const mine = () => S.pilots.find(p => p.name === S.me) || null;
 export const wingmate = () => S.pilots.find(p => p.name !== S.me) || null;
 export const ordered = () => [...S.pilots].sort((a,b) => (b.name === S.me) - (a.name === S.me));
 // A pilot's private ESI fields: from their own session in this browser, else what they share with the wing (wallet
-// and assets; at consent level 2 also ship, location, mining, trail and jobs). Journal, trades, clones and attributes
-// are never shared, so they only show on the device the pilot connected from.
-const WING_FIELDS = ['wallet', 'assets', 'ship', 'location', 'mining', 'trail', 'jobs'];
+// and assets; at consent level 2 also ship, its current fit, location, mining, trail and jobs). Journal, trades, orders,
+// contracts, losses, clones and attributes are never shared, so they only show on the device the pilot connected from.
+const WING_FIELDS = ['wallet', 'assets', 'ship', 'fit', 'location', 'mining', 'trail', 'jobs'];
 export const viaWing = p => Boolean(p && !p.private && S.wing.get(p.id)?.sharing);
 export function opsOf(p) {
   if (p?.private) return p.ops || {};

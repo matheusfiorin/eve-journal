@@ -2,7 +2,7 @@ import {readFile,mkdir,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-const token=process.env.CLOUDFLARE_API_TOKEN?.trim(),account=process.env.CLOUDFLARE_ACCOUNT_ID?.trim(),eveSecret=process.env.EVE_CLIENT_SECRET?.trim(),pipelineSecret=process.env.PIPELINE_SECRET?.trim();
+const token=process.env.CLOUDFLARE_API_TOKEN?.trim(),account=process.env.CLOUDFLARE_ACCOUNT_ID?.trim(),eveSecret=process.env.EVE_CLIENT_SECRET?.trim(),pipelineSecret=process.env.PIPELINE_SECRET?.trim(),discordWebhook=process.env.DISCORD_WEBHOOK_URL?.trim();
 if(!token||!account||!eveSecret)throw new Error('Missing CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, or EVE_CLIENT_SECRET. Add repository Actions secrets before deploying.');
 if(!/^[a-f0-9]{32}$/i.test(account))throw new Error('Cloudflare Account ID must contain 32 hexadecimal characters.');
 const clientId='a94f7ccbcc8b4b0d8f7fd90fec110d2b';
@@ -32,7 +32,7 @@ ratelimits:[{name:'RATE_AUTH',namespace_id:'710001',simple:{limit:10,period:60}}
 triggers:{crons:['*/5 * * * *',DAILY_CRON]}};
 const configPath=resolve('.cloudflare/wrangler.json');await writeFile(configPath,JSON.stringify(config,null,2));
 // Wrangler needs the Cloudflare credentials, not the EVE or pipeline secrets, so those are left out of its environment.
-const {EVE_CLIENT_SECRET:_eve,PIPELINE_SECRET:_pipeline,...wranglerEnv}=process.env;
+const {EVE_CLIENT_SECRET:_eve,PIPELINE_SECRET:_pipeline,DISCORD_WEBHOOK_URL:_discord,...wranglerEnv}=process.env;
 function wrangler(args){
  const result=spawnSync('npx',['--no-install','wrangler',...args,'--config',configPath],{encoding:'utf8',input:'y\n',env:wranglerEnv,maxBuffer:4*1024*1024});
  if(result.status!==0)throw new Error(`Wrangler ${args[0]} failed (exit ${result.status}). No secret values are included in this log.`);
@@ -48,6 +48,11 @@ await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'EVE_CLIENT_SECRET',type
 console.log('EVE client secret configured in Cloudflare.');
 if(pipelineSecret){await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'PIPELINE_SECRET',type:'secret_text',text:pipelineSecret});console.log('Pipeline signing secret configured in Cloudflare.');}
 else console.log('PIPELINE_SECRET is not set: the market pipeline still uses the legacy fixed token. See worker/README.md.');
+// Optional: without it the Worker sends no Discord alerts. The value is never printed.
+if(discordWebhook){
+ if(!/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+\/?$/.test(discordWebhook))throw new Error('DISCORD_WEBHOOK_URL is not a Discord webhook URL (https://discord.com/api/webhooks/<id>/<token>).');
+ await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'DISCORD_WEBHOOK_URL',type:'secret_text',text:discordWebhook});console.log('Discord alert webhook configured in Cloudflare.');
+}else console.log('DISCORD_WEBHOOK_URL is not set: no Discord alerts. See worker/README.md.');
 let healthy=false,lastHealth={};
 for(let attempt=0;attempt<30;attempt++){
  try{const r=await fetch(`${url}/health`,{signal:AbortSignal.timeout(15000)});lastHealth={status:r.status};const body=await r.json();lastHealth={status:r.status,ready:body.ready,database:body.database,error:body.error};healthy=r.ok&&body.ready;}catch(error){lastHealth={networkError:error.code||error.cause?.code||error.name};}

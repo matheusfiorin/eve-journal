@@ -805,9 +805,9 @@ export async function sampleActivity(env,fetchImpl=fetch,now=Date.now()){
   .bind(data||'{}',JSON.stringify({kills:kills.hint,jumps:jumps.hint}),now,expires).run();
  return {sampled:Boolean(fresh),expires,failed:Boolean(failed)};
 }
-// One ESI job per run, taking turns: a pilot sync makes about 13 ESI calls plus up to 19 more asset pages and a token
-// refresh (fewer now that unexpired endpoints are skipped), and the free plan allows 50 subrequests and 10 ms of CPU per
-// invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs), so with two pilots each one refreshes every
+// One ESI job per run, taking turns: a pilot sync makes about 13 core ESI calls plus up to 19 more asset pages, a token
+// refresh and the extras (orders, contracts, losses and the rest, which are counted and capped: see SYNC_LIMIT), fewer
+// now that unexpired endpoints are skipped, and the free plan allows 50 subrequests and 10 ms of CPU per invocation. The cron runs every 5 minutes (scripts/deploy-backend.mjs), so with two pilots each one refreshes every
 // 10 minutes, about as often as ESI's own caches turn over. Turns follow the clock rather than the last sync, so a
 // pilot whose sync keeps failing cannot starve the other. A pilot whose grant EVE refused gets no turn until they
 // reconnect: it could not reach EVE anyway. Once an hour a run samples kills and jumps (2 calls) instead of syncing;

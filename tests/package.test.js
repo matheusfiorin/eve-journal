@@ -120,6 +120,8 @@ test('the deploy script turns on logs, the rate limits, both cron triggers and t
   assert.equal(deploy.match(/const DAILY_CRON='([^']+)'/)[1],worker.match(/export const DAILY_CRON='([^']+)'/)[1],'the deploy script and the Worker name the same daily cron');
   assert.match(deploy,/name:'PIPELINE_SECRET'/);assert.doesNotMatch(deploy,/every 30 minutes/);assert.match(deploy,/every 5 minutes/);
   assert.match(deploy,/env:wranglerEnv/,'wrangler gets an environment without the EVE and pipeline secrets');assert.doesNotMatch(deploy,/env:process\.env/);
+  assert.match(deploy,/name:'DISCORD_WEBHOOK_URL'/);assert.match(deploy,/DISCORD_WEBHOOK_URL:_discord/,'the webhook is kept out of wrangler\'s environment');
+  assert.match(await read('.github/workflows/pages.yml'),/DISCORD_WEBHOOK_URL: \$\{\{ secrets\.DISCORD_WEBHOOK_URL \}\}/,'the deploy step passes the optional secret on');
 });
 test('the published page pins its connect-src to the deployed Worker; the source keeps the wildcard for local runs',async()=>{
   const {mkdtemp,writeFile,readFile:rf}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {spawnSync}=await import('node:child_process');

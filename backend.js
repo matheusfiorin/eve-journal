@@ -79,6 +79,8 @@ export class BackendClient {
  // The static universe document (gate map, stations, ore and skill IDs): public, the same for every visitor, and
  // cached for a year under its version, so it is sent without a session.
  async universe(version){const data=await this.call(`/api/market/universe?v=${encodeURIComponent(version)}`);if(typeof data.version!=='string'||!data.meta||typeof data.meta!=='object')throw new Error('Backend returned an invalid universe map.');return data;}
+ // One contract's items, read on demand: the backend checks the contract is the pilot's own.
+ async contractItems(id,contractId){const data=await this.call(`/api/contract-items?id=${encodeURIComponent(contractId)}`,{id});if(!Array.isArray(data.items))throw new Error('Backend returned an invalid contract.');return data.items;}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  // Journal sync: records after a rev, and changes sent against the rev each was based on (see worker/index.js).
  // prefs=1: this client understands pilot preferences; older clients aren't sent them, as they'd take them for entries.

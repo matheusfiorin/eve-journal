@@ -1,6 +1,7 @@
 // Logbook: private journal entries with search and filters, drafts that survive reloads, and backup/restore.
 import {validateBackup, mergeBackups, mergeSummary, editedAt, localDate, filterEntries} from '../../model.js';
 import {S, KEY, DRAFT} from '../state.js';
+import {name} from '../esi.js';
 import {$, esc, plural, when, clock, notice, toast, persist, go, openDrawer, closeDrawer} from '../shared.js';
 import {readout} from './pilot.js';
 import {syncOn, synced} from '../journalsync.js';
@@ -9,6 +10,7 @@ const CATEGORIES = '<option>Adventure</option><option>Milestone</option><option>
 export const markup = {logbook:`<div class="toolbar" role="toolbar" aria-label="Logbook">
   <label class="field--inline field--search"><span class="sr-only">Search entries</span><input id="journal-search" type="search" data-filter placeholder="Search titles and notes  /" autocomplete="off"></label>
   <label class="field--inline">Pilot<select id="journal-pilot"><option value="">All pilots</option></select></label>
+  <label class="field--inline">Show<select id="journal-kind"><option value="">Entries and losses</option><option value="entries">Entries</option><option value="losses">Losses</option></select></label>
   <label class="field--inline">Focus<select id="journal-category"><option value="">All entries</option>${CATEGORIES}</select></label>
   <p class="backup-chip" id="backup-chip"><span id="backup-age" role="status"></span><span aria-hidden="true"> · </span><button type="button" id="backup-now" class="btn--link">Back up now</button></p>
   <button type="button" id="new-entry" class="toolbar__end" aria-keyshortcuts="N" aria-controls="desk" aria-expanded="false">New entry</button></div>
@@ -39,16 +41,45 @@ function authorFilter() {
   filter.value = authors.includes(prior) ? prior : '';
 }
 const excerpt = text => text.length > 220 ? `${text.slice(0, 220).trimEnd()}…` : text;
-function renderEntries() {
-  const entries = filterEntries(S.data.entries, {query:$('#journal-search').value, pilot:$('#journal-pilot').value, category:$('#journal-category').value});
-  const all = S.data.entries, last = [...all].sort((a, b) => b.date.localeCompare(a.date))[0], month = localDate().slice(0, 7);
-  $('#logbook-summary').innerHTML = readout([['Entries', `<span class="num">${all.length}</span>`], ['Last entry', last ? `<span class="num">${esc(last.date)}</span>` : '—'], ['This month', `<span class="num">${all.filter(e => e.date.startsWith(month)).length}</span>`]]);
-  $('#entry-count').textContent = entries.length === all.length ? `${plural(all.length, 'entry', 'entries')} · ${syncOn() ? 'private, synced' : 'private to this browser'}` : `${entries.length} of ${plural(all.length, 'entry', 'entries')} match`;
-  $('#entries').innerHTML = entries.length ? `<ol class="entries">${entries.map((e, i) => `<li class="entry" data-row tabindex="${i ? -1 : 0}" style="--i:${i}" data-entry="${esc(e.id)}" data-pilot="${esc(String(e.pilot).toLowerCase())}">
+// Ships the pilots lost, from each connected pilot's killmails (private: only on the device the pilot connected from).
+const losses = () => S.pilots.filter(p => p.private).flatMap(p => (p.ops?.killmails?.value?.losses || []).map(l => ({...l, pilot:p.name, date:String(l.time).slice(0, 10)})));
+const lossTitle = l => `Lost a ${name(l.ship)} in ${name(l.system)}`;
+const lossLine = l => `${plural(l.attackers, 'attacker')}${l.corp ? ` · final blow by ${esc(name(l.corp))}` : ''}`;
+function lossText(l) { return `${lossTitle(l)} to ${plural(l.attackers, 'attacker')}${l.corp ? ` (final blow: ${name(l.corp)})` : ''}.\nhttps://zkillboard.com/kill/${l.id}/\n\nWhat happened, and what would I do differently?`; }
+const entryItem = (e, i) => `<li class="entry" data-row tabindex="${i ? -1 : 0}" style="--i:${i}" data-entry="${esc(e.id)}" data-pilot="${esc(String(e.pilot).toLowerCase())}">
       <time class="entry__date num" datetime="${esc(e.date)}">${esc(e.date)}</time>
       <div class="entry__main"><h3>${esc(e.title)}</h3><p class="entry__meta"><span class="who">${esc(e.pilot)}</span><span class="chip">${esc(e.category || 'Adventure')}</span></p><p class="entry__body">${esc(excerpt(e.body))}</p></div>
-      <div class="entry__actions"><button data-edit-entry="${esc(e.id)}" class="secondary small">Edit</button><button data-delete-entry="${esc(e.id)}" class="secondary small" aria-label="Delete ${esc(e.title)}">Delete</button></div></li>`).join('')}</ol>`
-    : `<div class="state"><p>${all.length ? '<b>No entries match.</b> Try a different search or filter.' : '<b>Every capsuleer starts somewhere.</b> Write your first entry: what you flew, where you went, what you learned.'}</p></div>`;
+      <div class="entry__actions"><button data-edit-entry="${esc(e.id)}" class="secondary small">Edit</button><button data-delete-entry="${esc(e.id)}" class="secondary small" aria-label="Delete ${esc(e.title)}">Delete</button></div></li>`;
+const lossItem = (l, i) => `<li class="entry entry--loss" data-row tabindex="${i ? -1 : 0}" style="--i:${i}" data-loss="${l.id}" data-pilot="${esc(l.pilot.toLowerCase())}">
+      <time class="entry__date num" datetime="${esc(l.date)}">${esc(l.date)}</time>
+      <div class="entry__main"><h3>${esc(lossTitle(l))}</h3><p class="entry__meta"><span class="who">${esc(l.pilot)}</span><span class="chip chip--danger">Loss</span></p>
+        <p class="entry__body">${lossLine(l)} · <a href="https://zkillboard.com/kill/${l.id}/" target="_blank" rel="noopener noreferrer">View on zKillboard<span class="sr-only"> (opens in a new tab)</span></a></p></div>
+      <div class="entry__actions"><button type="button" data-loss-journal="${l.id}" class="secondary small" aria-label="Add the loss of ${esc(name(l.ship))} to the journal">Add to journal</button></div></li>`;
+function renderEntries() {
+  const kind = $('#journal-kind').value, query = $('#journal-search').value, pilot = $('#journal-pilot').value, category = $('#journal-category').value;
+  const entries = kind === 'losses' ? [] : filterEntries(S.data.entries, {query, pilot, category});
+  const allLosses = losses(), needle = query.trim().toLocaleLowerCase();
+  // A loss has no focus, so choosing one hides them.
+  const shownLosses = kind === 'entries' || category ? [] : allLosses.filter(l => (!pilot || l.pilot === pilot) && (!needle || `${lossTitle(l)} ${l.corp ? name(l.corp) : ''}`.toLocaleLowerCase().includes(needle))).sort((a, b) => b.date.localeCompare(a.date));
+  const all = S.data.entries, last = [...all].sort((a, b) => b.date.localeCompare(a.date))[0], month = localDate().slice(0, 7);
+  $('#logbook-summary').innerHTML = readout([['Entries', `<span class="num">${all.length}</span>`], ['Last entry', last ? `<span class="num">${esc(last.date)}</span>` : '—'], ['This month', `<span class="num">${all.filter(e => e.date.startsWith(month)).length}</span>`], ...(allLosses.length ? [['Losses', `<span class="num">${allLosses.length}</span>`]] : [])]);
+  const filtered = entries.length !== all.length || kind || shownLosses.length !== allLosses.length;
+  $('#entry-count').textContent = !filtered ? `${plural(all.length, 'entry', 'entries')}${allLosses.length ? ` and ${plural(allLosses.length, 'loss', 'losses')}` : ''} · ${syncOn() ? 'private, synced' : 'private to this browser'}`
+    : `${[kind !== 'losses' && `${entries.length} of ${plural(all.length, 'entry', 'entries')}`, allLosses.length && kind !== 'entries' && `${shownLosses.length} of ${plural(allLosses.length, 'loss', 'losses')}`].filter(Boolean).join(' and ')} match`;
+  const items = [...entries.map(e => ({date:e.date, html:entryItem, item:e})), ...shownLosses.map(l => ({date:l.date, html:lossItem, item:l}))].sort((a, b) => b.date.localeCompare(a.date));
+  $('#entries').innerHTML = items.length ? `<ol class="entries">${items.map((x, i) => x.html(x.item, i)).join('')}</ol>`
+    : `<div class="state"><p>${kind === 'losses' ? (allLosses.length ? '<b>No losses match.</b> Try a different search or filter.' : '<b>No losses recorded.</b> Ships you lose show up here after the next sync, once the pilot has allowed reading killmails.') : all.length ? '<b>No entries match.</b> Try a different search or filter.' : '<b>Every capsuleer starts somewhere.</b> Write your first entry: what you flew, where you went, what you learned.'}</p></div>`;
+}
+// Start a journal entry from a loss: the desk opens prefilled, and nothing is saved until the pilot saves it.
+function lossToJournal(id) {
+  const l = losses().find(x => String(x.id) === id); if (!l) return;
+  const f = $('#journal-form');
+  if ((f.elements.title.value || f.elements.body.value) && !confirm('Replace your current draft with this loss?')) return;
+  resetEntry(true);
+  f.elements.title.value = lossTitle(l); f.elements.body.value = lossText(l); f.elements.date.value = l.date;
+  if (![...f.elements.pilot.options].some(o => o.value === l.pilot)) f.elements.pilot.add(new Option(l.pilot, l.pilot));
+  f.elements.pilot.value = l.pilot; f.elements.category.value = 'Lesson learned';
+  openDesk(); f.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); f.elements.body.focus(); saveDraft();
 }
 function readEntry(id) {
   const e = S.data.entries.find(x => x.id === id); if (!e) return;
@@ -167,11 +198,13 @@ export function wire() {
   $('#journal-search').oninput = renderEntries;
   $('#journal-pilot').onchange = renderEntries;
   $('#journal-category').onchange = renderEntries;
+  $('#journal-kind').onchange = renderEntries;
   document.addEventListener('click', event => {
     const row = event.target.closest('#entries [data-entry]');
     if (row && !event.target.closest('button')) readEntry(row.dataset.entry);
     const b = event.target.closest('button');
     if (b?.dataset.editEntry) editEntry(b.dataset.editEntry);
+    if (b?.dataset.lossJournal) lossToJournal(b.dataset.lossJournal);
     if (b?.dataset.deleteEntry && confirm('Delete this private entry? Export a backup first if you want to keep it.')) {
       closeDrawer();
       if (persist({...S.data, entries:S.data.entries.filter(e => e.id !== b.dataset.deleteEntry)}) && editingEntry === b.dataset.deleteEntry) resetEntry();

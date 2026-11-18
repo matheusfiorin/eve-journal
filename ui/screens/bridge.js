@@ -6,10 +6,11 @@ import {skillLevels, isAlpha, evaluate, rank} from '../../industry.js';
 import {SHIPS, yieldRate, holdOf, canFly, oreValue, sites} from '../../mining.js';
 import {rankSystems} from '../../exploration.js';
 import {capabilities, groupPlan, ACT} from '../../capabilities.js';
+import {SLOTS, fitGroups, fitCounts, eft} from '../../fit.js';
 import {S, mine, wingmate, ordered, summary, assetCats, opsOf, viaWing} from '../state.js';
 import {name, named} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
-import {$, esc, isk, when, day, left, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert} from '../shared.js';
+import {$, esc, isk, when, day, left, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert, permissionBanner, toast, openDrawer} from '../shared.js';
 import {mapGraph, route} from '../routes.js';
 import {haulSaved} from '../prefs.js';
 
@@ -155,6 +156,35 @@ function wingCard(p, s, o, crew) {
     <button class="secondary small" data-go="strengths">Open the crew map</button></section>`;
 }
 
+// ── Current fit: what is in the ship the pilot flies now (the Worker keeps only the ship's own items). ──
+const catOf = id => assetCats.get(id) || null;
+const SUM = {high:'high', mid:'mid', low:'low', rig:'rigs', sub:'subsystems', drones:'drones', fighters:'fighters', special:'in holds', cargo:'in cargo'};
+const fitText = p => { const ops = opsOf(p), ship = ops.ship?.value; return eft({ship:ship.ship_type_id, title:ship.ship_name, items:ops.fit.value.items, nameOf:name, catOf}); };
+// The same module twice in a row reads as one line with a count, as in game.
+const lines = list => list.reduce((out, m) => { const last = out.at(-1); if (last && last.type === m.type && last.charge === m.charge) last.n += m.qty; else out.push({...m, n:m.qty}); return out; }, []);
+function fitCard(p, own) {
+  const ops = opsOf(p), ship = ops.ship?.value, f = ops.fit, who = own ? 'Current fit' : `${p.name}’s current fit`, id = `fit-title-${keyOf(p)}`;
+  const wrap = body => `<section class="panel fit-card" data-pilot="${esc(keyOf(p))}" aria-labelledby="${id}"><div class="panel__head"><h2 id="${id}">${esc(who)}</h2>${ship ? `<p class="panel__sub">${esc(name(ship.ship_type_id))}${ship.ship_name ? ` · ${esc(ship.ship_name)}` : ''}</p>` : ''}</div>${body}</section>`;
+  if (!own && !f?.value) return '';
+  if (!f) return wrap(p.refreshing ? '<p class="hint">Loading…</p>' : '<p class="hint">Not synced yet. Press Refresh.</p>');
+  if (!f.permission) return wrap(permissionBanner(p, ['your current fit']));
+  if (!f.value || !ship) return wrap('<p class="hint">The fit appears after the next asset refresh.</p>');
+  // The fit was read for one ship; after a change of hull it waits for the next asset refresh (about an hour).
+  if (f.value.ship !== ship.ship_item_id) return wrap('<p class="hint">You changed ships. The fit of this one appears after the next asset refresh, which can take up to an hour.</p>');
+  const groups = fitGroups(f.value.items, catOf), counts = fitCounts(f.value.items, catOf), parts = SLOTS.filter(([k]) => counts[k]);
+  if (!parts.length) return wrap('<p class="hint">Nothing is fitted in this ship.</p>');
+  const mods = ['high', 'mid', 'low', 'rig', 'sub'];
+  return wrap(`<p class="fit-card__sum">${parts.map(([k]) => `<span><b class="num">${counts[k]}</b> ${SUM[k]}</span>`).join('')}</p>
+    <div class="fit-card__groups">${parts.map(([k, l]) => `<details class="fit-group" ${mods.includes(k) ? 'open' : ''}><summary>${l} <span class="num seg__n">${counts[k]}</span></summary><ul class="plain">${lines(groups[k]).map(m => `<li>${esc(name(m.type))}${m.charge ? ` <small>${esc(name(m.charge))}</small>` : ''}${m.n > 1 ? ` <span class="num">×${m.n.toLocaleString()}</span>` : ''}</li>`).join('')}</ul></details>`).join('')}</div>
+    <div class="actions"><button type="button" class="secondary small" data-copy-eft="${esc(p.name)}">Copy as EFT</button></div>`);
+}
+async function copyFit(button) {
+  const p = S.pilots.find(x => x.name === button.dataset.copyEft); if (!p || !opsOf(p).fit?.value || !opsOf(p).ship?.value) return;
+  const text = fitText(p);
+  try { await navigator.clipboard.writeText(text); toast('Fit copied. Paste it into EVE or a fitting tool.', 'ok'); }
+  catch { openDrawer({title:'Copy this fit', body:`<p class="hint">Your browser would not copy it for you. Select the text and copy it.</p><textarea class="eft" readonly rows="14" aria-label="Fit as EFT text">${esc(text)}</textarea>`}); $('#drawer .eft')?.select(); }
+}
+
 export function render() {
   const p = mine(), o = wingmate();
   if (!p) { $('#pilots').innerHTML = '<div class="empty">Choose your pilot to begin.</div>'; return; }
@@ -195,7 +225,10 @@ export function render() {
     </dl>
     <details><summary>Corporation history</summary>${p.corp ? `<p class="hint">${Number(p.corp.member_count).toLocaleString()} members · ${(p.corp.tax_rate * 100).toFixed(1)}% tax</p>` : ''}${p.careerError ? `<p class="error">History unavailable: ${esc(p.careerError)}</p>` : ''}<ol class="career">${(p.career || []).map(item => `<li><b>${esc(item.name)}</b><span>Joined ${esc(day(item.start_date))}</span></li>`).join('')}</ol></details>
   </section>
+  ${linked ? fitCard(p, true) : ''}${o ? fitCard(o, false) : ''}
   <p class="freshness hint">${p.synced ? `EVE data from ${esc(when(p.synced))}` : ''}</p>`;
 }
 // Next up names the saved haul: redraw when another tab or device changes it.
-export function wire() { document.addEventListener('pref-change', event => { if (event.detail.remote && event.detail.name === 'haul' && !$('#bridge').hidden) render(); }); }
+export function wire() {
+  document.addEventListener('click', event => { const b = event.target.closest('#bridge [data-copy-eft]'); if (b) copyFit(b); });
+  document.addEventListener('pref-change', event => { if (event.detail.remote && event.detail.name === 'haul' && !$('#bridge').hidden) render(); }); }

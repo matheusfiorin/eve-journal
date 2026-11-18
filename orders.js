@@ -1,4 +1,4 @@
-// Is a pilot's market order still the best at its station or in its region? Pure: the browser feeds it the market
+// Market orders and contracts, as plain functions. Is a pilot's market order still the best at its station or in its region? Pure: the browser feeds it the market
 // snapshot's regions ({region, data:{types:{id:{s:[[loc,price,volume]],b:[...]}}}}), the Worker a slice of the same rows.
 const EPS = 0.005;
 /** {state:'best'|'outbid'|'unchecked', by?, scope?:'station'|'region'}. Unchecked: that region or item is not in the snapshot. */
@@ -30,4 +30,10 @@ export function historySummary(list, now = Date.now(), days = 30) {
     if (value > 0) out[o.is_buy_order ? 'bought' : 'sold'] += value;
   }
   return out;
+}
+/** When an open contract runs out, in ms: its expiry while outstanding, the courier deadline once accepted; null when it has none (or is over). */
+export function contractDue(c) {
+  if (c.status === 'outstanding') { const end = Date.parse(c.date_expired); return Number.isFinite(end) ? end : null; }
+  if (c.status === 'in_progress' && c.type === 'courier') { const end = Date.parse(c.date_accepted) + c.days_to_complete * DAY; return Number.isFinite(end) ? end : null; }
+  return null;
 }

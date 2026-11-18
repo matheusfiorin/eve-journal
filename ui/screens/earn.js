@@ -12,6 +12,7 @@ import {S, ROMAN, mine, wingmate, summary} from '../state.js';
 import {esi, json, name} from '../esi.js';
 import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho} from '../shared.js';
 import {explored, markExplored} from '../prefs.js';
+import {ordersSection} from '../ordersview.js';
 import {mapGraph, route, routeCache, routeIds, sendable, autopilotButton, legHtml, systemOptions, regionName} from '../routes.js';
 
 const PREFIX = {industry:'industry', mining:'mining', exploration:'explore', market:'market'};
@@ -164,7 +165,8 @@ export async function renderMarket() {
   <section class="panel panel--primary panel--flush earn-main">
     <div class="earn-main__head"><div class="seg" role="tablist" aria-label="Trade lists">${Object.entries(TRADE_LISTS).map(([k, l]) => `<button type="button" role="tab" data-trade="${k}" aria-selected="${k === tradeList}">${l} <span class="num seg__n">${counts[k]}</span></button>`).join('')}</div><p class="panel__sub">${esc(subs[tradeList])}</p></div>
     ${main}
-  </section>`;
+  </section>
+  ${ordersSection(p)}`;
   applyFilter('market');
 }
 

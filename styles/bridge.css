@@ -19,7 +19,7 @@
 .bridge-side{display:grid;gap:18px}
 .next-up .panel__head{margin-bottom:6px;flex-wrap:wrap}
 .next-up h2{white-space:nowrap}
-.next-up h2,.together h2,.wing-card h2,.ship-card h2{font:600 var(--fs-lg) var(--ff-ui);margin:0}
+.next-up h2,.together h2,.wing-card h2,.ship-card h2,.fit-card h2{font:600 var(--fs-lg) var(--ff-ui);margin:0}
 .course{list-style:none;margin:6px 0 0;padding:0;position:relative}
 .course::before{content:"";position:absolute;left:103px;top:22px;bottom:22px;width:1px;background:linear-gradient(var(--accent-line),var(--line) 70%,transparent)}
 .course__step{display:grid;grid-template-columns:86px minmax(0,1fr) auto auto;align-items:center;gap:18px 34px;padding:14px 0;border-bottom:1px solid var(--line)}
@@ -85,3 +85,17 @@
 .pilot-line .readout{min-height:50px}
 .next-up__idle{margin:12px 0 0}
 @media (max-width:900px){.next-up{min-height:280px}.wing-card{min-height:0}.together{min-height:0}.ship-card{min-height:0}}
+
+/* Current fit: slot counts on top, each group a fold-out list, one button to copy it as EFT. */
+.fit-card .panel__head{flex-wrap:wrap;margin-bottom:8px}
+.fit-card__sum{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0 0 10px;color:var(--text-muted);font-size:var(--fs-sm)}
+.fit-card__sum b{color:var(--text);font-weight:600}
+.fit-card__groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0 24px}
+.fit-group{border-top:1px solid var(--line);padding:2px 0}
+.fit-group>summary{display:flex;align-items:center;gap:8px;min-height:36px;cursor:pointer;font:500 var(--fs-sm) var(--ff-ui);color:var(--text-muted)}
+.fit-group ul{margin:0 0 10px;padding:0 0 0 2px;list-style:none;font-size:var(--fs-sm)}
+.fit-group li{padding:2px 0;overflow-wrap:anywhere}
+.fit-group li small{color:var(--text-muted)}
+.fit-card .actions{margin-top:10px}
+.eft{width:100%;font:13px/1.5 var(--ff-num);white-space:pre;overflow:auto}
+@media (pointer:coarse){ .fit-group>summary{min-height:44px} }

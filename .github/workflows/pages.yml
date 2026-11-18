@@ -59,6 +59,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
           PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: node scripts/deploy-backend.mjs
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

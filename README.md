@@ -10,7 +10,7 @@ The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker
 
 Seven destinations sit in the left rail (a bottom bar on phones): **Bridge**, **Wing** (Crew map, Goals), **Pilot** (Training, Skills, Clones), **Earn** (Build, Mine, Explore, Trade, Jobs), **Navigate** (Star map, Haul plan), **Ledger** and **Logbook**. Each view has its own address (`#earn/mine`), and old links like `#mining` still work. **Ctrl/Cmd K** searches screens, actions and systems; `g` then a letter jumps to a destination, `1`–`5` switches views, and `?` lists every shortcut.
 
-- **Bridge** — your title (rank + specialty from your skill points), training alert, ship and position, and your wing: the wingmate's training, wing net worth and combined skill points.
+- **Bridge** — your title (rank + specialty from your skill points), training alert, ship and position, your **current fit** (high, mid, low, rig and subsystem slots, drones, fighters and holds, read from the ship's own assets, with **Copy as EFT**), and your wing: the wingmate's training, wing net worth and combined skill points. A wingmate who shares at the newer consent level also shares their ship and fit.
 - **Wing → Crew map** — wing net worth, holdings by category, what we own (grouped, with each owner's portrait) and each pilot's role breakdown.
 - **Earn → Trade** — opportunities from your pilot's current system (or a trade hub): haul & flip routes ranked by profit per jump, station trading spreads, and manufacturing margins, all sized to your budget (your wallet unless you type another). Fees come from your Accounting and Broker Relations; cargo defaults to your current ship.
 - **Earn → Build** — an early-game plan for the chosen pilot: alpha/omega detection, job slots, fees, the cheapest place to build, a stage plan by wallet, the next skills to train, and the best NPC-sold T1 blueprints to start with. Picks are sized to the budget (your wallet by default): a small wallet buys fewer runs, and picks it can't cover at all are hidden unless you ask for them. A wing build plan fills each pilot's build slots within their wallet, skipping blueprints they lack the skills for and never giving both pilots the same product. Each pick shows its research plan (ME target, time, cost), required skills, the full material bill (bought in one region), margin, profit per day and payback. Sale prices are capped at 15% over the 7-day average, and thin, spiking, crowded or low-margin markets are flagged and ranked lower. It lists the cheapest safe NPC factories and labs within 10 high-sec jumps, and every pick has a trip plan: where to buy the blueprint, research, buy materials, build and sell, each leg with its jump-by-jump route (coloured by security) and a Dotlan map link.
@@ -21,8 +21,10 @@ Seven destinations sit in the left rail (a bottom bar on phones): **Bridge**, **
 - **Routes everywhere** — every route in Market, Industry, Mining and Hauling previews as a sketch when you hover it, and **3D view** opens it in a 3D modal with its jump strip; system names open their panel; **Open in Star map** carries the route onto the full map.
 - **Pilot → Training** — the active skill with progress, a queue timeline, and alerts when the queue is empty, paused, or runs out within 24 hours.
 - **Pilot → Skills** — the full skill sheet grouped by skill group, with levels, SP per skill and group, and search.
-- **Ledger** — balance, the latest 50 journal entries and market transactions, and current industry jobs.
+- **Ledger** — balance, the latest 50 journal entries and market transactions, your **contracts** (outstanding, in progress and recently finished or expired; courier collateral and reward; anything expiring within 24 hours is flagged; a contract's items load only when you ask), a summary of your market orders, and current industry jobs.
+- **Earn → Trade → My orders** — your open market orders (item, buy or sell, price, volume left, place, days left) with an **outbid** check against the last market scan (“Outbid by 1.00 ISK”, “Best price” or “Not checked” when that region isn't scanned), and the last 30 days of filled, expired and cancelled orders.
 - **Pilot → Clones** — attributes and remaps, active implants, home station, jump clones and the next clone jump time.
+- **Logbook → Losses** — the ships you lost (ship, system, time, attackers, final-blow corporation, a zKillboard link), filterable beside your entries, with **Add to journal** to start an entry titled “Lost a <ship> in <system>” in the Lesson learned category.
 - **Wing → Goals** and **Logbook** — shared goals and a journal kept in this browser, with optional sync through the wing backend (turn it on per browser in the Logbook's Backup card), export, import and draft recovery. A goal can carry an ISK target, the result so far (shown as progress, with “target reached”), a checklist of steps you tick off on the goal, and notes.
 
 Visitors without a session see public profiles plus each pilot's shared skill total and queue. Everything else needs that pilot's own session.
@@ -46,14 +48,24 @@ Enable all of these on the EVE application (client ID `a94f7ccbcc8b4b0d8f7fd90fe
 - `esi-location.read_location.v1`, `esi-location.read_ship_type.v1`
 - `esi-industry.read_character_jobs.v1`, `esi-industry.read_character_mining.v1`
 - `esi-clones.read_clones.v1`, `esi-clones.read_implants.v1`
-- `esi-assets.read_assets.v1`
+- `esi-assets.read_assets.v1` (also the source of the current fit)
+- `esi-markets.read_character_orders.v1` (My orders and order history)
+- `esi-contracts.read_character_contracts.v1` (Ledger contracts)
+- `esi-killmails.read_killmails.v1` (the loss log)
+- `esi-characters.read_blueprints.v1`, `esi-planets.manage_planets.v1`, `esi-characters.read_standings.v1` (read and stored now, for the blueprint, planetary industry and standings views that come next, so each pilot reconnects only once)
 - `esi-ui.write_waypoint.v1` (Hauling: send a route to the in-game autopilot)
 
 A pilot who connected before a scope was added sees "Permission not granted" for that data and can press **Reconnect** to grant it.
 
+**Both pilots must reconnect once** to grant the six newest scopes (orders, contracts, killmails, blueprints, planets and standings). Until they do everything else keeps working. The scopes must also be ticked on the EVE application at [developers.eveonline.com](https://developers.eveonline.com/), or EVE refuses the login that asks for them.
+
 ### Wingmate sharing
 
-On the consent page each pilot can tick **share with my wingmate**. Their skills, wallet balance and asset summary (and, for pilots who connected after the Mining tab shipped, their ship, location, 7-day location trail, industry jobs and mining ledger) then reach the other pilot's session through `GET /api/wing`. That data is never public.
+On the consent page each pilot can tick **share with my wingmate**. Their skills, wallet balance and asset summary (and, for pilots who connected after the Mining tab shipped, their ship, its current fit, location, 7-day location trail, industry jobs and mining ledger) then reach the other pilot's session through `GET /api/wing`. That data is never public.
+
+### Discord alerts
+
+Optional. With a `DISCORD_WEBHOOK_URL` secret the Worker posts one short message per new event to a Discord channel: a skill queue that is empty or ends within 24 hours, an industry job that is ready, a market order that was outbid, filled or expired, a contract that was accepted, completed or expires within 24 hours, and a new loss. Each event is sent once. Messages name the pilot and the item but never a system, station or region, so the channel can be shared. Without the secret nothing is sent. Setup is in [worker/README.md](worker/README.md#discord-alerts).
 
 ### Market pipeline
 

@@ -7,6 +7,8 @@ import {mapGraph} from '../routes.js';
 import {loadMarket} from '../marketdata.js';
 import {name, place} from '../esi.js';
 import {$, esc, isk, day, when, left, format, plural, connectButtons, openDrawer, wingNote, permissionBanner} from '../shared.js';
+import {ordersLine} from '../ordersview.js';
+import {contractsSection, contractDrawer, showItems} from '../contractsview.js';
 import {readout, pilotSeg, shownPilot, whenPilotChanges, sorter, sortBy, rowsHead, reveal, rowAttrs} from './pilot.js';
 
 const KINDS = [['all', 'All'], ['bounty', 'Bounty'], ['market', 'Market'], ['industry', 'Industry'], ['tax', 'Tax'], ['transfer', 'Transfer'], ['mining', 'Mining']];
@@ -52,8 +54,8 @@ export function render() {
   if (!p.private && !viaWing(p)) { rows = []; content.innerHTML = `<div class="state"><p><b>${esc(p.name)}’s wallet is private.</b> Connect this pilot to load the balance, journal and trades.</p>${connectButtons(p, S.pilots.indexOf(p))}</div>`; return; }
   const ops = opsOf(p), wallet = ops.wallet, jobs = ops.jobs?.value, shared = !p.private;
   rows = collect(p);
-  // Mined ore is valued from the market snapshot; fetch it once while the Ledger is on screen.
-  if (!S.marketData && S.backend && ops.mining?.value?.length && !$('#ledger').hidden && !marketAsked) { marketAsked = true; loadMarket().then(render, () => {}); }
+  // Mined ore is valued, and open orders checked for outbidding, from the market snapshot; fetch it once while the Ledger is on screen.
+  if (!S.marketData && S.backend && (ops.mining?.value?.length || ops.orders?.value?.length) && !$('#ledger').hidden && !marketAsked) { marketAsked = true; loadMarket().then(render, () => {}); }
   const week = Date.now() - 7 * 86400000;
   const net = (ops.journal?.value || []).filter(r => Date.parse(r.date) >= week).reduce((t, r) => t + (r.amount || 0), 0);
   // A job past its end time is ready even while ESI still calls it active.
@@ -68,6 +70,8 @@ export function render() {
   ${problems.map(([w, m]) => `<p class="alert warn">${w[0].toUpperCase() + w.slice(1)}: ${m}</p>`).join('')}
   ${shared ? `${wingNote(p)}<div class="state"><p><b>Shared with the wing.</b> ${esc(p.name)}’s journal and trades stay on their own device; the balance, mining and jobs come from what ${esc(p.name)} shares.</p>${connectButtons(p, S.pilots.indexOf(p))}</div>` : ''}
   <section class="card panel--primary ledger" data-pilot="${esc(p.name.toLowerCase())}" aria-label="${esc(p.name)}’s ledger"><div id="ledger-table"></div></section>
+  ${shared ? '' : contractsSection(p)}
+  ${shared ? '' : `<button type="button" class="card orders-line" data-go="market"><span><b>Market orders</b><small id="orders-line">${esc(ordersLine(p))}</small></span><span class="jobs-line__go">Open My orders</span></button>`}
   <button type="button" class="card jobs-line" data-go="earn/jobs"><span><b>Industry jobs</b><small>${!ops.jobs ? 'Not synced yet' : !ops.jobs.permission ? 'Needs permission' : jobs?.length ? `${plural(running.length, 'job')} running${ready ? `, ${ready} ready to deliver` : ''}${next ? `, next done in ${esc(left(next))}` : ''} · ${jobs.slice(0, 3).map(j => `${esc(name(j.product_type_id || j.blueprint_type_id))} (${Number(j.runs)} runs)`).join(', ')}` : 'No current industry jobs'}</small></span><span class="jobs-line__go">Open Jobs</span></button>`;
   drawRows();
 }
@@ -84,9 +88,16 @@ export function wire() {
   document.getElementById('ledger').classList.add('vk');
   whenPilotChanges(render);
   $('#ledger-search').addEventListener('input', drawRows);
+  // The drawer sits outside the Ledger view, so its "Show items" button is wired here.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('#drawer [data-contract-items]'), p = shownPilot();
+    if (button && p) { button.disabled = true; showItems(p, Number(button.dataset.contractItems)).finally(() => { button.disabled = false; }); }
+  });
   document.addEventListener('click', event => {
     const chip = event.target.closest('[data-ledger-kind]');
     if (chip) { kind = chip.dataset.ledgerKind; document.querySelectorAll('[data-ledger-kind]').forEach(b => b.setAttribute('aria-pressed', String(b === chip))); drawRows(); return; }
+    const contract = event.target.closest('#ledger [data-contract]');
+    if (contract) { const p = shownPilot(); if (p) contractDrawer(p, Number(contract.dataset.contract)); return; }
     const row = event.target.closest('#ledger [data-ledger-row]');
     if (row && !event.target.closest('a,button')) rowDrawer(Number(row.dataset.ledgerRow));
   });

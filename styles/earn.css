@@ -158,3 +158,20 @@
   .earn-sum .readout dd small,.ed .readout dd small{display:block}
 }
 @media (pointer:coarse){ .earn-bar select,.earn-bar input:not([type=checkbox]){min-height:44px} .earn-bar .sw{min-height:44px} .earn details>summary{min-height:44px} }
+
+/* My orders (Trade): one line per order with what it asks, what is left and whether someone undercut it. */
+.orders{margin-top:16px}
+.orders__history{margin-top:14px}
+.orders__history>summary{display:flex;align-items:center;min-height:36px;color:var(--accent-strong);font-size:var(--fs-sm);cursor:pointer}
+.olist{list-style:none;margin:8px 0 0;padding:0}
+.orow{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr);gap:4px 16px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.orow:first-child{border-top:0}
+.orow__main b{display:block;font-weight:600;overflow-wrap:anywhere}
+.orow small{display:block;color:var(--text-muted);font-size:var(--fs-xs)}
+.orow__fig{text-align:right}.orow__fig .num{font-weight:600}
+.orow__status{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+@media (max-width:720px){
+  .orow{grid-template-columns:minmax(0,1fr) auto}
+  .orow__status{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center}
+}
+@media (pointer:coarse){ .orders__history>summary{min-height:44px} }

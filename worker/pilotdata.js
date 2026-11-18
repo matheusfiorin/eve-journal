@@ -18,7 +18,7 @@ export function compactHistory(list, now = Date.now()) {
 const ACTIVE = new Set(['outstanding', 'in_progress']);
 // Open contracts first (all of them, up to the cap), then the newest others; deleted ones are gone.
 export function compactContracts(list) {
-  const rows = list.filter(c => c.status !== 'deleted').map(c => ({...pick(c, ['contract_id', 'type', 'status', 'availability', 'issuer_id', 'assignee_id', 'acceptor_id', 'date_issued', 'date_expired', 'date_completed', 'price', 'reward', 'collateral', 'volume', 'days_to_complete', 'start_location_id', 'end_location_id', 'for_corporation']), ...(c.title ? {title:String(c.title).slice(0, 60)} : {})}));
+  const rows = list.filter(c => c.status !== 'deleted').map(c => ({...pick(c, ['contract_id', 'type', 'status', 'availability', 'issuer_id', 'assignee_id', 'acceptor_id', 'date_issued', 'date_expired', 'date_accepted', 'date_completed', 'price', 'reward', 'collateral', 'volume', 'days_to_complete', 'start_location_id', 'end_location_id', 'for_corporation']), ...(c.title ? {title:String(c.title).slice(0, 60)} : {})}));
   const open = rows.filter(c => ACTIVE.has(c.status)), rest = rows.filter(c => !ACTIVE.has(c.status)).sort((a, b) => Date.parse(b.date_issued) - Date.parse(a.date_issued));
   return [...open, ...rest].slice(0, MAX_CONTRACTS);
 }

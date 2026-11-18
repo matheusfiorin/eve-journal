@@ -1,6 +1,6 @@
 // Loading both pilots: public profile, private backend record or shared snapshot, wingmate summary and holdings.
-import {S, mine, summary, assetsOf} from './state.js';
-import {esi, corporation, resolveNames, loadSkillGroups, loadPrices, loadAssetCategories} from './esi.js';
+import {S, mine, summary, assetsOf, opsOf} from './state.js';
+import {esi, corporation, resolveNames, loadSkillGroups, loadPrices, loadAssetCategories, isStation} from './esi.js';
 import {$, notice, setSync, clock} from './shared.js';
 
 function referencedIds(p) {
@@ -11,8 +11,21 @@ function referencedIds(p) {
     ...(v('jobs') || []).flatMap(j => [j.product_type_id, j.blueprint_type_id]),
     ...(v('transactions') || []).flatMap(t => [t.type_id, t.location_id]),
     ...(v('implants') || []), v('clones')?.home_location?.location_id,
-    ...(v('clones')?.jump_clones || []).flatMap(c => [c.location_id, ...(c.implants || [])])
+    ...(v('clones')?.jump_clones || []).flatMap(c => [c.location_id, ...(c.implants || [])]),
+    ...(v('fit')?.items || []).map(row => row[0]),
+    ...[...(v('orders') || []), ...(v('orderHistory') || [])].flatMap(o => [o.type_id, isStation(o.location_id) ? o.location_id : null]),
+    ...(v('contracts') || []).flatMap(c => [c.issuer_id, c.assignee_id, c.acceptor_id, ...[c.start_location_id, c.end_location_id].filter(isStation)]),
+    ...(v('killmails')?.losses || []).flatMap(l => [l.ship, l.system, l.corp])
   ];
+}
+// Charges loaded in a module share its slot flag, so only types that share a flag with another item need a category lookup.
+function chargeCandidates(ps) {
+  const out = [];
+  for (const p of ps) {
+    const seen = new Map();
+    for (const [type, flag] of opsOf(p).fit?.value?.items || []) { if (/Slot\d+$/.test(flag)) { if (seen.has(flag)) out.push(type, seen.get(flag)); else seen.set(flag, type); } }
+  }
+  return out;
 }
 async function loadProfile(p) {
   try {
@@ -83,8 +96,11 @@ export async function loadPilots(force, render) {
     if (request !== S.generation) return false;
     try { await resolveNames(next.flatMap(referencedIds)); } catch { notice('Some EVE names could not be loaded. IDs are shown instead.'); }
     await loadWing();
+    // A wingmate's shared ship and fit come with the wing summary, after the first round of names.
+    try { await resolveNames(next.flatMap(p => [opsOf(p).ship?.value?.ship_type_id, ...(opsOf(p).fit?.value?.items || []).map(row => row[0])])); } catch { /* IDs show instead. */ }
     if (next.some(p => p.skills?.skills) || [...S.wing.values()].some(w => w.skills?.skills)) await loadSkillGroups();
     await loadHoldings();
+    try { await loadAssetCategories(chargeCandidates(next)); } catch { /* A charge then reads as a module. */ }
     const at = dataTime();
     S.settling = false; syncStatus(at);
     ok = true;

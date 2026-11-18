@@ -2,7 +2,7 @@
 // one message each to DISCORD_WEBHOOK_URL. The channel may be shared, so a message never names a place: no systems,
 // stations or regions, only the pilot, what happened and the item. Without the secret none of this runs.
 import {queueState} from '../model.js';
-import {checkOrder} from '../orders.js';
+import {checkOrder, contractDue} from '../orders.js';
 
 const HOURS = ms => { const h = Math.max(1, Math.round(ms / 3600000)); return h < 24 ? `${h} h` : `${Math.round(h / 24)} d`; };
 // Posts per run: the sync that precedes them may have used up to SYNC_LIMIT of the free plan's 50 subrequests (worker/index.js).
@@ -31,8 +31,8 @@ export function candidates(pilots, {now = Date.now(), outbid = () => null} = {})
     const checks = outbid(orders) || [];
     orders.forEach((o, i) => { if (checks[i]?.state === 'outbid') out.push({key: `outbid:${id}:${o.order_id}:${o.price}`, text: `${who}'s ${o.is_buy_order ? 'buy' : 'sell'} order for ${nameOf(o.type_id) || 'an item'} was outbid`}); });
     for (const c of ops.contracts?.value || []) {
-      const end = Date.parse(c.date_expired);
-      if (['outstanding', 'in_progress'].includes(c.status) && end > now && end - now < 86400000) out.push({key: `contract-expiring:${id}:${c.contract_id}`, text: `${who}'s ${contract(c.type)} expires in ${HOURS(end - now)}`});
+      const end = contractDue(c);
+      if (end !== null && end > now && end - now < 86400000) out.push({key: `contract-expiring:${id}:${c.contract_id}`, text: `${who}'s ${contract(c.type)} expires in ${HOURS(end - now)}`});
     }
     for (const e of snap.events || []) {
       const item = nameOf(e.type) || 'an item';
