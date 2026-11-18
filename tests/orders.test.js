@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {checkOrder, daysLeft, outcome, historySummary} from '../orders.js';
-import {compactOrders, compactHistory, compactContracts, compactBlueprints, compactStandings, summarizeKill, summarizePins, stepKillmails, stepPlanets, diffEvents, fitCollector, MAX_ORDERS, MAX_CONTRACTS} from '../worker/pilotdata.js';
+import {compactOrders, compactHistory, compactContracts, compactBlueprints, compactStandings, summarizeKill, summarizePins, stepKillmails, stepPlanets, diffEvents, trackOrders, fitCollector, MAX_ORDERS, MAX_CONTRACTS} from '../worker/pilotdata.js';
 
 const JITA = 60003760, AMARR = 60008494, now = Date.parse('2026-11-18T12:00:00Z');
 const regions = [{region: 10000002, data: {types: {34: {s: [[JITA, 5, 1e6], [60000001, 6, 10]], b: [[JITA, 4.6, 1e6]]}, 35: {s: [[60000001, 12, 5]], b: []}}}}];
@@ -93,9 +93,11 @@ test('events come from what changed between two syncs, are kept three days and a
   const next = {operations: {orders: {value: []}, orderHistory: {value: [o(1, {volume_remain: 0}), o(2, {volume_remain: 5, state: 'expired'}), o(3, {state: 'cancelled', volume_remain: 4})]},
     contracts: {value: [{contract_id: 7, type: 'courier', status: 'in_progress'}, {contract_id: 8, type: 'courier', status: 'finished'}, {contract_id: 9, status: 'in_progress'}]}, killmails: {value: {losses: [{id: 2, ship: 605}, {id: 1}]}}}};
   const events = diffEvents(prior, next, now);
-  assert.deepEqual(events.map(e => e.kind).sort(), ['contract-accepted', 'contract-completed', 'loss', 'order-expired', 'order-expired', 'order-filled']);
+  assert.deepEqual(events.map(e => e.kind).sort(), ['contract-accepted', 'contract-completed', 'loss', 'order-expired', 'order-filled']);
   assert.ok(!events.some(e => e.k === 'order-end:3'), 'a cancelled order is the pilot\'s own doing');
-  assert.equal(events.find(e => e.kind === 'order-expired' && e.k === 'order-end:4').type, 34, 'gone with no history, within an hour of its end, is expiry');
+  // Gone with no history entry (ESI caches it for an hour): not guessed at, even within an hour of its end. It waits.
+  assert.ok(!events.some(e => e.k === 'order-end:4'));
+  assert.deepEqual(trackOrders(prior, next, now).pending.map(p => p.order_id), [4]);
   assert.deepEqual(diffEvents(undefined, next, now), [], 'the first sync is a baseline, not a flood');
   const later = diffEvents({...prior, events}, {operations: {}}, now + 2 * 86400000);assert.equal(later.length, events.length, 'kept for the alert pass');
   assert.equal(diffEvents({...prior, events}, {operations: {}}, now + 4 * 86400000).length, 0, 'and dropped after three days');

@@ -1,5 +1,5 @@
 // Discord alerts. The cron reads both pilots' stored snapshots (no ESI calls), works out which events are new and posts
-// one message each to DISCORD_WEBHOOK_URL. The channel may be shared, so a message never names a place: no systems,
+// one message each to DISCORD_WEBHOOK_URL. Only pilots who ticked the alerts box on the consent page (pilots.share_alerts) are included. The channel may be shared, so a message never names a place: no systems,
 // stations or regions, only the pilot, what happened and the item. Without the secret none of this runs.
 import {queueState} from '../model.js';
 import {checkOrder, contractDue} from '../orders.js';
@@ -65,19 +65,33 @@ export async function sendAlerts(env, fetchImpl = fetch, now = Date.now()) {
   const url = env.DISCORD_WEBHOOK_URL;
   if (!url) return {sent: 0, skipped: true};
   if (!WEBHOOK.test(url)) return {sent: 0, invalid: true};
-  const rows = (await env.DB.prepare('SELECT character_id, name, snapshot FROM pilots').all()).results;
+  const rows = (await env.DB.prepare('SELECT character_id, name, snapshot FROM pilots WHERE share_alerts = 1').all()).results;
   const pilots = rows.map(r => { try { return {id: r.character_id, name: r.name, snapshot: JSON.parse(r.snapshot || '{}')}; } catch { return null; } }).filter(Boolean);
   const slices = new Map();
   for (const p of pilots) { const orders = p.snapshot.operations?.orders?.value; if (orders?.length) slices.set(p.id, await marketSlice(env, orders, now).catch(() => [])); }
   const all = [];
   for (const p of pilots) all.push(...candidates([p], {now, outbid: orders => orders.map(o => checkOrder(o, slices.get(p.id) || []))}));
+  // D1's free plan allows 50 queries per invocation, so the known keys are read in a few chunked lookups (not one write per
+  // old candidate) and only the first MAX_ALERTS new ones are claimed, in one batch.
+  const known = new Set();
+  for (let i = 0; i < all.length; i += 90) {
+    const chunk = all.slice(i, i + 90).map(a => a.key);
+    for (const r of (await env.DB.prepare(`SELECT key FROM alerts WHERE key IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all()).results) known.add(r.key);
+  }
+  const fresh = [], seen = new Set();
+  for (const a of all) if (!known.has(a.key) && !seen.has(a.key)) { seen.add(a.key); fresh.push(a); if (fresh.length >= MAX_ALERTS) break; }
+  if (!fresh.length) return {sent: 0, failed: 0};
+  const claims = await env.DB.batch(fresh.map(a => env.DB.prepare('INSERT OR IGNORE INTO alerts (key, sent_at) VALUES (?, ?)').bind(a.key, now)));
+  const mine = fresh.filter((_, i) => claims[i]?.meta?.changes !== 0);
   let sent = 0, failed = 0;
-  for (const {key, text} of all) {
-    if (sent >= MAX_ALERTS) break;
-    const claimed = await env.DB.prepare('INSERT OR IGNORE INTO alerts (key, sent_at) VALUES (?, ?)').bind(key, now).run();
-    if (claimed?.meta?.changes === 0) continue;
+  for (const {key, text} of mine) {
     try { await post(url, text, fetchImpl); sent++; }
-    catch { failed++; await env.DB.prepare('DELETE FROM alerts WHERE key = ?').bind(key).run(); break; }
+    catch {
+      failed++;
+      const rest = mine.slice(mine.findIndex(a => a.key === key));
+      await env.DB.batch(rest.map(a => env.DB.prepare('DELETE FROM alerts WHERE key = ?').bind(a.key)));
+      break;
+    }
   }
   return {sent, failed};
 }

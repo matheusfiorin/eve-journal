@@ -11,7 +11,7 @@ import {secLight} from '../../mapview.js';
 import {facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from '../../route.js';
 import {S, ROMAN, mine, wingmate, summary, ordered, opsOf} from '../state.js';
 import {esi, json, name, resolveNames, isStation} from '../esi.js';
-import {brokerFor, brokerNote} from '../brokers.js';
+import {brokerFor, brokerNote, learnOwners} from '../brokers.js';
 import {render as renderPlanets, wire as wirePlanets} from './planets.js';
 import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho, permissionBanner, wingNote} from '../shared.js';
 import {explored, markExplored} from '../prefs.js';
@@ -91,7 +91,7 @@ export async function renderMarket() {
     if (cargo.get(ship) > 0) cargoInput.value = Math.round(cargo.get(ship));
   }
   tradeSortOptions();
-  const skills = summary(p).skills, broker = await brokerFor(p, skills, meta.skills, marketBook, () => { if (!$('#market').hidden) renderMarket(); });
+  const skills = summary(p).skills, broker = await brokerFor(p, skills, meta.skills, marketBook);
   if (t.stale()) return;
   const f = {...fees(skills, meta.skills), brokerAt:broker.at};
   const from = Number(origin.value), maxJumps = Number($('#market-jumps').value), hold = Math.max(1, Number(cargoInput.value) || 5000);
@@ -116,6 +116,8 @@ export async function renderMarket() {
     .filter(h => near(h.toA) && h.ab !== null).map(h => ({...h, perJump:h.profit / Math.max(1, h.toA + h.ab)})).sort((a, b) => b.perJump - a.perJump).slice(0, 12);
   const tradeRows = trades.map(t => ({...t, j:jumps(from, sys(t.loc))})).filter(t => near(t.j)).slice(0, 12);
   const buildRows = builds.map(b => ({...b, j:jumps(from, sys(b.loc))}));
+  // Standings need the owner of each station a visible row sells at; a late answer redraws once.
+  learnOwners([...haulRows.map(h => h.to.loc), ...tradeRows.map(t => t.loc), ...buildRows.map(b => b.loc)], () => { if (!$('#market').hidden) renderMarket(); });
   const tripIds = stops => g && stops.every(id => g.systems.has(id)) ? routeIds(stops) : [];
   const SORTS = {haul:{profit:(a, b) => b.profit - a.profit, invest:(a, b) => a.invest - b.invest, jumps:(a, b) => (a.toA + a.ab) - (b.toA + b.ab)},
     spread:{margin:(a, b) => b.margin - a.margin, daily:(a, b) => b.daily - a.daily, jumps:(a, b) => a.j - b.j},
@@ -195,7 +197,7 @@ export async function renderIndustry() {
   const meta = marketData.meta?.data || {}, catalog = meta.starters || [];
   if (!marketData.regions.length || !catalog.length) { status.textContent = 'The pipeline has not priced starter blueprints yet. Check back after its next hourly run.'; content.innerHTML = state('No blueprint prices yet.', 'The hourly pipeline prices starter blueprints on its next run. Press Refresh after that.'); return; }
   const p = mine(), o = wingmate(), x = summary(p), levels = skillLevels(x.skills, meta.skills || {}), alpha = isAlpha(x.skills), s = slots(levels);
-  const broker = await brokerFor(p, x.skills, meta.skills, marketBook, () => { if (!$('#industry').hidden) renderIndustry(); });
+  const broker = await brokerFor(p, x.skills, meta.skills, marketBook);
   if (t.stale()) return;
   const f = {...fees(x.skills, meta.skills), brokerAt:broker.at};
   // Blueprints each pilot already owns (a wingmate's only when they share them): no purchase, their own ME and TE.
@@ -230,6 +232,7 @@ export async function renderIndustry() {
   // Only what the wallet covers, unless the pilot asks to see the rest.
   const showAll = $('#industry-over').checked, overBudget = ranked.filter(pick => !pick.affordable).length;
   const list = (SORTS[sortBy] ? [...ranked].sort((a, b) => (b.affordable - a.affordable) || SORTS[sortBy](a, b)) : ranked).filter(pick => showAll || pick.affordable).slice(0, 20);
+  learnOwners(list.map(pick => pick.sell.loc), () => { if (!$('#industry').hidden) renderIndustry(); });
   const jobTax = buildIndex + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
   const trip = pick => {
     if (!g) return {html:'<p class="hint">Routes appear after the next market pipeline run.</p>', foot:''};
@@ -317,10 +320,10 @@ export async function renderIndustry() {
 
   // "My blueprints": every pilot's own library, answering the toolbar's filter box.
   const libraryOf = pl => {
-    const f = opsOf(pl).blueprints, list = library(f?.value?.types, name), shared = pl.private || S.wing.get(pl.id)?.shareLevel >= 2;
+    const f = opsOf(pl).blueprints, list = library(f?.value?.types, name), shared = pl.private || S.wing.get(pl.id)?.shareLevel >= 3;
     const body = pl.private && f && !f.permission ? permissionBanner(pl, ['blueprints'])
       : list.length ? `<ul class="bplib">${list.map(b => `<li data-lib data-find="${esc(`${b.name} ${b.kind === 'bpo' ? 'original bpo' : 'copy bpc'} me ${b.me} te ${b.te}`.toLowerCase())}"><span><b>${esc(b.name)}</b><small>${b.loc !== undefined ? esc(isStation(b.loc) ? name(b.loc) : 'In a structure or container') : 'Location unknown'}</small></span><span class="bplib__tags"><span class="tag ${b.kind === 'bpo' ? 'pos' : 'dim'}">${esc(b.label)}</span>${b.kind === 'bpc' ? `<span class="tag dim">ME ${b.me}/TE ${b.te}</span>` : b.copies ? `<span class="tag dim">${plural(b.copies, 'copy', 'copies')}</span>` : ''}</span></li>`).join('')}</ul>`
-      : shared ? `<p class="hint">${f?.permission || !pl.private ? 'No blueprints found.' : 'Not synced yet.'}</p>` : `<p class="hint">${esc(pl.name)}’s blueprints are not shared with the wing.</p>${wingNote(pl)}`;
+      : shared ? `<p class="hint">${f?.permission || !pl.private ? 'No blueprints found.' : 'Not synced yet.'}</p>` : `<p class="hint">${esc(pl.name)}’s blueprints are not shared with the wing.</p>${wingNote(pl, 3)}`;
     return `<h3 class="ed-h who" data-pilot="${esc(pl.name.toLowerCase())}">${esc(pl.name)}${list.length ? ` · ${plural(list.length, 'blueprint')}` : ''}</h3>${body}`;
   };
   const affordable = ranked.filter(r => r.affordable), top = affordable[0];

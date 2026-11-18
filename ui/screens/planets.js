@@ -44,11 +44,11 @@ export async function render() {
   const rows = all.flatMap(x => x.rows), expired = rows.filter(c => c.worst === 'expired').length, soon = rows.filter(c => c.worst === 'soon').length;
   status.textContent = rows.length ? `${plural(rows.length, 'colony', 'colonies')} across ${plural(all.filter(x => x.rows.length).length, 'pilot')}` : 'No colonies to show yet.';
   const section = (x, i) => {
-    const lacking = x.p.private && x.f && !x.f.permission, shared = !x.p.private && Boolean(S.wing.get(x.p.id)?.sharing && S.wing.get(x.p.id).shareLevel >= 2);
+    const lacking = x.p.private && x.f && !x.f.permission, shared = !x.p.private && Boolean(S.wing.get(x.p.id)?.sharing && S.wing.get(x.p.id).shareLevel >= 3);
     const body = lacking ? permissionBanner(x.p, ['planetary colonies'])
       : x.rows.length ? `<ul class="colonies">${x.rows.map(c => colonyHtml(c, now)).join('')}</ul>`
       : x.p.private || shared ? `<p class="hint">${x.f?.permission || shared ? 'No colonies found.' : 'Not synced yet.'}</p>`
-      : `<p class="hint">${esc(x.p.name)}’s colonies are not shared with the wing.</p>${wingNote(x.p)}`;
+      : `<p class="hint">${esc(x.p.name)}’s colonies are not shared with the wing.</p>${wingNote(x.p, 3)}`;
     return `<section class="panel colony-group" data-pilot="${esc(x.p.name.toLowerCase())}" aria-labelledby="planets-h-${i}"><div class="panel__head"><h2 id="planets-h-${i}">${esc(x.p.name)}’s colonies</h2>${x.rows.length ? `<span class="hint">${plural(x.rows.length, 'colony', 'colonies')}</span>` : ''}</div>${body}</section>`;
   };
   content.innerHTML = `<section class="panel earn-sum" aria-label="Summary"><dl class="readout"><div><dt>Colonies</dt><dd class="num">${rows.length}</dd></div><div><dt>Extractors expired</dt><dd class="num ${expired ? 'neg' : ''}">${expired}</dd></div><div><dt>Expiring within a day</dt><dd class="num ${soon ? 'warn-text' : ''}">${soon}</dd></div></dl>

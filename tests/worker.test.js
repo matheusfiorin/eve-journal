@@ -8,7 +8,7 @@ import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,d
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -87,10 +87,10 @@ function setup(options={}){
 }
 // The hourly kills sample is not due, so a cron run goes to a pilot sync (see the sampling tests for the other case).
 const sampled=(app,turns=0)=>app.env.DB.raw.prepare("INSERT INTO market_docs (name, data, updated_at, expires_at, turns) VALUES ('activity', '{}', ?, ?, ?) ON CONFLICT(name) DO UPDATE SET expires_at = excluded.expires_at, turns = excluded.turns").run(Date.now(),Date.now()+3600000,turns);
-async function consent(app,{wing=true,character=id}={}){
+async function consent(app,{wing=true,wing3=false,alerts=false,character=id}={}){
  const page=await app.request(`/auth/start?pilot=${character}`);assert.equal(page.status,200);
  const body=await page.text(),csrf=body.match(/name="csrf" value="([^"]+)"/)[1];
- const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{})})});
+ const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{}),...(wing3?{wing3:'yes'}:{}),...(alerts?{alerts:'yes'}:{})})});
  assert.equal(start.status,303);const login=new URL(start.headers.get('Location'));
  return {state:login.searchParams.get('state'),cookie:start.headers.get('Set-Cookie').split(';')[0],login};
 }
@@ -574,7 +574,8 @@ test('migration 0007 moves the pipeline\'s kill and jump history and static meta
  const live=JSON.parse(db.prepare("SELECT data FROM market_docs WHERE name = 'activity'").get().data);
  assert.deepEqual(live,{risk:LEGACY_META.risk,traffic:LEGACY_META.traffic,activity:LEGACY_META.activity});
  const fixed=db.prepare("SELECT version, data FROM market_docs WHERE name = 'universe'").get();assert.deepEqual(JSON.parse(fixed.data),{ores:LEGACY_META.ores,combat:LEGACY_META.combat,skills:LEGACY_META.skills});assert.ok(fixed.version);
- assert.deepEqual(Object.keys(JSON.parse(db.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data)).sort(),['generatedAt','recipes','regions','skillNames','starters','types']);
+ // Region 0 keeps its legacy keys: deploy runs migrations before the new Worker, and the old Worker still serves /api/market from that row.
+ assert.deepEqual(JSON.parse(db.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data),LEGACY_META);
  // The new Worker on the migrated rows: an old client's /api/market is what the old Worker served.
  const app=setup();app.env.DB=database(db);
  const old=await(await app.request('/api/market')).json();
@@ -584,6 +585,18 @@ test('migration 0007 moves the pipeline\'s kill and jump history and static meta
  await sampleActivity(app.env,sampler.fetchImpl,T0+H);
  const next=JSON.parse(db.prepare("SELECT data FROM market_docs WHERE name = 'activity'").get().data);
  assert.equal(next.risk.since,T0-86400000);assert.ok(next.risk.s[30000142][1]>9);assert.equal(next.traffic.s[30000142],Math.round(500*Math.exp(-1/24)+900));
+});
+test('leftover legacy keys in region 0 are harmless: /api/market (v1 and v2) serves the activity document\'s history, not the stale copy',async()=>{
+ const db=legacyDb();db.exec(await readFile(new URL('../worker/migrations/0007_market_docs.sql',import.meta.url),'utf8'));
+ const stale=JSON.parse(db.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data);assert.ok(stale.risk&&stale.traffic&&stale.activity,'the migration leaves them in place');
+ const risk={at:T0+H,since:T0-86400000,s:{30000142:[1,2]}},traffic={at:T0+H,since:T0-86400000,s:{30000142:7}};
+ db.prepare("UPDATE market_docs SET data = ? WHERE name = 'activity'").run(JSON.stringify({risk,traffic,activity:{30000142:[9,9,9]}}));
+ const app=setup();app.env.DB=database(db);
+ for(const path of ['/api/market','/api/market?v=2']){const meta=(await(await app.request(path)).json()).meta.data;assert.deepEqual(meta.risk,risk,path);assert.deepEqual(meta.traffic,traffic,path);assert.deepEqual(meta.activity,{30000142:[9,9,9]},path);}
+ // The next pipeline ingest drops the copy for good (it never wins over the cron's newer one).
+ const token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
+ assert.equal((await app.request('/api/market/ingest',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify({region:0,data:LEGACY_META})})).status,200);
+ const row=JSON.parse(db.prepare('SELECT data FROM market_snapshots WHERE region_id = 0').get().data);for(const k of ['risk','traffic','activity',...STATIC_META])assert.equal(row[k],undefined,k);
 });
 test('a pipeline still sending kill history only replaces the cron\'s copy when it is newer, and the sampler adopts a newer pipeline copy',async()=>{
  const app=setup(),token=await pipelineToken(app.env.EVE_CLIENT_SECRET);
@@ -743,7 +756,18 @@ test('the consent page names journal sync and the market scan, states the public
  assert.match(text,/Journal sync/);assert.match(text,/market of the region you are in/);assert.match(text,/visible on the public two-pilot dashboard, to anyone/);assert.match(text,/Delete my data/);
  assert.match(text,/<input type="checkbox" name="share" value="yes" required>/);
  const wing=text.match(/<input type="checkbox" name="wing"[^>]*>/)[0];assert.doesNotMatch(wing,/checked/);assert.doesNotMatch(wing,/required/);
- const kept=setup();await connect(kept,{wing:false});assert.equal(kept.env.DB.raw.prepare('SELECT share_wing FROM pilots').get().share_wing,0);
+ for(const box of ['wing3','alerts']){const tag=text.match(new RegExp(`<input type="checkbox" name="${box}"[^>]*>`))[0];assert.doesNotMatch(tag,/checked|required/,box);}
+ assert.match(text,/Post my alerts \(skill queue, jobs ready, orders, contracts, losses, planet extractors\) to the wing's Discord channel\. No places are named\./);
+ assert.match(text,/fit, blueprints[^<]*planetary colonies/);assert.match(text,/market orders[^<]*contracts, standings and ship losses/);
+ const kept=setup();await connect(kept,{wing:false});assert.equal(kept.env.DB.raw.prepare('SELECT share_wing, share_alerts FROM pilots').get().share_alerts,0);
+});
+test('consent records the three choices separately; level 3 needs the wing box, alerts stand alone and reconnecting resets them',async()=>{
+ const row=async o=>{const a=setup();await connect(a,o);return a.env.DB.raw.prepare('SELECT share_wing, share_alerts FROM pilots').get();};
+ assert.deepEqual({...await row({wing:true,wing3:true,alerts:true})},{share_wing:3,share_alerts:1});
+ assert.deepEqual({...await row({wing:true})},{share_wing:2,share_alerts:0});
+ assert.deepEqual({...await row({wing:false,wing3:true})},{share_wing:0,share_alerts:0},'level 3 without the wing box shares nothing');
+ assert.deepEqual({...await row({wing:false,alerts:true})},{share_wing:0,share_alerts:1});
+ const again=setup();await connect(again,{wing:true,wing3:true,alerts:true});await connect(again,{wing:false});assert.deepEqual({...again.env.DB.raw.prepare('SELECT share_wing, share_alerts FROM pilots').get()},{share_wing:0,share_alerts:0});
 });
 test('Delete my data removes the journal, prefs, grant, pilot and sessions; goals and the wingmate stay',async()=>{
  const {app,a,b,call}=await wingApp();
@@ -944,28 +968,33 @@ test('contract items are read on demand, only for the caller\'s own contracts',a
  old.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify({operations:{contracts:{permission:true,value:[{contract_id:5}]}}}));
  assert.equal((await old.request('/api/contract-items?id=5',{headers:{Authorization:`Bearer ${o.bearer}`}})).status,403,'without the contracts scope');
 });
-test('the wing summary carries the current fit only at consent level 2',async()=>{
- const app=setup({fit:[{type_id:2977,quantity:1,location_id:1001,location_flag:'HiSlot0'}]});const {bearer}=await connect(app);
+test('the wing summary carries the current fit only at consent level 3',async()=>{
+ const app=setup({fit:[{type_id:2977,quantity:1,location_id:1001,location_flag:'HiSlot0'}]});const {bearer}=await connect(app,{wing3:true});
  const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots[0];
- app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2').run();assert.deepEqual((await wing()).fit,{ship:1001,items:[[2977,'HiSlot0',1]]});
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3').run();assert.deepEqual((await wing()).fit,{ship:1001,items:[[2977,'HiSlot0',1]]});
  app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 1').run();assert.equal((await wing()).fit.ship,1001,'the pilot always sees their own');
+ // The other pilot, on level 2, sees ship and location but not the fit.
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,2)").run(JSON.stringify({operations:{ship:{value:{ship_type_id:1}},fit:{value:{ship:1,items:[]}}}}));
+ const other=(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots.find(x=>x.name==='Decxus');assert.ok(other.ship);assert.equal(other.fit,undefined);
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('2977'),'never public');
 });
-test('the wing summary carries blueprints and planets only at consent level 2, and never publicly',async()=>{
- const app=setup({blueprints:[{item_id:1,type_id:1234,quantity:-1,runs:-1,material_efficiency:10,time_efficiency:20,location_id:60003760}],planets:[{planet_id:40000001,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)}]});const {bearer}=await connect(app);
+test('the wing summary carries blueprints and planets only at consent level 3, and never publicly',async()=>{
+ const app=setup({blueprints:[{item_id:1,type_id:1234,quantity:-1,runs:-1,material_efficiency:10,time_efficiency:20,location_id:60003760}],planets:[{planet_id:40000001,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)}]});const {bearer}=await connect(app,{wing3:true});
  const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots[0];
- app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2').run();const w=await wing();
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3').run();const w=await wing();
  assert.deepEqual(w.blueprints.types,[[1234,1,0,10,20,0,60003760]]);assert.equal(w.planets.planets[0].type,'lava');
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('1234')&&!text.includes('lava'),'never public');
- // Another pilot's consent level 1 leaves both out.
+ // Another pilot's consent level 1 leaves both out, and level 2 (agreed before blueprints and planets were shared) too.
  app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,1)").run(JSON.stringify({operations:{wallet:{value:1},blueprints:{value:{types:[[1,1,0,0,0,0]]}},planets:{value:{planets:[{id:1}]}}}}));
  const list=(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots,other=list.find(x=>x.name==='Decxus');
  assert.equal(other.wallet,1);assert.equal(other.blueprints,undefined);assert.equal(other.planets,undefined);
  app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2 WHERE character_id = 2124815118').run();
+ const two=(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots.find(x=>x.name==='Decxus');assert.equal(two.blueprints,undefined);assert.equal(two.planets,undefined);
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3 WHERE character_id = 2124815118').run();
  assert.ok((await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots.find(x=>x.name==='Decxus').blueprints);
 });
 const alertApp=async(options={})=>{
- const o={posts:[],typeNames:{1234:'Venture Blueprint',34:'Tritanium',605:'Venture'},...options},app=setup(o);app.posts=o.posts;app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);app.env.DB.raw.exec('DELETE FROM alerts');return app;
+ const o={posts:[],typeNames:{1234:'Venture Blueprint',34:'Tritanium',605:'Venture'},...options},app=setup(o);app.posts=o.posts;app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app,{alerts:true});app.env.DB.raw.exec('DELETE FROM alerts');return app;
 };
 test('Discord alerts: one message per new event, never repeated, and no place names',async()=>{
  const {sendAlerts}=await import('../worker/alerts.js');
@@ -996,7 +1025,7 @@ test('Discord alerts: an empty queue, an outbid order, orders that ended, contra
  const {sendAlerts}=await import('../worker/alerts.js');
  const old=hoursFromNow(-48),order=(order_id,extra={})=>({order_id,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:7,volume_remain:10,volume_total:50,issued:old,duration:90,...extra});
  const options={posts:[],typeNames:{34:'Tritanium',605:'Venture'},orders:[order(1),order(2,{price:5})],kills:[],contracts:[{contract_id:7,type:'item_exchange',status:'outstanding',issuer_id:id,date_issued:old,date_expired:hoursFromNow(200)}]};
- const app=setup(options);app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);
+ const app=setup(options);app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app,{alerts:true});
  // The stored market says Tritanium sells at 5 in Jita: order 1 (7) is outbid, order 2 (5) is the best price.
  app.env.DB.raw.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?)').run(10000002,JSON.stringify({name:'The Forge',types:{34:{d:1,s:[[60003760,5,100]],b:[]}}}),Date.now());
  app.env.DB.raw.prepare("UPDATE pilots SET snapshot = json_set(snapshot, '$.queue', json('[]'))").run();
@@ -1019,7 +1048,7 @@ test('Discord alerts: an empty queue, an outbid order, orders that ended, contra
 });
 test('Discord alerts do nothing without the secret, reject a bad URL, release a key when the post fails, and cap a run',async()=>{
  const {sendAlerts,MAX_ALERTS}=await import('../worker/alerts.js');
- const plain=setup({posts:[],jobs:[readyJob(1)]});await connect(plain);
+ const plain=setup({posts:[],jobs:[readyJob(1)]});await connect(plain,{alerts:true});
  const before=plain.calls.length;assert.deepEqual(await sendAlerts(plain.env,plain.fetchImpl),{sent:0,skipped:true});assert.equal(plain.calls.length,before,'no request at all');
  plain.env.DISCORD_WEBHOOK_URL='https://evil.example/hook';assert.equal((await sendAlerts(plain.env,plain.fetchImpl)).sent,0);assert.equal(plain.calls.length,before);
  const down=await alertApp({webhookStatus:500,jobs:[readyJob(1)]});
@@ -1040,4 +1069,68 @@ test('the daily cleanup purges alert keys older than 30 days',async()=>{
  const app=setup();const now=Date.now();
  app.env.DB.raw.prepare('INSERT INTO alerts (key, sent_at) VALUES (?, ?)').run('old',now-31*86400000);app.env.DB.raw.prepare('INSERT INTO alerts (key, sent_at) VALUES (?, ?)').run('new',now-86400000);
  await cleanup(app.env,now);assert.deepEqual(app.env.DB.raw.prepare('SELECT key FROM alerts').all().map(r=>r.key),['new']);
+});
+test('/api/market?v=2 and v1 are revalidated, never served from the browser cache; the versioned universe stays immutable',async()=>{
+ const {app,bearer}=await marketApp();
+ for(const path of ['/api/market?v=2','/api/market']){
+  const open=await app.request(path),signed=await app.request(path,{headers:{Authorization:`Bearer ${bearer}`}});
+  assert.equal(open.headers.get('Cache-Control'),'public, no-cache',path);assert.equal(signed.headers.get('Cache-Control'),'private, no-cache',path);
+  const again=await app.request(path,{headers:{'If-None-Match':open.headers.get('ETag')}});assert.equal(again.status,304);assert.equal(again.headers.get('Cache-Control'),'public, no-cache');
+ }
+ const version=(await(await app.request('/api/market?v=2')).json()).universeVersion;
+ assert.match((await app.request(`/api/market/universe?v=${version}`)).headers.get('Cache-Control'),/immutable/);
+});
+test('Discord alerts: a pilot who did not tick the alerts box gets no posts, and the consenting one still does',async()=>{
+ const {sendAlerts}=await import('../worker/alerts.js');
+ const app=await alertApp({jobs:[readyJob(1)]});
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing,share_alerts) VALUES (2124815118,'Decxus','x',?,2,0)").run(JSON.stringify({queue:[],operations:{jobs:{value:[{job_id:9,activity_id:1,status:'ready',product_type_id:34,blueprint_type_id:1234,end_date:hoursFromNow(-1)}]}}}));
+ await sendAlerts(app.env,app.fetchImpl);
+ const texts=app.posts.map(p=>p.content);assert.ok(texts.length>=1&&texts.every(t=>t.startsWith('Fiofka')),texts.join('|'));assert.ok(!texts.some(t=>/Decxus/.test(t)));
+ app.env.DB.raw.prepare('UPDATE pilots SET share_alerts = 0').run();app.env.DB.raw.exec('DELETE FROM alerts');app.posts.length=0;
+ assert.deepEqual(await sendAlerts(app.env,app.fetchImpl),{sent:0,failed:0});assert.equal(app.posts.length,0,'nobody consented, nothing is posted');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM alerts').get().n,0);
+});
+test('migration 0010 adds share_alerts, off for everyone who already connected',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(sql.split('-- Explicit consent for the Discord channel')[0]);db.prepare("INSERT INTO pilots (character_id,name,credentials,share_wing) VALUES (1,'A','x',2)").run();
+ db.exec(await readFile(new URL('../worker/migrations/0010_share_alerts.sql',import.meta.url),'utf8'));assert.equal(db.prepare('SELECT share_alerts FROM pilots').get().share_alerts,0);
+});
+test('Discord alerts: the queries per run stay bounded however many old candidates there are',async()=>{
+ const {sendAlerts,MAX_ALERTS}=await import('../worker/alerts.js');
+ const jobs=Array.from({length:60},(_,i)=>readyJob(i+1));
+ const app=await alertApp({jobs});
+ const count=async()=>{const seen=[],prepare=app.env.DB.prepare;app.env.DB.prepare=q=>{seen.push(q);return prepare.call(app.env.DB,q);};try{return {result:await sendAlerts(app.env,app.fetchImpl),seen};}finally{app.env.DB.prepare=prepare;}};
+ for(let i=0;i<60/MAX_ALERTS+2;i++)await count();
+ const known=app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM alerts').get().n;assert.ok(known>=60,`${known} keys claimed`);
+ const {result,seen}=await count();
+ assert.equal(result.sent,0);assert.ok(seen.length<=8,`${seen.length} queries with ${known} old keys: ${seen.map(q=>q.slice(0,30)).join(' | ')}`);
+ assert.ok(!seen.some(q=>/INSERT OR IGNORE/.test(q)),'old candidates are not written again');
+ // With new events as well, still one lookup per 90 keys and one claim per new post.
+ app.env.DB.raw.exec('DELETE FROM alerts WHERE key LIKE \'job:%\' AND rowid % 2 = 0');
+ const more=await count();assert.equal(more.result.sent,MAX_ALERTS);assert.ok(more.seen.length<=8,String(more.seen.length));
+});
+test('an order that vanishes waits for the hourly order history, then fires the right event once (filled vs expired), and unexplained ones are dropped after a day',async()=>{
+ const day=86400000,at=h=>new Date(Date.now()+h*3600000).toISOString();
+ const o=(order_id,issued,extra={})=>({order_id,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:7,volume_remain:10,volume_total:50,issued,duration:90,...extra});
+ const nearEnd=at(-90*24-0.1);// ran out six minutes ago
+ const options={orders:[o(1,at(-48)),o(2,nearEnd),o(3,nearEnd),o(4,at(-48)),o(5,at(-48))],history:[],cache:{ttl:p=>/orders\/history/.test(p)?3600000:0}};
+ const app=setup(options);await connect(app);
+ const snap=()=>JSON.parse(app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get().snapshot);
+ const resync=async()=>{app.env.DB.raw.prepare('UPDATE pilots SET updated_at = 0, sync_lock_until = 0').run();await syncPilot(id,app.env,app.fetchImpl,{force:true});};
+ const kinds=()=>(snap().events||[]).filter(e=>/^order-end/.test(e.k)).map(e=>`${e.k.split(':')[1]}:${e.kind}`).sort();
+ // Every order vanishes at once while ESI still serves the history cached before they ended.
+ options.orders=[];await resync();
+ assert.deepEqual(kinds(),[],'no guess without the history: order 2 is not called expired because it was near its end');
+ assert.deepEqual(snap().pendingOrders.map(p=>p.order_id).sort(),[1,2,3,4,5]);
+ await resync();assert.deepEqual(kinds(),[],'still waiting while the history is cached');
+ // The history cache runs out and lists what happened.
+ options.history=[o(1,at(-48),{volume_remain:0,state:'expired'}),o(2,nearEnd,{volume_remain:0,state:'expired'}),o(3,nearEnd,{state:'expired'}),o(4,at(-48),{state:'cancelled'})];
+ const row=snap();row.esi.orderHistory.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify(row));
+ await resync();
+ assert.deepEqual(kinds(),['1:order-filled','2:order-filled','3:order-expired'],'filled is filled even close to its end date; cancelled says nothing');
+ assert.deepEqual(snap().pendingOrders.map(p=>p.order_id),[5],'only the unexplained one still waits');
+ await resync();assert.equal(kinds().length,3,'each event once');
+ // A day later it is dropped without an event.
+ const later=snap();later.pendingOrders[0].vanishedAt=Date.now()-day-1000;app.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify(later));
+ await resync();assert.equal(snap().pendingOrders,undefined);assert.equal(kinds().length,3);
+ const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('pendingOrders'));
 });

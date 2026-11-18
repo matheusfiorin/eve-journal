@@ -2,13 +2,17 @@ import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} fr
 import {validateBackup,validatePref} from '../model.js';
 import {history,lastHour} from './activity.js';
 import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
-import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stepKillmails,stepPlanets,diffEvents} from './pilotdata.js';
+import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stepKillmails,stepPlanets,diffEvents,trackOrders} from './pilotdata.js';
 import {sendAlerts} from './alerts.js';
 
 const EVE='https://login.eveonline.com';
 // Unversioned ESI routes answer as they did on the compatibility date sent with each request
-// (developers.eveonline.com/docs/services/esi/overview). Checked against ESI's changelog: none of the routes the
-// Worker uses changed after this date. Move it forward only after reading the changelog again.
+// (developers.eveonline.com/docs/services/esi/overview). Checked against ESI's changelog (read again on
+// 2026-11-18, entries through 2026-09-03): after this date the breaking changes are new endpoints (access lists, mercenary
+// dens, skyhooks, sovereignty, military campaigns, SKINR), characters/{id} and corporations/{id} (which the Worker never
+// reads) and the route/ POST. None touches universe/names, characters/*/{assets, contracts, orders, orders/history,
+// killmails/recent, planets, blueprints, standings, skills, skillqueue}, killmails/ or universe/system_{kills,jumps}; the
+// 2026-01-27 skills changes are non-breaking. Move it forward only after reading the changelog again.
 const ESI='https://esi.evetech.net';
 export const ESI_COMPAT='2025-12-16';
 // Below this many errors (X-ESI-Error-Limit-Remain) or rate-limit tokens (X-Ratelimit-Remaining) left, a sync stops
@@ -187,7 +191,7 @@ async function session(request,env){
 }
 function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {};}}
 function privatePayload(row,sessionRow){
- const {esi,events,names,cursor,...snapshot}=parseSnapshot(row); // ESI's cache hints, alert events and the round-robin cursor are the Worker's bookkeeping
+ const {esi,events,names,cursor,pendingOrders,...snapshot}=parseSnapshot(row); // ESI's cache hints, alert events and the round-robin cursor are the Worker's bookkeeping
  return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...snapshot,lastError:row.last_error};
 }
 // Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
@@ -434,6 +438,8 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
   snapshot.cursor=blocked<0?start:blocked;
   // What changed since the last sync, for the alert pass (kept three days).
   const events=diffEvents(prior,snapshot);
+  const vanished=trackOrders(prior,snapshot).pending;
+  if(vanished.length)snapshot.pendingOrders=vanished;
   if(events.length)snapshot.events=events;
   // Item names the alerts will use (the Worker has no name data): one lookup, only when alerts are on.
   if(env.DISCORD_WEBHOOK_URL){
@@ -573,7 +579,7 @@ async function route(request,env,ctx,fetchImpl){
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
   const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data. What it keeps, and who sees it:</p><ul><li><b>Public:</b> your skill-point total and training queue will be visible on the public two-pilot dashboard, to anyone who opens it. The dashboard works that way, so connecting requires you to agree to it.</li><li><b>Only you, and your wingmate if you tick the second box:</b> wallet, ship, location, assets, industry jobs and mining ledger.</li><li><b>Journal sync:</b> your Logbook entries, goals and settings are stored encrypted on the backend so they sync between your devices. Goals are shared with your wingmate; entries and settings are only yours.</li><li><b>Market scans:</b> once an hour the market pipeline reads the market of the region you are in, so the dashboard can price trades near you. That region is shown only to signed-in pilots, never publicly.</li><li>Refresh tokens are encrypted on the backend. You can disconnect, or use Delete my data on the dashboard to remove everything stored about you.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree that my skill total and training queue are shown publicly on this dashboard. (Required.)</label><label><input type="checkbox" name="wing" value="yes"> Also share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public. (Optional.)</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data. What it keeps, and who sees it:</p><ul><li><b>Public:</b> your skill-point total and training queue will be visible on the public two-pilot dashboard, to anyone who opens it. The dashboard works that way, so connecting requires you to agree to it.</li><li><b>Only you, and your wingmate if you tick the second box:</b> wallet, ship, location, assets, industry jobs and mining ledger. The third box adds your ship's fit, blueprints and planetary colonies.</li><li><b>Only you, never your wingmate:</b> your market orders and their history, contracts, standings and ship losses. They are read to show them to you and to work out alerts.</li><li><b>Journal sync:</b> your Logbook entries, goals and settings are stored encrypted on the backend so they sync between your devices. Goals are shared with your wingmate; entries and settings are only yours.</li><li><b>Market scans:</b> once an hour the market pipeline reads the market of the region you are in, so the dashboard can price trades near you. That region is shown only to signed-in pilots, never publicly.</li><li>Refresh tokens are encrypted on the backend. You can disconnect, or use Delete my data on the dashboard to remove everything stored about you.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree that my skill total and training queue are shown publicly on this dashboard. (Required.)</label><label><input type="checkbox" name="wing" value="yes"> Also share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public. (Optional.)</label><label><input type="checkbox" name="wing3" value="yes"> Also share my ship's fit, blueprints (with where they are) and planetary colonies (with their solar systems) with my wingmate. Needs the box above. (Optional.)</label><label><input type="checkbox" name="alerts" value="yes"> Post my alerts (skill queue, jobs ready, orders, contracts, losses, planet extractors) to the wing's Discord channel. No places are named. (Optional.)</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
@@ -582,7 +588,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
   const state=random(),verifier=random(),stateHash=await hash(state);
-  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(stateHash,await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'},env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`),Date.now()+300000).run();
+  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(stateHash,await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'?(fields.get('wing3')==='yes'?3:2):0,alerts:fields.get('alerts')==='yes'},env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`),Date.now()+300000).run();
   const login=new URL(`${EVE}/v2/oauth/authorize/`);
   login.search=new URLSearchParams({response_type:'code',client_id:env.EVE_CLIENT_ID,redirect_uri:`${url.origin}/auth/callback`,scope:REQUESTED_SCOPES.join(' '),state,code_challenge:await challenge(verifier),code_challenge_method:'S256'});
   return new Response(null,{status:303,headers:{Location:login.href,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state',state,600),'Referrer-Policy':'no-referrer'}});
@@ -600,7 +606,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!tokens.refresh_token)throw new ServiceError('EVE did not return a refresh token. Reconnect the pilot.',502);
   const identity=await verify(tokens.access_token,env,payload.id,fetchImpl);
   const encrypted=await encrypt({accessToken:tokens.access_token,refreshToken:tokens.refresh_token,expires:identity.expires,scopes:identity.scopes},env.TOKEN_ENCRYPTION_KEY,`pilot:${payload.id}`);
-  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing) VALUES (?, ?, ?, 1, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, sync_lock_until = 0, grant_revoked_at = NULL, refresh_after = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing?2:0).run();
+  await env.DB.prepare('INSERT INTO pilots (character_id, name, credentials, share_training, share_wing, share_alerts) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(character_id) DO UPDATE SET name = excluded.name, credentials = excluded.credentials, share_training = 1, share_wing = excluded.share_wing, share_alerts = excluded.share_alerts, sync_lock_until = 0, grant_revoked_at = NULL, refresh_after = 0').bind(payload.id,ALLOWED.get(payload.id),encrypted,payload.wing||0,payload.alerts?1:0).run();
   const bearer=random(),expires=Date.now()+SESSION_MS;
   await env.DB.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').bind(await hash(bearer),payload.id,expires).run();
   await syncPilot(payload.id,env,fetchImpl,{force:true});
@@ -674,7 +680,8 @@ async function route(request,env,ctx,fetchImpl){
   const shown=heads.filter(r=>r.region_id===0||(r.region_id===1&&!(split&&universe))||(r.region_id>2&&(signedIn||HUB_REGIONS.has(r.region_id))));
   // Answer from the row timestamps alone when the browser already has this exact view, before reading megabytes.
   const tag=`W/"${(await hash([split?2:1,signedIn?1:0,...shown.map(r=>`${r.region_id}:${r.updated_at}`),...docs.map(d=>`${d.name}:${d.version}:${d.updated_at}`)].join('|'))).slice(0,27)}"`;
-  const headers={'Cache-Control':`${signedIn?'private':'public'}, max-age=300`,Vary:'Authorization',ETag:tag};
+  // no-cache, not max-age: the browser still revalidates (ETag, 304, no body), so Refresh is never answered from its own cache.
+  const headers={'Cache-Control':`${signedIn?'private':'public'}, no-cache`,Vary:'Authorization',ETag:tag};
   if(etagMatch(request,tag))return notModified(headers);
   const ids=shown.map(r=>r.region_id);
   const rows=ids.length?(await env.DB.prepare(`SELECT region_id, data, updated_at FROM market_snapshots WHERE region_id IN (${ids.map(()=>'?').join(',')}) ORDER BY region_id`).bind(...ids).all()).results:[];
@@ -692,8 +699,9 @@ async function route(request,env,ctx,fetchImpl){
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
    return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),shareLevel:row.share_wing,lastError:row.last_error||null,fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
-    // Consent version 2 also covers ship, its current fit, location, the mining ledger, blueprints and planetary colonies.
-    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null,fit:ops.fit?.value||null,blueprints:ops.blueprints?.value||null,planets:ops.planets?.value||null}:{})};
+    // Consent level 2: ship, location, trail, jobs and the mining ledger. Level 3 adds the fit, blueprints (with where they are) and planets (with their systems).
+    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null}:{}),
+    ...(row.share_wing>=3||row.character_id===s.character_id?{fit:ops.fit?.value||null,blueprints:ops.blueprints?.value||null,planets:ops.planets?.value||null}:{})};
   })});
  }
  if(url.pathname==='/api/contract-items'&&request.method==='GET'){

@@ -15,6 +15,10 @@ export async function json(url, options = {}) {
 // X-User-Agent headers without a CORS preflight before every call, so both go as the query parameters ESI documents
 // for that case (developers.eveonline.com/docs/services/esi/overview and /best-practices). 2025-09-26 is before ESI
 // replaced status/ (2025-11-06) and changed the corporation and character fields this app reads (2026).
+// Checked again on 2026-11-18 against esi.evetech.net/meta/changelog (entries through 2026-09-03). Staying on 2025-09-26 is
+// deliberate: this file still reads status/ (replaced 2025-11-06), characters/{id} (title became corporation_title on
+// 2026-06-09) and corporations/{id} (tax_rate moved, ceo_id/creator_id optional, faction_id renamed, 2026-07-21), and a later date
+// would change those shapes. Moving it needs pilots.js to adopt the new ones; nothing else here changed.
 export const ESI_COMPAT = '2025-09-26';
 const ESI_QUERY = `compatibility_date=${ESI_COMPAT}&user_agent=${encodeURIComponent('Echelon/1.0 (EVE wing console in a browser)')}`;
 export const esi = (path, options = {}) => json(`https://esi.evetech.net/${path}${path.includes('?') ? '&' : '?'}${ESI_QUERY}`, {...options, headers:{Accept:'application/json', ...(options.body ? {'Content-Type':'application/json'} : {})}});

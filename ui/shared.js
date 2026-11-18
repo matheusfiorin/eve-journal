@@ -82,12 +82,14 @@ export function permissionBanner(p, what) {
   return `<div class="alert warn alert--action"><span>Permission not granted for ${esc(list)}. Reconnect ${esc(p.name)} and allow ${what.length > 1 ? 'them' : 'it'}.</span><button type="button" class="small" data-connect="${S.pilots.indexOf(p)}">Reconnect</button></div>`;
 }
 export const noPermission = (p, keys) => p.private ? keys.filter(k => p.ops?.[k] && !p.ops[k].permission) : [];
-// Why a wingmate's shared data is thin: an older consent (level 1 shares only wallet and assets) or a failing sync.
-export function wingNote(p) {
+// Why a wingmate's shared data is thin: an older consent or a failing sync. Level 1 shares only wallet and assets, level 2 adds
+// ship, location, jobs and mining, level 3 the fit, blueprints and planets; `need` is the level the screen wants.
+export function wingNote(p, need = 2) {
   const w = !p.private && S.wing.get(p.id);
   if (!w?.sharing) return '';
   if (w.lastError) return `<p class="alert warn">${esc(p.name)}’s last sync failed: ${esc(w.lastError)}</p>`;
-  if (w.shareLevel < 2) return `<p class="alert muted">${esc(p.name)} shares skills, wallet and assets. To share ship, location, jobs and mining too, ${esc(p.name)} reconnects once with the wing box ticked.</p>`;
+  if (w.shareLevel < 2) return `<p class="alert muted">${esc(p.name)} shares skills, wallet and assets. To share ${need > 2 ? 'ship, location, jobs, mining, fit, blueprints and planets' : 'ship, location, jobs and mining'} too, ${esc(p.name)} reconnects once with ${need > 2 ? 'both wing boxes' : 'the wing box'} ticked.</p>`;
+  if (w.shareLevel < need) return `<p class="alert muted">${esc(p.name)} shares ship, location, jobs and mining. To share the fit, blueprints and planets too, ${esc(p.name)} reconnects once and ticks the third box.</p>`;
   return '';
 }
 export function head(p, index, extra = '') {

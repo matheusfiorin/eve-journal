@@ -109,19 +109,28 @@ export async function stepPlanets(list, old, {get, room, now = Date.now()}) {
 // ── Events: what changed between two syncs (no ESI calls), kept three days for the alert pass ──
 const DAY = 86400000;
 const DONE = new Set(['finished', 'finished_issuer', 'finished_contractor']);
-export function diffEvents(prior, next, now = Date.now()) {
-  const ops = prior?.operations || {}, cur = next.operations || {}, out = [];
-  const oldOrders = ops.orders?.value, newOrders = cur.orders?.value;
-  if (Array.isArray(oldOrders) && Array.isArray(newOrders)) {
-    const live = new Set(newOrders.map(o => o.order_id)), history = cur.orderHistory?.value || [];
-    for (const o of oldOrders) {
-      if (live.has(o.order_id)) continue;
-      const h = history.find(x => x.order_id === o.order_id);
-      // History lags a little: without it, an order that was within an hour of running out is taken to have expired.
-      const how = h ? (h.state === 'cancelled' ? null : h.volume_remain === 0 ? 'filled' : 'expired') : Date.parse(o.issued) + o.duration * DAY <= now + 3600000 ? 'expired' : null;
-      if (how) out.push({k: `order-end:${o.order_id}`, kind: 'order-' + how, type: o.type_id, buy: Boolean(o.is_buy_order), at: now});
-    }
+// An order that left the live list waits in `pending` (with when it vanished) until the order history lists it, because ESI
+// caches orders/history/ for an hour: reading the history only on the run the order vanished would lose a fill or label it an
+// expiry. Waiting costs no request (the history is read on its own schedule), where ignoring its cache would cost one per
+// pending order run. Cancelled ones are dropped, and so is anything still unexplained after a day.
+export const PENDING_ORDER_TTL = DAY;
+export function trackOrders(prior, next, now = Date.now()) {
+  const oldOrders = prior?.operations?.orders?.value, newOrders = next.operations?.orders?.value, held = prior?.pendingOrders || [];
+  if (!Array.isArray(oldOrders) || !Array.isArray(newOrders)) return {events: [], pending: held};
+  const live = new Set(newOrders.map(o => o.order_id)), history = new Map((next.operations?.orderHistory?.value || []).map(h => [h.order_id, h]));
+  const waiting = new Map(held.map(o => [o.order_id, o]));
+  for (const o of oldOrders) if (!live.has(o.order_id) && !waiting.has(o.order_id)) waiting.set(o.order_id, {order_id: o.order_id, type_id: o.type_id, is_buy_order: Boolean(o.is_buy_order), vanishedAt: now});
+  const events = [], pending = [];
+  for (const o of waiting.values()) {
+    if (live.has(o.order_id)) continue;
+    const h = history.get(o.order_id);
+    if (h) { if (h.state !== 'cancelled') events.push({k: `order-end:${o.order_id}`, kind: h.volume_remain === 0 ? 'order-filled' : 'order-expired', type: o.type_id, buy: Boolean(o.is_buy_order), at: now}); }
+    else if (now - o.vanishedAt < PENDING_ORDER_TTL) pending.push(o);
   }
+  return {events, pending};
+}
+export function diffEvents(prior, next, now = Date.now()) {
+  const ops = prior?.operations || {}, cur = next.operations || {}, out = trackOrders(prior, next, now).events;
   const oldContracts = ops.contracts?.value, newContracts = cur.contracts?.value;
   if (Array.isArray(oldContracts) && Array.isArray(newContracts)) {
     const before = new Map(oldContracts.map(c => [c.contract_id, c.status]));

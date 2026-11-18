@@ -26,9 +26,9 @@ INSERT INTO market_docs (name, version, data, updated_at)
     MAX(m.updated_at, COALESCE(u.updated_at, 0))
   FROM market_snapshots m LEFT JOIN market_snapshots u ON u.region_id = 1 WHERE m.region_id = 0
   ON CONFLICT(name) DO NOTHING;
-UPDATE market_snapshots SET data = json_remove(data, '$.risk', '$.traffic', '$.activity')
-  WHERE region_id = 0 AND EXISTS (SELECT 1 FROM market_docs WHERE name = 'activity');
-UPDATE market_snapshots SET data = json_remove(data, '$.ores', '$.combat', '$.skills')
-  WHERE region_id = 0 AND EXISTS (SELECT 1 FROM market_docs WHERE name = 'universe');
+-- Deliberately NOT stripped from region 0 here: deploy applies migrations before `wrangler deploy`, so the previous Worker
+-- would still serve /api/market with those keys missing. (0007 was never deployed, so this file was edited, not superseded.)
+-- The new Worker drops the keys when the pipeline next writes region 0, and a leftover copy is harmless: joinObjects puts
+-- the activity/universe documents last, and pipelineHistory adopts only data newer than the cron's own.
 -- ESI answered a pilot's sync with 429 or 420: no ESI request for that pilot until this time (Retry-After).
 ALTER TABLE pilots ADD COLUMN esi_after INTEGER NOT NULL DEFAULT 0;

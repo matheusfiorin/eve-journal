@@ -10,7 +10,7 @@ import {SLOTS, fitGroups, fitCounts, eft} from '../../fit.js';
 import {S, mine, wingmate, ordered, summary, assetCats, opsOf, viaWing} from '../state.js';
 import {name, named} from '../esi.js';
 import {loadMarket} from '../marketdata.js';
-import {$, esc, isk, when, day, left, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert, permissionBanner, toast, openDrawer} from '../shared.js';
+import {$, esc, isk, when, day, left, count, fact, format, plural, portrait, corpLine, connectButtons, trainingAlert, permissionBanner, wingNote, toast, openDrawer} from '../shared.js';
 import {mapGraph, route} from '../routes.js';
 import {haulSaved} from '../prefs.js';
 
@@ -165,7 +165,7 @@ const lines = list => list.reduce((out, m) => { const last = out.at(-1); if (las
 function fitCard(p, own) {
   const ops = opsOf(p), ship = ops.ship?.value, f = ops.fit, who = own ? 'Current fit' : `${p.name}’s current fit`, id = `fit-title-${keyOf(p)}`;
   const wrap = body => `<section class="panel fit-card" data-pilot="${esc(keyOf(p))}" aria-labelledby="${id}"><div class="panel__head"><h2 id="${id}">${esc(who)}</h2>${ship ? `<p class="panel__sub">${esc(name(ship.ship_type_id))}${ship.ship_name ? ` · ${esc(ship.ship_name)}` : ''}</p>` : ''}</div>${body}</section>`;
-  if (!own && !f?.value) return '';
+  if (!own && !f?.value) return !p.private && S.wing.get(p.id)?.shareLevel === 2 ? wrap(`<p class="hint">${esc(p.name)}’s fit is not shared with the wing.</p>${wingNote(p, 3)}`) : '';
   if (!f) return wrap(p.refreshing ? '<p class="hint">Loading…</p>' : '<p class="hint">Not synced yet. Press Refresh.</p>');
   if (!f.permission) return wrap(permissionBanner(p, ['your current fit']));
   if (!f.value || !ship) return wrap('<p class="hint">The fit appears after the next asset refresh.</p>');

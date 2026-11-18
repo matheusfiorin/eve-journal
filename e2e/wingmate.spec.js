@@ -24,3 +24,16 @@ test('an older wing consent and a failing wingmate sync say why his data is thin
  await expect(page.locator('#ledger-content .alert.warn')).toContainText('Decxus’s last sync failed: EVE authorization expired or was revoked.');
  expect(errors).toEqual([]);
 });
+test('A wingmate who agreed before the third box shares ship and jobs, but not the fit, blueprints or planets, and the notes say what to tick',async({page})=>{
+ const {errors}=await mockApp(page,{connected:'first',wingLevel:2});await openApp(page);
+ const note='Decxus shares ship, location, jobs and mining. To share the fit, blueprints and planets too, Decxus reconnects once and ticks the third box.';
+ await tab(page,'planets');
+ const colonies=page.locator('#planets .colony-group[data-pilot="decxus"]');
+ await expect(colonies).toContainText('colonies are not shared with the wing');await expect(colonies).toContainText(note);await expect(colonies.locator('[data-colony]')).toHaveCount(0);
+ await tab(page,'industry');
+ const library=page.locator('#industry section.panel:has(#bplib-title)');
+ await expect(library).toContainText('Decxus’s blueprints are not shared with the wing');await expect(library).toContainText(note);
+ await tab(page,'bridge');
+ const fit=page.locator('#bridge .fit-card[data-pilot="decxus"]');await expect(fit).toContainText('fit is not shared with the wing');await expect(fit).toContainText(note);
+ expect(errors).toEqual([]);
+});
