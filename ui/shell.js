@@ -10,7 +10,7 @@ export const DESTS = [
   {id:'bridge', label:'Bridge', key:'b', views:[{id:'bridge', slug:'', label:'Bridge'}]},
   {id:'wing', label:'Wing', key:'w', views:[{id:'strengths', slug:'crew', label:'Crew map'}, {id:'goals', slug:'goals', label:'Goals'}]},
   {id:'pilot', label:'Pilot', key:'p', sep:true, views:[{id:'training', slug:'training', label:'Training'}, {id:'skills', slug:'skills', label:'Skills'}, {id:'clones', slug:'clones', label:'Clones'}]},
-  {id:'earn', label:'Earn', key:'e', views:[{id:'industry', slug:'build', label:'Build'}, {id:'mining', slug:'mine', label:'Mine'}, {id:'exploration', slug:'explore', label:'Explore'}, {id:'market', slug:'trade', label:'Trade'}, {id:'jobs', slug:'jobs', label:'Jobs'}]},
+  {id:'earn', label:'Earn', key:'e', views:[{id:'industry', slug:'build', label:'Build'}, {id:'mining', slug:'mine', label:'Mine'}, {id:'exploration', slug:'explore', label:'Explore'}, {id:'market', slug:'trade', label:'Trade'}, {id:'jobs', slug:'jobs', label:'Jobs'}, {id:'planets', slug:'planets', label:'Planets'}]},
   {id:'navigate', label:'Navigate', key:'n', views:[{id:'map', slug:'map', label:'Star map'}, {id:'hauling', slug:'haul', label:'Haul plan'}]},
   {id:'ledger', label:'Ledger', key:'l', sep:true, views:[{id:'ledger', slug:'', label:'Ledger'}]},
   {id:'logbook', label:'Logbook', key:'j', views:[{id:'logbook', slug:'', label:'Logbook'}]}
@@ -76,7 +76,7 @@ export function boot() {
   setTimeout(() => document.body.classList.remove('booting'), 1200);
 }
 
-const SHORTCUTS = [['Ctrl K', 'Search or jump anywhere'], ['G then B W P E N L J', 'Bridge, Wing, Pilot, Earn, Navigate, Ledger, Logbook'], ['1–4', 'Switch view inside the current screen'],
+const SHORTCUTS = [['Ctrl K', 'Search or jump anywhere'], ['G then B W P E N L J', 'Bridge, Wing, Pilot, Earn, Navigate, Ledger, Logbook'], ['1–9', 'Switch view inside the current screen'],
   ['/', 'Focus the search on this view'], ['J K', 'Next or previous row'], ['R', 'Refresh EVE data'], ['[', 'Collapse or expand the navigation'], ['?', 'Show these shortcuts'], ['Esc', 'Close the open dialog']];
 export const openShortcuts = () => openDrawer({title:'Keyboard shortcuts', body:`<dl class="keys">${SHORTCUTS.map(([k, what]) => `<div><dt>${k.split(' ').map(x => x === 'then' ? '<span>then</span>' : `<kbd>${x}</kbd>`).join(' ')}</dt><dd>${what}</dd></div>`).join('')}</dl>`});
 function openMore() {

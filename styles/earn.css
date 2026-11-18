@@ -175,3 +175,21 @@
   .orow__status{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center}
 }
 @media (pointer:coarse){ .orders__history>summary{min-height:44px} }
+
+/* Planets: one card per colony, in the pilot's colour. */
+.colonies{list-style:none;margin:0;padding:0;display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.colony{display:grid;gap:6px;align-content:start;padding:12px;border:1px solid var(--line);border-left:2px solid var(--pilot);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.colony__head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.colony__meta{margin:0;font-size:var(--fs-xs);color:var(--text-muted)}
+.colony__ext{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.colony__ext li{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:32px}
+.colony__ext small{display:block;font-size:var(--fs-xs);color:var(--text-muted)}
+.colony__store{display:grid;gap:4px}.colony__store small{font-size:var(--fs-xs);color:var(--text-muted)}
+.colony-group .panel__head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.brokers{display:grid;gap:8px}
+.brokers__list{list-style:none;margin:0;padding:0;display:grid;gap:6px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
+.brokers__list li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.brokers__list small{display:block;font-size:var(--fs-xs);color:var(--text-muted)}
+.bplib{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.bplib li{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface-sunk);min-height:44px}
+.bplib small{display:block;font-size:var(--fs-xs);color:var(--text-muted)}

@@ -53,24 +53,26 @@ export function hauls(market, {salesTax, cargo, volumeOf, budget = Infinity, lim
   return out.sort((a,b) => b.profit - a.profit).slice(0, limit);
 }
 // Station trading: buy order at the top bid, relist at the lowest ask, inside one station.
-export function stationTrades(market, {salesTax, brokerFee, capture = 0.05, budget = Infinity, limit = 60}) {
+// brokerAt(loc) gives the broker fee at one station (standings differ per owner); without it brokerFee applies everywhere.
+export function stationTrades(market, {salesTax, brokerFee, brokerAt, capture = 0.05, budget = Infinity, limit = 60}) {
   const out = [];
   for (const [type, item] of market.items) for (const sell of item.sells) {
     const buy = item.buys.find(b => b.loc === sell.loc);
     if (!buy || buy.price >= sell.price) continue;
-    const unit = sell.price * (1 - salesTax - brokerFee) - buy.price * (1 + brokerFee);
+    const fee = brokerAt ? brokerAt(sell.loc) : brokerFee;
+    const unit = sell.price * (1 - salesTax - fee) - buy.price * (1 + fee);
     if (unit <= 0) continue;
     // shortcut: assumes we fill `capture` of the scanned regions' daily volume; real fills depend on competition.
     // Capital tied up is one day's worth of buy orders; a small wallet caps how many units you can hold.
-    const units = Math.min(item.daily * capture, buy.volume, sell.volume, Math.floor(budget / (buy.price * (1 + brokerFee))));
+    const units = Math.min(item.daily * capture, buy.volume, sell.volume, Math.floor(budget / (buy.price * (1 + fee))));
     if (!(units > 0)) continue;
-    out.push({type, loc:sell.loc, buy:buy.price, sell:sell.price, unit, margin:unit / buy.price, volume:item.daily, units, capital:units * buy.price * (1 + brokerFee), daily:unit * units});
+    out.push({type, loc:sell.loc, buy:buy.price, sell:sell.price, unit, margin:unit / buy.price, volume:item.daily, units, capital:units * buy.price * (1 + fee), daily:unit * units});
   }
   return out.sort((a,b) => b.daily - a.daily).slice(0, limit);
 }
 // One manufacturing run at ME 0: materials bought at the cheapest scanned ask, product listed at the best ask.
 // Job cost uses Industry's rates; pass alpha for an alpha clone's extra tax.
-export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, costIndex = 0, alpha = false}) {
+export function manufacturing(market, recipes, {salesTax, brokerFee, brokerAt, adjusted, costIndex = 0, alpha = false}) {
   const cheapest = type => market.items.get(type)?.sells[0];
   const out = [];
   for (const [product, r] of Object.entries(recipes || {})) {
@@ -84,7 +86,7 @@ export function manufacturing(market, recipes, {salesTax, brokerFee, adjusted, c
     }
     if (missing) continue;
     const job = eiv * (costIndex + SCC.manufacturing + NPC_FACILITY_TAX + (alpha ? ALPHA_TAX : 0)); // shortcut: NPC stations only; rigged structures differ.
-    const revenue = sell.price * r.q * (1 - salesTax - brokerFee);
+    const revenue = sell.price * r.q * (1 - salesTax - (brokerAt ? brokerAt(sell.loc) : brokerFee));
     const profit = revenue - materials - job;
     out.push({type:Number(product), materials, job, revenue, profit, margin:profit / (materials + job), capital:materials + job, loc:sell.loc, daily:market.items.get(Number(product)).daily});
   }

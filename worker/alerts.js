@@ -34,6 +34,11 @@ export function candidates(pilots, {now = Date.now(), outbid = () => null} = {})
       const end = contractDue(c);
       if (end !== null && end > now && end - now < 86400000) out.push({key: `contract-expiring:${id}:${c.contract_id}`, text: `${who}'s ${contract(c.type)} expires in ${HOURS(end - now)}`});
     }
+    // An extractor that ran out in the last three days; one message per planet and expiry, and no place name.
+    for (const pl of ops.planets?.value?.planets || []) {
+      const gone = (pl.pins?.ext || []).map(x => Date.parse(x[1])).filter(t => t <= now && now - t < 3 * 86400000);
+      if (gone.length) out.push({key: `extractor:${id}:${pl.id}:${Math.max(...gone)}`, text: `${who}'s extractor on a ${String(pl.type || 'planetary').replace(/_/g, ' ')} planet expired`});
+    }
     for (const e of snap.events || []) {
       const item = nameOf(e.type) || 'an item';
       if (e.kind === 'order-filled' || e.kind === 'order-expired') out.push({key: `${e.k}:${id}`, text: `${who}'s ${e.buy ? 'buy' : 'sell'} order for ${item} ${e.kind === 'order-filled' ? 'filled' : 'expired'}`});

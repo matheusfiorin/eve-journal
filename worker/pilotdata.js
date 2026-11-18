@@ -22,16 +22,19 @@ export function compactContracts(list) {
   const open = rows.filter(c => ACTIVE.has(c.status)), rest = rows.filter(c => !ACTIVE.has(c.status)).sort((a, b) => Date.parse(b.date_issued) - Date.parse(a.date_issued));
   return [...open, ...rest].slice(0, MAX_CONTRACTS);
 }
-// One row per blueprint type: [type, originals, copies, best ME, best TE, runs left across copies]. quantity -1 is an original, -2 a copy.
+// One row per blueprint type: [type, originals, copies, ME, TE, runs left across copies, location?]. quantity -1 is an original, -2 a copy.
+// ME, TE and the location are those of the blueprint the pilot would build with: the best original, else the best copy
+// (an original has unlimited runs, and a copy's ME says nothing about it). The location is the item's location_id.
 export function compactBlueprints(list) {
-  const by = new Map();
+  const by = new Map(), better = (a, b) => !a || (b.material_efficiency || 0) > (a.material_efficiency || 0) || ((b.material_efficiency || 0) === (a.material_efficiency || 0) && (b.time_efficiency || 0) > (a.time_efficiency || 0));
   for (const b of list) {
-    const row = by.get(b.type_id) || [b.type_id, 0, 0, 0, 0, 0], copy = b.quantity === -2 || (b.runs > 0 && b.quantity !== -1);
-    if (copy) { row[2]++; row[5] += Math.max(0, b.runs || 0); } else row[1] += Math.max(1, b.quantity || 1);
-    row[3] = Math.max(row[3], b.material_efficiency || 0); row[4] = Math.max(row[4], b.time_efficiency || 0);
-    by.set(b.type_id, row);
+    const e = by.get(b.type_id) || {id: b.type_id, orig: 0, copies: 0, runs: 0}, copy = b.quantity === -2 || (b.runs > 0 && b.quantity !== -1);
+    if (copy) { e.copies++; e.runs += Math.max(0, b.runs || 0); if (better(e.bestCopy, b)) e.bestCopy = b; } else { e.orig += Math.max(1, b.quantity || 1); if (better(e.bestOrig, b)) e.bestOrig = b; }
+    by.set(b.type_id, e);
   }
-  return {count: list.length, types: [...by.values()].slice(0, MAX_BLUEPRINTS)};
+  const types = [...by.values()].slice(0, MAX_BLUEPRINTS).map(e => { const b = e.bestOrig || e.bestCopy;
+    return [e.id, e.orig, e.copies, b.material_efficiency || 0, b.time_efficiency || 0, e.runs, ...(Number.isSafeInteger(b.location_id) ? [b.location_id] : [])]; });
+  return {count: list.length, types};
 }
 export const compactStandings = list => list.filter(s => Number.isFinite(s.standing)).sort((a, b) => Math.abs(b.standing) - Math.abs(a.standing)).slice(0, MAX_STANDINGS).map(s => [s.from_id, s.from_type, Math.round(s.standing * 100) / 100]);
 
@@ -72,15 +75,23 @@ export async function stepKillmails(list, old, {id, get, room}) {
 }
 
 // ── Planets ──
-// Pins reduced to what a planner needs: extractors (product, expiry, heads), factories (schematic), stored goods.
+// Base hold of the pins that store goods (m3): storage facilities 12,000, launchpads 10,000, command centres 500. The pin data gives no capacity.
+const hold = new Map([...[2257, 2535, 2536, 2541, 2558, 2560, 2561, 2562].map(t => [t, 12000]), ...[2256, 2542, 2543, 2544, 2552, 2555, 2556, 2557].map(t => [t, 10000]),
+  ...[2129, 2130, 2131, 2132, 2133, 2134, 2135, 2136, 2137, 2138, 2139, 2140, 2141, 2142, 2143, 2144, 2145, 2146, 2147, 2148, 2149, 2150, 2151, 2152, 2153, 2154, 2155, 2156, 2157, 2158, 2159, 2160, 2254, 2524, 2525, 2533, 2534, 2549, 2550, 2551, 2574, 2576, 2577, 2578, 2581, 2582, 2585, 2586].map(t => [t, 500])]);
+// Pins reduced to what a planner needs: extractors [product, expiry, heads, quantity per cycle, cycle seconds] (the last two when known),
+// factories (schematic), goods held in storage pins with their combined hold, and everything stored.
 export function summarizePins(planet) {
-  const ext = [], fac = [], store = new Map();
+  const ext = [], fac = [], store = new Map(), vault = new Map();
+  let cap = 0;
   for (const pin of planet.pins || []) {
-    if (pin.extractor_details) ext.push([pin.extractor_details.product_type_id, pin.expiry_time || null, pin.extractor_details.heads?.length || 0]);
+    const x = pin.extractor_details;
+    if (x) ext.push([x.product_type_id, pin.expiry_time || null, x.heads?.length || 0, ...(num(x.qty_per_cycle) !== undefined && num(x.cycle_time) > 0 ? [x.qty_per_cycle, x.cycle_time] : [])]);
     else if (pin.factory_details) fac.push(pin.factory_details.schematic_id);
-    for (const c of pin.contents || []) store.set(c.type_id, (store.get(c.type_id) || 0) + (c.amount || 0));
+    const room = hold.get(pin.type_id);
+    if (room) cap += room;
+    for (const c of pin.contents || []) { store.set(c.type_id, (store.get(c.type_id) || 0) + (c.amount || 0)); if (room) vault.set(c.type_id, (vault.get(c.type_id) || 0) + (c.amount || 0)); }
   }
-  return {ext: ext.slice(0, 20), fac: fac.slice(0, 20), store: [...store].slice(0, 20), links: Array.isArray(planet.links) ? planet.links.length : 0};
+  return {ext: ext.slice(0, 20), fac: fac.slice(0, 20), store: [...store].slice(0, 20), links: Array.isArray(planet.links) ? planet.links.length : 0, ...(cap ? {cap, vault: [...vault].slice(0, 20)} : {})};
 }
 export const PIN_REFRESH = 45 * 60000;
 /** list: ESI's planet list, or undefined when it did not change. Pins are read for the planets whose summary is oldest, while the budget allows. */

@@ -692,8 +692,8 @@ async function route(request,env,ctx,fetchImpl){
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
    return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),shareLevel:row.share_wing,lastError:row.last_error||null,fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
-    // Consent version 2 also covers ship, its current fit, location and the mining ledger.
-    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null,fit:ops.fit?.value||null}:{})};
+    // Consent version 2 also covers ship, its current fit, location, the mining ledger, blueprints and planetary colonies.
+    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null,fit:ops.fit?.value||null,blueprints:ops.blueprints?.value||null,planets:ops.planets?.value||null}:{})};
   })});
  }
  if(url.pathname==='/api/contract-items'&&request.method==='GET'){

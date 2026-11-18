@@ -40,5 +40,6 @@ export const markup = {
    ${tf('Cargo m³', '<input id="market-cargo" type="number" min="1" step="100" value="5000" inputmode="numeric">')}
    ${tf('Budget', '<input id="market-budget" type="text" data-isk placeholder="Your wallet" inputmode="decimal" autocomplete="off"><span class="isk-echo"></span>')}
    ${sortBox('id="market-sort"', [['', 'Best first']], 'tf--m')}
-   ${filterBox('id="market-filter"', 'items')}`), 'id="market-status"', 'id="market-content"')
+   ${filterBox('id="market-filter"', 'items')}`), 'id="market-status"', 'id="market-content"'),
+  planets:`<div class="earn">${bar('Planet options', filterBox('id="planets-filter"', 'colonies'))}<p id="planets-status" class="earn-status" role="status"></p><p id="planets-none" class="hint" hidden>No colonies match this filter.</p><div id="planets-content" class="earn-content">${skeleton('Loading…')}</div></div>`
 };

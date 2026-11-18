@@ -32,13 +32,16 @@ export function researchCost(eiv, from, to, index, alpha = false) {
   for (let n = from + 1; n <= to; n++) multiplier += RESEARCH_SECONDS[n] / 105;
   return eiv * 0.02 * multiplier * (index + NPC_FACILITY_TAX + SCC.research + (alpha ? ALPHA_TAX : 0));
 }
-export function buildSeconds(base, l = {}) {
-  return base * (1 - 0.04 * (l.industry || 0)) * (1 - 0.03 * (l.advancedIndustry || 0));
+// te: the blueprint's time efficiency in percent (0-20), which shortens the job by that much.
+export function buildSeconds(base, l = {}, te = 0) {
+  return base * (1 - 0.04 * (l.industry || 0)) * (1 - 0.03 * (l.advancedIndustry || 0)) * (1 - te / 100);
 }
 
 // Price one starter blueprint end to end: research to the target ME, then run it for as long as the market absorbs it.
 // skillOf(id) gives the pilot's active level for a skill type, or undefined when skills are unknown.
-export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0, levels = {}, alpha = false, capture = 0.05, skillOf, budget}) {
+// owned(bp) gives the pilot's own blueprint for it ({kind:'bpo'|'bpc', me, te, runs}) or nothing. An original is not bought and
+// is only researched up to the target; a copy is not bought or researched and limits the batch to its runs.
+export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0, levels = {}, alpha = false, capture = 0.05, skillOf, budget, owned}) {
   const product = book.items.get(s.type);
   if (!product?.sells.length) return null;
   const region = loc => book.stations.get(loc)?.region;
@@ -50,7 +53,8 @@ export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0,
   const bill = bills[0];
   if (!bill) return null;
   const ask = type => bill.asks[s.m.findIndex(([t]) => t === type)].price;
-  const me = researchTarget(s.rank);
+  const own = owned?.(s.bp) || null, copy = own?.kind === 'bpc', price = own ? 0 : s.price, te = own?.te || 0;
+  const from = own?.me || 0, me = copy ? from : Math.max(from, researchTarget(s.rank)), maxRuns = copy ? Math.max(1, own.runs || 1) : Infinity;
   const perUnit = s.t / s.q;
   // Sell where the item trades most. A thin market's lowest ask is often a wishful listing, so never count on
   // more than 15% above the 7-day average price.
@@ -59,33 +63,33 @@ export function evaluate(s, {book, adjusted, fees, index = 0, researchIndex = 0,
   const average = product.avgByRegion?.[hub];
   const sellPrice = average ? Math.min(sell.price, average * 1.15) : sell.price;
   const daily = product.byRegion?.[hub] ?? product.daily;
-  const capacity = slots(levels).build * 86400 / buildSeconds(perUnit, levels);
+  const capacity = slots(levels).build * 86400 / buildSeconds(perUnit, levels, te);
   const eiv = s.m.reduce((t, [type, qty]) => t + qty * (adjusted.get(type) || 0), 0);
   const jobFee = eiv * (index + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0)) / s.q;
-  const revenue = sellPrice * (1 - fees.salesTax - fees.brokerFee);
-  const research = {me, seconds:researchTime(s.rank, 0, me, levels), cost:researchCost(eiv, 0, me, researchIndex, alpha)};
+  const revenue = sellPrice * (1 - fees.salesTax - (fees.brokerAt ? fees.brokerAt(sell.loc) : fees.brokerFee));
+  const research = {me, from, seconds:researchTime(s.rank, from, me, levels), cost:researchCost(eiv, from, me, researchIndex, alpha)};
   const trend = average ? sell.price / average - 1 : null;
   const missing = skillOf ? (s.sk || []).filter(([id, level]) => (skillOf(id) || 0) < level) : [];
   // Batch about a day of output per job (at least one run) so ME rounding works for us.
   const at = unitsPerDay => {
-    const runs = Math.max(1, Math.ceil(unitsPerDay / s.q));
+    const runs = Math.min(maxRuns, Math.max(1, Math.ceil(unitsPerDay / s.q)));
     const materials = level => s.m.reduce((t, [type, qty]) => t + materialsFor(qty, runs, level) * ask(type), 0) / (runs * s.q);
     const profit = revenue - materials(me) - jobFee, profitDay = profit * unitsPerDay;
-    return {unitsPerDay, runs, materials, profit, profitDay, invest:s.price + research.cost + (materials(me) + jobFee) * runs * s.q};
+    return {unitsPerDay:Math.min(unitsPerDay, runs * s.q), runs, materials, profit, profitDay, invest:price + research.cost + (materials(me) + jobFee) * runs * s.q};
   };
   let plan = at(Math.min(daily * capture, capacity)), capital = false;
   // A small wallet buys fewer runs: output drops to what the money left after the blueprint and research covers.
   if (budget >= 0 && plan.invest > budget) {
-    const cash = budget - s.price - research.cost, perRun = (plan.materials(me) + jobFee) * s.q;
+    const cash = budget - price - research.cost, perRun = (plan.materials(me) + jobFee) * s.q;
     const runs = Math.floor(cash / perRun);
     if (runs >= 1) { plan = at(Math.min(plan.unitsPerDay, runs * s.q)); capital = true; }
   }
   const {unitsPerDay, runs, materials, profit, profitDay, invest} = plan;
   const flags = [daily < 10 && 'thin', trend > 0.15 && 'spike', product.sells.length >= 10 && 'crowded', missing.length && 'skills', unitsPerDay < 1 && 'slow', profit / revenue < 0.1 && 'margin', capital && 'capital'].filter(Boolean);
-  return {...s, me, research, unitsPerDay, runs, revenue, sellPrice, sell, materialsRegion:bill.r, bill:s.m.map(([type, qty], i) => ({type, qty:materialsFor(qty, runs, me), price:bill.asks[i].price, loc:bill.asks[i].loc})),
+  return {...s, price, listPrice:s.price, owned:own, me, research, unitsPerDay, runs, revenue, sellPrice, sell, materialsRegion:bill.r, bill:s.m.map(([type, qty], i) => ({type, qty:materialsFor(qty, runs, me), price:bill.asks[i].price, loc:bill.asks[i].loc})),
     materialsAt:bill.asks[s.m.reduce((best, [, qty], i) => qty * bill.asks[i].price > s.m[best][1] * bill.asks[best].price ? i : best, 0)].loc,
     materialCost:materials(me), jobFee, profit, profitAtZero:revenue - materials(0) - jobFee, margin:profit / revenue, profitDay,
-    payback:profitDay > 0 ? (s.price + research.cost) / profitDay + research.seconds / 86400 : Infinity,
+    payback:profitDay > 0 ? (price + research.cost) / profitDay + research.seconds / 86400 : Infinity,
     invest, daily, listings:product.sells.length, trend, missing, flags};
 }
 // Profitable picks you can afford and build first; risky markets count for less.
@@ -134,4 +138,18 @@ const SKILL_PLAN = [
 export function nextSkills(l, alpha, count = 4) {
   return SKILL_PLAN.filter(([key, level, omega]) => (l[key] || 0) < level && !(omega && alpha)).slice(0, count)
     .map(([key, level, omega, why]) => ({key, from:l[key] || 0, level, omega, why}));
+}
+
+// Who builds what across the wing. crew: [{ranked, slots, budget}] in priority order (each ranked with that pilot's own
+// blueprints). A product goes first to a pilot who already owns its blueprint, then the rest are filled in priority order;
+// nobody gets a product another pilot already has, so they never undercut each other.
+export function wingAssign(crew) {
+  const taken = new Set(), plans = crew.map(() => ({chosen:[], spent:0, profitDay:0}));
+  const fill = (only) => crew.forEach((c, i) => {
+    const plan = plans[i], got = portfolio(c.ranked.filter(x => !taken.has(x.bp) && (!only || x.owned)), {slots:c.slots - plan.chosen.length, budget:(c.budget ?? Infinity) - plan.spent});
+    for (const x of got.chosen) taken.add(x.bp);
+    plan.chosen.push(...got.chosen); plan.spent += got.spent; plan.profitDay += got.profitDay;
+  });
+  fill(true); fill(false);
+  return plans;
 }

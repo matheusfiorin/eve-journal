@@ -2,15 +2,18 @@
 // Every view: a sticky toolbar, a summary (at most three figures), one ranked, sortable list, and details in the drawer.
 import {levelOf} from '../../model.js';
 import {fees, hauls, stationTrades, manufacturing} from '../../market.js';
-import {skillLevels, isAlpha, slots, evaluate, rank, portfolio, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from '../../industry.js';
+import {skillLevels, isAlpha, slots, evaluate, rank, wingAssign, stage, nextSkills, SCC, NPC_FACILITY_TAX, ALPHA_TAX} from '../../industry.js';
+import {owned as ownedMap, ownedLabel, library} from '../../blueprints.js';
 import {SHIPS, SKILL, yieldRate, holdOf, canFly, oreValue, sites, ledger} from '../../mining.js';
 import {plan as routePlan} from '../../hauling.js';
 import {BANDS, rankSystems, visitedMap, nextSkills as exploreSkills, explorerFor, shortcuts} from '../../exploration.js';
 import {secLight} from '../../mapview.js';
 import {facilities, nearest, secShown, secClass, dotlanSystem, dotlanRoute} from '../../route.js';
-import {S, ROMAN, mine, wingmate, summary} from '../state.js';
-import {esi, json, name} from '../esi.js';
-import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho} from '../shared.js';
+import {S, ROMAN, mine, wingmate, summary, ordered, opsOf} from '../state.js';
+import {esi, json, name, resolveNames, isStation} from '../esi.js';
+import {brokerFor, brokerNote} from '../brokers.js';
+import {render as renderPlanets, wire as wirePlanets} from './planets.js';
+import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho, permissionBanner, wingNote} from '../shared.js';
 import {explored, markExplored} from '../prefs.js';
 import {ordersSection} from '../ordersview.js';
 import {mapGraph, route, routeCache, routeIds, sendable, autopilotButton, legHtml, systemOptions, regionName} from '../routes.js';
@@ -39,11 +42,17 @@ function table(view, label, cols, head, rows) {
 }
 const row = (i, find, cells, {dim, attrs = ''} = {}) => `<div class="rows__row${dim ? ' is-dim' : ''}" role="row" data-row tabindex="0" data-pick="${i}" data-find="${esc(find.toLowerCase())}" style="--i:${i}" ${attrs}>${cells.join('')}</div>`;
 const sorted = (view, list, cmps) => { const k = $(`#${PREFIX[view]}-sort`).value; return cmps[k] ? [...list].sort(cmps[k]) : list; };
+export {renderPlanets};
 function applyFilter(view) {
   const q = ($(`#${PREFIX[view]}-filter`)?.value || '').trim().toLowerCase(), rows = [...document.querySelectorAll(`#${view} [data-row]`)];
   rows.forEach(r => { r.hidden = Boolean(q) && !r.dataset.find.includes(q); });
   const none = $(`#${view} .rows__none`);
   if (none) none.hidden = !rows.length || rows.some(r => !r.hidden);
+  // The blueprint library under Build answers the same filter box.
+  const lib = [...document.querySelectorAll(`#${view} [data-lib]`)];
+  lib.forEach(r => { r.hidden = Boolean(q) && !r.dataset.find.includes(q); });
+  const libNone = $(`#${view} [data-lib-none]`);
+  if (libNone) libNone.hidden = !q || !lib.length || lib.some(r => !r.hidden);
 }
 function failed(view) {
   if (S.marketData) return; // a newer run is drawing this view
@@ -82,7 +91,9 @@ export async function renderMarket() {
     if (cargo.get(ship) > 0) cargoInput.value = Math.round(cargo.get(ship));
   }
   tradeSortOptions();
-  const skills = summary(p).skills, f = fees(skills, meta.skills);
+  const skills = summary(p).skills, broker = await brokerFor(p, skills, meta.skills, marketBook, () => { if (!$('#market').hidden) renderMarket(); });
+  if (t.stale()) return;
+  const f = {...fees(skills, meta.skills), brokerAt:broker.at};
   const from = Number(origin.value), maxJumps = Number($('#market-jumps').value), hold = Math.max(1, Number(cargoInput.value) || 5000);
   // Size every suggestion to the pilot's wallet unless they type another budget.
   const budgetInput = $('#market-budget'), wallet = summary(p).wallet;
@@ -90,7 +101,7 @@ export async function renderMarket() {
   iskEcho(budgetInput);
   const budget = budgetInput.value === '' ? Infinity : Math.max(0, Number(budgetInput.value));
   status.textContent = `${plural(marketData.regions.length, 'region')} · ${plural(Object.keys(meta.types).length, 'item')} · ${scannedAgo()} by the hourly pipeline`;
-  const feesText = `Sales tax ${(f.salesTax * 100).toFixed(2)}% · broker fee ${(f.brokerFee * 100).toFixed(2)}% · ${skills?.skills ? `from ${p.name}’s skills` : 'base rates (connect for your skills)'} · cargo ${hold.toLocaleString()} m³ · budget ${Number.isFinite(budget) ? format(budget, 'isk') : 'unlimited'}`;
+  const feesText = `Sales tax ${(f.salesTax * 100).toFixed(2)}% · broker fee ${(f.brokerFee * 100).toFixed(2)}% before standings · ${skills?.skills ? `from ${p.name}’s skills` : 'base rates (connect for your skills)'} · cargo ${hold.toLocaleString()} m³ · budget ${Number.isFinite(budget) ? format(budget, 'isk') : 'unlimited'}`;
   const g = mapGraph(), sys = loc => marketBook.stations.get(loc)?.system, station = loc => marketBook.stations.get(loc)?.name || `Station ${loc}`;
   const sysName = id => g?.systems.get(id)?.name || name(id);
   const item = id => meta.types[id]?.n || name(id);
@@ -156,12 +167,17 @@ export async function renderMarket() {
   const subs = {haul:'Buy from a sell order, fly, sell into a buy order. Ranked by profit per jump.', spread:'Buy at the top bid, relist at the lowest ask. About 5% of daily volume, within your budget.',
     build:`One run with an ME 0 blueprint you own, at ${(index * 100).toFixed(2)}% system index + fees.${tooDear ? ` ${tooDear} more profitable ${tooDear === 1 ? 'build needs' : 'builds need'} more than ${format(budget, 'isk')}.` : ''}`};
   const best = haulRows[0];
+  const hubFees = broker.hubs.map(h => ({...h, ...broker.explain(h.loc)}));
+  const brokerPanel = hubFees.length ? `<section class="panel brokers" aria-labelledby="brokers-title"><div class="panel__head"><h2 id="brokers-title">Broker fee by hub</h2></div>
+    <ul class="brokers__list">${hubFees.map(h => `<li><span><b>${esc(h.hub)}</b><small>${esc(brokerNote(h))}</small></span><b class="num">${(h.fee * 100).toFixed(2)}%</b></li>`).join('')}</ul>
+    <p class="hint">${skills?.skills ? `Broker Relations ${ROMAN[levelOf(skills, meta.skills?.brokerRelations)]}` : 'Base rate'}, less 0.03% per point of standing with the station owner’s faction and 0.02% per point with its corporation, never below 1%. Spreads and builds below use the fee at the station they trade in.</p></section>` : '';
   content.innerHTML = `
   <section class="panel earn-sum" aria-label="Summary">
     ${readout([['From', esc(sysName(from))], ['Budget', Number.isFinite(budget) ? short(budget) : 'Any', Number.isFinite(budget) ? 'ISK' : ''], ['Best haul', best ? `+${short(best.perJump)}` : '—', best ? 'ISK per jump' : '']])}
     <p class="earn-sum__line">${best ? `Best haul: ${esc(item(best.type))} from ${esc(sysName(sys(best.from.loc)))} to ${esc(sysName(sys(best.to.loc)))}, ${plural(best.toA + best.ab, 'jump')} in all.` : 'No haul pays for this cargo and budget right now.'}</p>
     <details class="fees"><summary>Fees and assumptions</summary><p id="market-fees">${esc(feesText)}</p></details>
   </section>
+  ${brokerPanel}
   <section class="panel panel--primary panel--flush earn-main">
     <div class="earn-main__head"><div class="seg" role="tablist" aria-label="Trade lists">${Object.entries(TRADE_LISTS).map(([k, l]) => `<button type="button" role="tab" data-trade="${k}" aria-selected="${k === tradeList}">${l} <span class="num seg__n">${counts[k]}</span></button>`).join('')}</div><p class="panel__sub">${esc(subs[tradeList])}</p></div>
     ${main}
@@ -178,7 +194,14 @@ export async function renderIndustry() {
   const {status, content} = t, {marketData, marketBook, costIndices, adjusted} = S;
   const meta = marketData.meta?.data || {}, catalog = meta.starters || [];
   if (!marketData.regions.length || !catalog.length) { status.textContent = 'The pipeline has not priced starter blueprints yet. Check back after its next hourly run.'; content.innerHTML = state('No blueprint prices yet.', 'The hourly pipeline prices starter blueprints on its next run. Press Refresh after that.'); return; }
-  const p = mine(), o = wingmate(), x = summary(p), levels = skillLevels(x.skills, meta.skills || {}), alpha = isAlpha(x.skills), f = fees(x.skills, meta.skills), s = slots(levels);
+  const p = mine(), o = wingmate(), x = summary(p), levels = skillLevels(x.skills, meta.skills || {}), alpha = isAlpha(x.skills), s = slots(levels);
+  const broker = await brokerFor(p, x.skills, meta.skills, marketBook, () => { if (!$('#industry').hidden) renderIndustry(); });
+  if (t.stale()) return;
+  const f = {...fees(x.skills, meta.skills), brokerAt:broker.at};
+  // Blueprints each pilot already owns (a wingmate's only when they share them): no purchase, their own ME and TE.
+  const myBps = ownedMap(opsOf(p).blueprints?.value?.types), theirBps = ownedMap(opsOf(o).blueprints?.value?.types);
+  await resolveNames(ordered().flatMap(pl => (opsOf(pl).blueprints?.value?.types || []).flatMap(r => [r[0], isStation(r[6]) ? r[6] : 0])).filter(Boolean)).catch(() => {});
+  if (t.stale()) return;
   systemOptions($('#industry-system'));
   const system = Number($('#industry-system').value), idx = costIndices.get(system) || {};
   const budgetInput = $('#industry-budget');
@@ -201,9 +224,9 @@ export async function renderIndustry() {
   const skillOf = x.skills?.skills ? id => levelOf(x.skills, id) : undefined;
   // Price every blueprint for one pilot: their fees, slots (capacity), Alpha tax, skills and wallet.
   const priceFor = pilot => rank(catalog.filter(item => !category.value || item.cat === category.value).map(item => evaluate(item, {book:marketBook, adjusted, index:buildIndex, researchIndex, ...pilot})), pilot.budget);
-  const ranked = priceFor({fees:f, levels, alpha, skillOf, budget}).map(pick => ({...pick, seller:sellerOf(pick)}));
+  const ranked = priceFor({fees:f, levels, alpha, skillOf, budget, owned:bp => myBps.get(bp)}).map(pick => ({...pick, seller:pick.owned ? null : sellerOf(pick)}));
   const SORTS = {profit:(a, b) => b.profitDay - a.profitDay, payback:(a, b) => a.payback - b.payback, margin:(a, b) => b.margin - a.margin, cheap:(a, b) => a.price - b.price, invest:(a, b) => a.invest - b.invest,
-    near:(a, b) => (a.seller?.route.jumps ?? 999) - (b.seller?.route.jumps ?? 999)};
+    near:(a, b) => (a.owned ? -1 : a.seller?.route.jumps ?? 999) - (b.owned ? -1 : b.seller?.route.jumps ?? 999)};
   // Only what the wallet covers, unless the pilot asks to see the rest.
   const showAll = $('#industry-over').checked, overBudget = ranked.filter(pick => !pick.affordable).length;
   const list = (SORTS[sortBy] ? [...ranked].sort((a, b) => (b.affordable - a.affordable) || SORTS[sortBy](a, b)) : ranked).filter(pick => showAll || pick.affordable).slice(0, 20);
@@ -211,14 +234,15 @@ export async function renderIndustry() {
   const trip = pick => {
     if (!g) return {html:'<p class="hint">Routes appear after the next market pipeline run.</p>', foot:''};
     const seller = pick.seller, start = seller?.place.system ?? system;
-    const mats = at(pick.materialsAt), hub = at(pick.sell.loc);
-    const legs = [seller ? legHtml('Buy the blueprint', seller.place.name, seller.route, ` · ${format(seller.place.price, 'isk')}`)
-      : `<div class="leg"><div class="leg-head"><b>Buy the blueprint</b><span>No NPC seller reachable through high-sec</span><small>Search “${esc(pick.n)} Blueprint” on the in-game market.</small></div></div>`];
-    if (lab) legs.push(legHtml(`Research to ME ${pick.me}`, lab.station.name, route(start, lab.system.id), ` · ME index ${pct(lab.index)}`));
+    const mats = at(pick.materialsAt), hub = at(pick.sell.loc), legs = [];
+    // An owned blueprint skips the purchase; research is only a leg when the blueprint is an original below the target.
+    if (!pick.owned) legs.push(seller ? legHtml('Buy the blueprint', seller.place.name, seller.route, ` · ${format(seller.place.price, 'isk')}`)
+      : `<div class="leg"><div class="leg-head"><b>Buy the blueprint</b><span>No NPC seller reachable through high-sec</span><small>Search “${esc(pick.n)} Blueprint” on the in-game market.</small></div></div>`);
+    if (lab && pick.research.me > pick.research.from) legs.push(legHtml(`Research to ME ${pick.me}`, lab.station.name, route(start, lab.system.id), ` · ME index ${pct(lab.index)}`));
     legs.push(legHtml('Buy materials', mats.name, route(lab?.system.id ?? start, mats.system), ` · whole bill in ${esc(pick.materialsRegion)}`));
     if (factory) legs.push(legHtml('Build', factory.station.name, route(mats.system ?? start, factory.system.id), ` · index ${pct(factory.index)}`));
     legs.push(legHtml('Sell', hub.name, route(factory?.system.id ?? mats.system ?? start, hub.system), ` · lowest ask ${format(pick.sell.price, 'isk')}`));
-    const stopIds = [system, seller?.place.system, lab?.system.id, mats.system, factory?.system.id, hub.system].filter(id => g.systems.has(id)).filter((id, i, a) => id !== a[i - 1]);
+    const stopIds = [system, seller?.place.system, pick.research.me > pick.research.from ? lab?.system.id : undefined, mats.system, factory?.system.id, hub.system].filter(id => g.systems.has(id)).filter((id, i, a) => id !== a[i - 1]);
     const stops = stopIds.map(id => g.systems.get(id).name), tripIds = routeIds(stopIds);
     return {html:`<ol class="legs">${legs.map(l => `<li>${l}</li>`).join('')}</ol>`,
       foot:stops.length > 1 ? `<span class="ed-foot" ${routeAttrs(tripIds, `${pick.n} trip`)}>${mapButton(tripIds, `${pick.n}: whole trip`)}<a class="button small trip-link" href="${dotlanRoute(stops)}" target="_blank" rel="noopener noreferrer">Whole trip on Dotlan ↗</a></span>` : ''};
@@ -227,14 +251,13 @@ export async function renderIndustry() {
   const facilityList = (list, kind) => list.length ? `<ol class="facilities">${list.map((x, i) => `<li>${i ? '' : '<span class="tag">Best</span> '}<a href="${dotlanSystem(x.system.name)}" target="_blank" rel="noopener noreferrer">${esc(x.station.name)}</a><small><span class="sec sec-${secClass(x.system.sec)}">${secShown(x.system.sec).toFixed(1)}</span> ${esc(x.system.name)} · ${x.jumps ? plural(x.jumps, 'jump') : 'here'} · ${kind} index ${pct(x.index)} · job tax ${pct(x.index + NPC_FACILITY_TAX + (kind === 'ME' ? SCC.research : SCC.manufacturing) + (alpha ? ALPHA_TAX : 0))}</small>${x.jumps ? `<details><summary>Route</summary>${legHtml('', x.station.name, route(system, x.system.id))}</details>` : ''}</li>`).join('')}</ol>` : '<p class="hint">No high-sec NPC station with this service within 10 jumps.</p>';
   const plan = stage(x.wallet), next = nextSkills(levels, alpha), known = Boolean(x.skills?.skills);
   // A starting plan per pilot: fill their build slots within their wallet, never the same product twice.
-  const mePlan = portfolio(ranked, {slots:known ? s.build : 2, budget:budget ?? Infinity});
   const ox = o ? summary(o) : null, oLevels = ox ? skillLevels(ox.skills, meta.skills || {}) : null;
   const oSkillOf = ox?.skills?.skills ? id => levelOf(ox.skills, id) : null;
   // The wingmate's plan is priced with their own skills, fees, Alpha status and wallet, skipping what this pilot builds.
-  const taken = new Set(mePlan.chosen.map(c => c.bp));
-  const themPlan = o ? portfolio(priceFor({fees:fees(ox.skills, meta.skills), levels:oLevels, alpha:isAlpha(ox.skills), skillOf:oSkillOf || undefined, budget:ox.wallet}).filter(pick => !taken.has(pick.bp)),
-    {slots:ox.skills?.skills ? slots(oLevels).build : 2, budget:ox.wallet ?? Infinity}) : null;
-  const owner = pick => mePlan.chosen.includes(pick) ? p : themPlan?.chosen.some(c => c.bp === pick.bp) ? o : null;
+  // A product goes first to the pilot who already owns its blueprint (wingAssign).
+  const themRanked = o ? priceFor({fees:fees(ox.skills, meta.skills), levels:oLevels, alpha:isAlpha(ox.skills), skillOf:oSkillOf || undefined, budget:ox.wallet, owned:bp => theirBps.get(bp)}) : [];
+  const [mePlan, themPlan = null] = wingAssign([{ranked, slots:known ? s.build : 2, budget:budget ?? Infinity}, ...(o ? [{ranked:themRanked, slots:ox.skills?.skills ? slots(oLevels).build : 2, budget:ox.wallet ?? Infinity}] : [])]);
+  const owner = pick => mePlan.chosen.some(c => c.bp === pick.bp) ? p : themPlan?.chosen.some(c => c.bp === pick.bp) ? o : null;
   const skillName = id => meta.skillNames?.[id] || name(id);
   const FLAGS = {thin:['Thin market', 'Under 10 sold per day at the hub'], spike:['Price spike', 'Hub ask is well above its 7-day average; priced at the average +15%'], crowded:['Crowded', '10+ stations already list it'],
     skills:['Needs skills', 'You can’t start this job yet'], capital:['Budget-sized', 'Your wallet covers fewer runs than the market would take; output grows as you reinvest'], slow:['Slow seller', 'The market takes under one a day'], margin:['Thin margin', 'Under 10% after fees; a small undercut wipes it out']};
@@ -244,17 +267,20 @@ export async function renderIndustry() {
   status.textContent = `${catalog.length} cheap T1 blueprints that NPCs sell${meta.bpoSurvey ? ` (seller survey covers ${meta.bpoSurvey.regions}${meta.bpoSurvey.of > meta.bpoSurvey.regions ? ` of ${meta.bpoSurvey.of}` : ''} high-sec regions)` : ''}, priced from live orders · ${scannedAgo()}`;
 
   picks.industry = i => {
-    const pick = list[i], who = owner(pick), tr = trip(pick);
+    const pick = list[i], who = owner(pick), tr = trip(pick), theirs = theirBps.get(pick.bp), fee = broker.explain(pick.sell.loc);
     return {title:pick.n, foot:tr.foot, body:ed(`
       ${readout([['Profit', `+${short(pick.profitDay)}`, 'ISK/day'], ['Pays back', pick.payback < 1 ? '<1' : pick.payback.toFixed(1), 'days'], ['Start-up', short(pick.invest), 'ISK']])}
-      <p class="ed-lead">${who ? `<span class="who" data-pilot="${pilotKey(who)}">In ${esc(who.name)}’s plan.</span> ` : pick.affordable ? '' : '<span class="neg">Over budget.</span> '}${pick.missing?.length ? `<span class="neg">Needs ${pick.missing.map(([id, lvl]) => `${esc(skillName(id))} ${ROMAN[lvl]}`).join(', ')}.</span>` : ''}</p>
+      <p class="ed-lead">${who ? `<span class="who" data-pilot="${pilotKey(who)}">In ${esc(who.name)}’s plan.</span> ` : pick.affordable ? '' : '<span class="neg">Over budget.</span> '}${pick.missing?.length ? `<span class="neg">Needs ${pick.missing.map(([id, lvl]) => `${esc(skillName(id))} ${ROMAN[lvl]}`).join(', ')}.</span>` : ''}${!pick.owned && theirs ? ` <span class="who" data-pilot="${pilotKey(o)}">${esc(o.name)} owns this blueprint: ${esc(ownedLabel(theirs))}.</span>` : ''}</p>
       ${flagList(pick).length ? `<ul class="ed-flags">${flagList(pick).map(fl => `<li><span class="tag flag">${esc(FLAGS[fl][0])}</span> ${esc(FLAGS[fl][1])}</li>`).join('')}</ul>` : ''}
-      ${facts([['Blueprint', `${esc(pick.cat)} · BPO ${format(pick.seller?.place.price ?? pick.price, 'isk')} · rank ${pick.rank}`],
-        ['NPC sellers', pick.seller ? `NPC sells it at ${plural(pick.sellers.length, 'station')} · nearest ${pick.seller.route.jumps ? plural(pick.seller.route.jumps, 'jump') : 'here'}` : '<span class="neg">No NPC seller reachable through high-sec</span>'],
-        ['Research', `ME 0 → ${pick.me} · ${duration(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}`],
+      ${facts([['Blueprint', pick.owned ? `${esc(pick.cat)} · <b>${esc(ownedLabel(pick.owned))}</b> · yours, nothing to buy · rank ${pick.rank}` : `${esc(pick.cat)} · BPO ${format(pick.seller?.place.price ?? pick.listPrice, 'isk')} · rank ${pick.rank}`],
+        !pick.owned && ['NPC sellers', pick.seller ? `NPC sells it at ${plural(pick.sellers.length, 'station')} · nearest ${pick.seller.route.jumps ? plural(pick.seller.route.jumps, 'jump') : 'here'}` : '<span class="neg">No NPC seller reachable through high-sec</span>'],
+        ['Research', pick.research.me > pick.research.from ? `ME ${pick.research.from} → ${pick.me} · ${duration(pick.research.seconds)} · ${format(pick.research.cost, 'isk')}` : pick.owned?.kind === 'bpc' ? `A copy can’t be researched · built at ME ${pick.me}` : `None needed · already ME ${pick.me}`],
+        pick.owned && ['Time efficiency', `TE ${pick.owned.te}: builds take ${pick.owned.te}% less time`],
+        pick.owned?.kind === 'bpc' && ['Copy', `${plural(pick.owned.runs, 'run')} left, so this batch is capped at ${plural(pick.runs, 'run')}`],
         ['Sells', `${pick.unitsPerDay >= 1 ? `${Math.round(pick.unitsPerDay).toLocaleString()}/day` : `1 every ${Math.round(1 / pick.unitsPerDay)} days`} at ${format(pick.sellPrice, 'isk')} · margin ${pct(pick.margin)}`],
         ['At ME 0', `${pick.profitAtZero > 0 ? '+' : ''}${format(pick.profitAtZero, 'isk')} per unit`],
-        ['Start with', `${format(pick.invest, 'isk')}: blueprint, research and a ${pick.runs}-run batch`],
+        ['Start with', `${format(pick.invest, 'isk')}: ${pick.owned ? '' : 'blueprint, '}${pick.research.me > pick.research.from ? 'research and ' : ''}a ${pick.runs}-run batch`],
+        ['Broker fee', `${pct(fee.fee)} at ${esc(at(pick.sell.loc).name)}${fee.applied ? '' : ' · standings not applied'}`],
         ['Hub market', `${Math.round(pick.daily).toLocaleString()} traded/day · ${plural(pick.listings, 'station')} competing`],
         pick.trend !== null && ['Hub price', `<span class="${pick.trend > 0.15 ? 'neg' : pick.trend < -0.1 ? 'warn-text' : ''}">Hub price ${pick.trend >= 0 ? '+' : ''}${(pick.trend * 100).toFixed(0)}% vs 7-day average${pick.trend > 0.15 ? ' · likely a spike, expect it to fall' : pick.trend < -0.1 ? ' · below normal, may recover' : ''}</span>`]])}
       <h3 class="ed-h">Material bill</h3>${bill(pick)}
@@ -263,7 +289,7 @@ export async function renderIndustry() {
   extras.industry = {guide:() => ({title:'Build guide', body:ed(`
     <h3 class="ed-h">Your industry setup</h3>
     ${facts([['Clone', known ? (alpha ? 'Alpha · 4 build and 1 research slot at most' : 'Omega') : '—'], ['Build slots', known ? s.build : '—'], ['Research slots', known ? s.science : '—'],
-      ['Job tax', `${pct(jobTax)} · ${factory ? `at ${esc(factory.system.name)}: ` : ''}index ${pct(buildIndex)} + facility + SCC${alpha ? ' + alpha' : ''}`], ['Selling fees', `${pct(f.salesTax + f.brokerFee)} · sales ${pct(f.salesTax)}, broker ${pct(f.brokerFee)}`], ['Budget', format(budget, 'isk')]])}
+      ['Job tax', `${pct(jobTax)} · ${factory ? `at ${esc(factory.system.name)}: ` : ''}index ${pct(buildIndex)} + facility + SCC${alpha ? ' + alpha' : ''}`], ['Selling fees', `${pct(f.salesTax + f.brokerFee)} · sales ${pct(f.salesTax)}, broker ${pct(f.brokerFee)} before standings`], ['Budget', format(budget, 'isk')]])}
     <h3 class="ed-h">${esc(plan.name)}</h3>
     <div class="progress-row"><span class="stack"><i class="fill" style="width:${Math.min(100, (x.wallet || 0) / plan.goal * 100).toFixed(1)}%"></i></span><small>${format(x.wallet, 'isk')} of ${format(plan.goal, 'isk')}</small></div>
     <ol class="steps">${plan.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>
@@ -283,18 +309,26 @@ export async function renderIndustry() {
   // Wing build plan: who builds what, as teamwork.
   const crew = [[p, mePlan, budget, known ? s.build : 2], ...(o ? [[o, themPlan, ox.wallet, ox.skills?.skills ? slots(oLevels).build : 2]] : [])];
   const builders = crew.filter(([, pl]) => pl.chosen.length);
-  const wingLine = builders.length ? `${builders.map(([who, pl]) => `<b class="who" data-pilot="${pilotKey(who)}">${esc(who.name)}</b> builds ${esc(pl.chosen.map(c => c.n).join(' and '))}`).join(', ')}.${builders.length > 1 ? ' No overlap, so you don’t undercut each other.' : ''}`
+  const wingLine = builders.length ? `${builders.map(([who, pl]) => `<b class="who" data-pilot="${pilotKey(who)}">${esc(who.name)}</b> builds ${esc(pl.chosen.map(c => c.owned ? `${c.n} (owns the blueprint)` : c.n).join(' and '))}`).join(', ')}.${builders.length > 1 ? ' No overlap, so you don’t undercut each other.' : ''}`
     : 'Nothing fits the wing’s wallets with today’s prices yet.';
   const pilotCol = ([who, pl, wallet, free]) => `<div class="wplan__pilot" data-pilot="${pilotKey(who)}"><span class="wplan__name">${esc(who.name)}</span>${pl.chosen.length
-    ? `<span class="num wplan__fig">+${short(pl.profitDay)} <small>ISK/day</small></span><small>${esc(pl.chosen.map(c => c.n).join(', '))} · start-up ${format(pl.spent, 'isk')} · ${pl.chosen.length} of ${free} slots · ${wallet === undefined ? '—' : `${format(wallet - pl.spent, 'isk')} left`}</small>`
+    ? `<span class="num wplan__fig">+${short(pl.profitDay)} <small>ISK/day</small></span><small>${esc(pl.chosen.map(c => c.owned ? `${c.n} (owned)` : c.n).join(', '))} · start-up ${format(pl.spent, 'isk')} · ${pl.chosen.length} of ${free} slots · ${wallet === undefined ? '—' : `${format(wallet - pl.spent, 'isk')} left`}</small>`
     : `<small>Nothing fits ${wallet === undefined ? 'yet' : `a ${format(wallet, 'isk')} wallet`} with today’s prices.</small>`}</div>`;
 
+  // "My blueprints": every pilot's own library, answering the toolbar's filter box.
+  const libraryOf = pl => {
+    const f = opsOf(pl).blueprints, list = library(f?.value?.types, name), shared = pl.private || S.wing.get(pl.id)?.shareLevel >= 2;
+    const body = pl.private && f && !f.permission ? permissionBanner(pl, ['blueprints'])
+      : list.length ? `<ul class="bplib">${list.map(b => `<li data-lib data-find="${esc(`${b.name} ${b.kind === 'bpo' ? 'original bpo' : 'copy bpc'} me ${b.me} te ${b.te}`.toLowerCase())}"><span><b>${esc(b.name)}</b><small>${b.loc !== undefined ? esc(isStation(b.loc) ? name(b.loc) : 'In a structure or container') : 'Location unknown'}</small></span><span class="bplib__tags"><span class="tag ${b.kind === 'bpo' ? 'pos' : 'dim'}">${esc(b.label)}</span>${b.kind === 'bpc' ? `<span class="tag dim">ME ${b.me}/TE ${b.te}</span>` : b.copies ? `<span class="tag dim">${plural(b.copies, 'copy', 'copies')}</span>` : ''}</span></li>`).join('')}</ul>`
+      : shared ? `<p class="hint">${f?.permission || !pl.private ? 'No blueprints found.' : 'Not synced yet.'}</p>` : `<p class="hint">${esc(pl.name)}’s blueprints are not shared with the wing.</p>${wingNote(pl)}`;
+    return `<h3 class="ed-h who" data-pilot="${esc(pl.name.toLowerCase())}">${esc(pl.name)}${list.length ? ` · ${plural(list.length, 'blueprint')}` : ''}</h3>${body}`;
+  };
   const affordable = ranked.filter(r => r.affordable), top = affordable[0];
   const cheaper = factory && factory.system.id !== system && factory.index < (idx.manufacturing ?? Infinity) * 0.8;
   const rows = list.map((pick, i) => { const who = owner(pick);
     return row(i, `${pick.n} ${pick.cat}`, [
-      cell(`<b>${esc(pick.n)}</b><span class="tag">${esc(pick.cat)}</span>${who ? `<span class="who" data-pilot="${pilotKey(who)}">${esc(who.name)}’s plan</span>` : pick.affordable ? '' : '<span class="tag neg">Over budget</span>'}${pick.missing?.length ? '<span class="tag neg">Needs skills</span>' : ''}<small class="rows__meta">${pct(pick.margin)} margin · pays back in ${payback(pick.payback)} · ${short(pick.invest)} to start</small>`, 'rows__main'),
-      cell(pick.seller ? jumpsText(pick.seller.route.jumps) : '<span class="neg">none</span>'), cell(pct(pick.margin)), cell(pick.payback < 1 ? '<1 d' : `${pick.payback.toFixed(1)} d`), cell(short(pick.invest)),
+      cell(`<b>${esc(pick.n)}</b><span class="tag">${esc(pick.cat)}</span>${who ? `<span class="who" data-pilot="${pilotKey(who)}">${esc(who.name)}’s plan</span>` : pick.affordable ? '' : '<span class="tag neg">Over budget</span>'}${pick.missing?.length ? '<span class="tag neg">Needs skills</span>' : ''}${pick.owned ? `<span class="tag pos">${esc(ownedLabel(pick.owned))}</span>` : ''}<small class="rows__meta">${pct(pick.margin)} margin · pays back in ${payback(pick.payback)} · ${short(pick.invest)} to start</small>`, 'rows__main'),
+      cell(pick.owned ? 'own' : pick.seller ? jumpsText(pick.seller.route.jumps) : '<span class="neg">none</span>'), cell(pct(pick.margin)), cell(pick.payback < 1 ? '<1 d' : `${pick.payback.toFixed(1)} d`), cell(short(pick.invest)),
       cell(`+${short(pick.profitDay)}`, 'num num--pos rows__key')], {dim:!pick.affordable}); });
   const empty = overBudget && !showAll ? state(`Nothing profitable fits a ${format(budget, 'isk')} budget yet.`, `${overBudget} ${overBudget === 1 ? 'pick needs' : 'picks need'} more. Grow the wallet with the guide’s stage plan, or look at what’s over budget.`, stateButton('Show picks over budget', 'industry-over=on'))
     : state('No starter blueprint turns a profit at today’s prices with these fees.', 'Try another system or check after the next hourly scan.');
@@ -313,6 +347,11 @@ export async function renderIndustry() {
   <section class="panel panel--primary panel--flush earn-main" aria-labelledby="bp-title">
     <div class="earn-main__head"><h2 id="bp-title">Blueprints to start with</h2><p class="panel__sub">Best first. Select one for its trip plan and material bill.${overBudget && !showAll ? ` ${overBudget} more ${overBudget === 1 ? 'pick needs' : 'picks need'} a bigger budget.` : ''}</p></div>
     ${list.length ? table('industry', 'Blueprints to start with', 'minmax(0,2.2fr) 62px 70px 70px 80px 96px', [['Blueprint'], ['Seller', 'near'], ['Margin', 'margin'], ['Payback', 'payback'], ['Start', 'invest'], ['Profit/day', 'profit']], rows) : `<div class="earn-main__empty">${empty}</div>`}
+  </section>
+  <section class="panel" aria-labelledby="bplib-title">
+    <div class="panel__head"><h2 id="bplib-title">My blueprints</h2></div>
+    <p class="hint">What you already own. A blueprint that matches a pick skips its purchase and uses its own ME and TE. The filter above searches this list too.</p>
+    ${ordered().map(libraryOf).join('')}<p class="hint" data-lib-none hidden>No blueprints match this filter.</p>
   </section>
   <details class="panel earn-more">
     <summary><b>Facilities near ${esc(here?.name || 'you')}</b><small>${factory ? `Build at ${esc(factory.station.name)}${lab ? `, research at ${esc(lab.station.name)}` : ''}` : 'Where to build and research'}</small></summary>
@@ -525,6 +564,7 @@ function openRow(view, el) {
   openDrawer(spec);
 }
 export function wire() {
+  wirePlanets();
   $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
   $('#market-budget').onchange = $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
   $('#industry-system').onchange = $('#industry-over').onchange = $('#industry-category').onchange = () => renderIndustry();
