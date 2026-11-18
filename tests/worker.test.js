@@ -951,6 +951,19 @@ test('the wing summary carries the current fit only at consent level 2',async()=
  app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 1').run();assert.equal((await wing()).fit.ship,1001,'the pilot always sees their own');
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('2977'),'never public');
 });
+test('the wing summary carries blueprints and planets only at consent level 2, and never publicly',async()=>{
+ const app=setup({blueprints:[{item_id:1,type_id:1234,quantity:-1,runs:-1,material_efficiency:10,time_efficiency:20,location_id:60003760}],planets:[{planet_id:40000001,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)}]});const {bearer}=await connect(app);
+ const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots[0];
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2').run();const w=await wing();
+ assert.deepEqual(w.blueprints.types,[[1234,1,0,10,20,0,60003760]]);assert.equal(w.planets.planets[0].type,'lava');
+ const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('1234')&&!text.includes('lava'),'never public');
+ // Another pilot's consent level 1 leaves both out.
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,1)").run(JSON.stringify({operations:{wallet:{value:1},blueprints:{value:{types:[[1,1,0,0,0,0]]}},planets:{value:{planets:[{id:1}]}}}}));
+ const list=(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots,other=list.find(x=>x.name==='Decxus');
+ assert.equal(other.wallet,1);assert.equal(other.blueprints,undefined);assert.equal(other.planets,undefined);
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2 WHERE character_id = 2124815118').run();
+ assert.ok((await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots.find(x=>x.name==='Decxus').blueprints);
+});
 const alertApp=async(options={})=>{
  const o={posts:[],typeNames:{1234:'Venture Blueprint',34:'Tritanium',605:'Venture'},...options},app=setup(o);app.posts=o.posts;app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);app.env.DB.raw.exec('DELETE FROM alerts');return app;
 };
@@ -968,6 +981,16 @@ test('Discord alerts: one message per new event, never repeated, and no place na
  for(const t of texts)for(const place of ['Jita','60003760','30000142','Forge','Caldari'])assert.ok(!t.includes(place),`${place} stays out of "${t}"`);
  assert.equal((await sendAlerts(app.env,app.fetchImpl)).sent,0,'the same events are not sent twice');
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM alerts').get().n,3);
+});
+test('Discord alerts: an extractor that ran out is reported once, with the planet type and no place',async()=>{
+ const {sendAlerts}=await import('../worker/alerts.js');
+ const app=await alertApp({planets:[{planet_id:40000001,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)},{planet_id:40000002,planet_type:'gas',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)}],
+  planetPins:{links:[],pins:[{pin_id:1,extractor_details:{product_type_id:2268,heads:[{head_id:1}]},expiry_time:hoursFromNow(-5)},{pin_id:2,extractor_details:{product_type_id:2268,heads:[]},expiry_time:hoursFromNow(48)}],routes:[]}});
+ await sendAlerts(app.env,app.fetchImpl);
+ const texts=app.posts.map(p=>p.content).filter(t=>/extractor/.test(t));
+ assert.deepEqual(texts.sort(),["Fiofka's extractor on a gas planet expired","Fiofka's extractor on a lava planet expired"]);
+ for(const t of texts)for(const place of ['Jita','30000142','40000001','Forge'])assert.ok(!t.includes(place),t);
+ assert.equal((await sendAlerts(app.env,app.fetchImpl)).sent,0,'not repeated');
 });
 test('Discord alerts: an empty queue, an outbid order, orders that ended, contracts that moved and a new loss',async()=>{
  const {sendAlerts}=await import('../worker/alerts.js');

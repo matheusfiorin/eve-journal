@@ -100,3 +100,13 @@ test('events come from what changed between two syncs, are kept three days and a
   const later = diffEvents({...prior, events}, {operations: {}}, now + 2 * 86400000);assert.equal(later.length, events.length, 'kept for the alert pass');
   assert.equal(diffEvents({...prior, events}, {operations: {}}, now + 4 * 86400000).length, 0, 'and dropped after three days');
 });
+test('blueprint rows carry the ME, TE and location of the blueprint a pilot would build with', () => {
+  // The best original wins over any copy; without one, the best copy.
+  assert.deepEqual(compactBlueprints([{type_id: 1, quantity: -1, runs: -1, material_efficiency: 4, time_efficiency: 8, location_id: 60003760}, {type_id: 1, quantity: -1, runs: -1, material_efficiency: 10, time_efficiency: 6, location_id: 60008494}, {type_id: 1, quantity: -2, runs: 3, material_efficiency: 10, time_efficiency: 20, location_id: 5}]).types, [[1, 2, 1, 10, 6, 3, 60008494]]);
+  assert.deepEqual(compactBlueprints([{type_id: 2, quantity: -2, runs: 2, material_efficiency: 2, time_efficiency: 4, location_id: 60003760}, {type_id: 2, quantity: -2, runs: 3, material_efficiency: 6, time_efficiency: 2, location_id: 60008494}]).types, [[2, 0, 2, 6, 2, 5, 60008494]]);
+});
+test('pin summaries give extractor yield and the storage hold', () => {
+  const s = summarizePins({pins: [{type_id: 2848, extractor_details: {product_type_id: 2268, heads: [{}], qty_per_cycle: 600, cycle_time: 1800}, expiry_time: 'e'}, {type_id: 2257, contents: [{type_id: 2268, amount: 10}]}, {type_id: 2254, contents: [{type_id: 2268, amount: 2}]}]});
+  assert.deepEqual(s.ext, [[2268, 'e', 1, 600, 1800]]);assert.equal(s.cap, 12500);assert.deepEqual(s.vault, [[2268, 12]]);
+  assert.equal(summarizePins({pins: [{extractor_details: {product_type_id: 1, heads: []}}]}).cap, undefined);
+});
