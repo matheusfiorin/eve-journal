@@ -2,6 +2,8 @@ import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} fr
 import {validateBackup,validatePref} from '../model.js';
 import {history,lastHour} from './activity.js';
 import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
+import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stepKillmails,stepPlanets,diffEvents} from './pilotdata.js';
+import {sendAlerts} from './alerts.js';
 
 const EVE='https://login.eveonline.com';
 // Unversioned ESI routes answer as they did on the compatibility date sent with each request
@@ -138,7 +140,7 @@ async function esiJson(url,options,fetchImpl,gauge){
 }
 // Assets come in pages of 1000; store only quantity per type so the snapshot stays small. Pages are summed one at a
 // time rather than all held and parsed together.
-async function assetSummary(url,options,fetchImpl,gauge){
+async function assetSummary(url,options,fetchImpl,gauge,fit){
  const first=await fetchOk(url,options,fetchImpl,gauge);
  // All pages of a paged route share one cache entry (one Last-Modified), so an unchanged first page means an
  // unchanged set: the stored summary stands, and no page is downloaded or parsed.
@@ -146,7 +148,7 @@ async function assetSummary(url,options,fetchImpl,gauge){
  // shortcut: 20 pages (20k items) covers our two pilots; raise it if a pilot outgrows that.
  const total=Number(first.headers.get('X-Pages'))||1,pages=Math.min(20,total),modified=first.headers.get('Last-Modified');
  const {'If-None-Match':_,...headers}=options.headers,types=new Map(),locations=new Set();let items=0;
- const add=rows=>{for(const a of rows){if(a.is_blueprint_copy)continue;items++;locations.add(a.location_id);types.set(a.type_id,(types.get(a.type_id)||0)+a.quantity);}};
+ const add=rows=>{fit?.add(rows);for(const a of rows){if(a.is_blueprint_copy)continue;items++;locations.add(a.location_id);types.set(a.type_id,(types.get(a.type_id)||0)+a.quantity);}};
  add(await first.json());
  for(let page=2;page<=pages;page++){
   if(gauge?.stop)throw new ServiceError('EVE asked for fewer requests. Previous asset summary retained.',502);
@@ -185,7 +187,7 @@ async function session(request,env){
 }
 function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {};}}
 function privatePayload(row,sessionRow){
- const {esi,...snapshot}=parseSnapshot(row); // ESI's cache hints are the Worker's bookkeeping
+ const {esi,events,names,cursor,...snapshot}=parseSnapshot(row); // ESI's cache hints, alert events and the round-robin cursor are the Worker's bookkeeping
  return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...snapshot,lastError:row.last_error};
 }
 // Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
@@ -307,6 +309,36 @@ async function setWaypoints(id,systems,env,fetchImpl){
   await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();
  }
 }
+// The items of one contract, read on demand (the cron never asks: ESI has one route per contract). Only a contract in the
+// caller's own stored list qualifies, so a pilot cannot probe contract ids.
+async function contractItems(id,contractId,env,fetchImpl){
+ if(!Number.isSafeInteger(contractId)||contractId<1)throw new ServiceError('Send a contract id.');
+ const row=await env.DB.prepare('SELECT snapshot FROM pilots WHERE character_id = ?').bind(id).first();
+ if(!row||!parseSnapshot(row).operations?.contracts?.value?.some(c=>c.contract_id===contractId))throw new ServiceError('That contract is not one of yours.',404);
+ const now=Date.now(),lock=now+90000;
+ const locked=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(lock,id,now).first();
+ if(!locked)throw new ServiceError('This pilot is syncing. Try again in a moment.',409);
+ try{
+  const credentials=await freshCredentials(locked,env,fetchImpl,lock);
+  if(!credentials.scopes.includes(OPERATIONS_SCOPES.contracts))throw new ServiceError('Permission not granted. Reconnect to allow reading contracts.',403);
+  const res=await fetchImpl(`${ESI}/characters/${id}/contracts/${contractId}/items/`,{headers:{'User-Agent':UA,'X-Compatibility-Date':ESI_COMPAT,Accept:'application/json',Authorization:`Bearer ${credentials.accessToken}`},signal:AbortSignal.timeout(15000)});
+  // Courier contracts have no items: ESI answers 404.
+  if(res.status===404)return {contractId,items:[]};
+  if(res.status===429||res.status===420)throw new ServiceError(LIMITED,429,{retryAfter:60});
+  if(!res.ok)throw new ServiceError('EVE service is temporarily unavailable.',502);
+  return {contractId,items:(await res.json()).slice(0,100).map(i=>({type_id:i.type_id,quantity:i.quantity,is_included:i.is_included!==false}))};
+ }finally{
+  await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();
+ }
+}
+// A sync stops asking ESI after this many fetches (token and key calls included): the free plan allows 50 subrequests per
+// invocation, and the alert posts that follow a cron sync need a few of them.
+export const SYNC_LIMIT=44;
+// Endpoints a sync reads after the core ones, taking turns when the budget runs short (snapshot.cursor names the next).
+// Most are cached by ESI for an hour or more, so a run usually skips them.
+const EXTRA_PATHS={orders:'orders/',orderHistory:'orders/history/',contracts:'contracts/',killmails:'killmails/recent/',blueprints:'blueprints/',planets:'planets/',standings:'standings/'};
+export const EXTRAS=Object.keys(EXTRA_PATHS);
+const SHAPE={orders:compactOrders,orderHistory:list=>compactHistory(list),contracts:compactContracts,blueprints:compactBlueprints,standings:compactStandings};
 export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
  const now=Date.now();
  const previous=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
@@ -316,15 +348,20 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
  if(previous.esi_after>now)return previous;
  const row=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(now+90000,id,now).first();
  if(!row)return previous;
+ // Every outgoing request goes through this count, so the limit holds however many pages or details a pilot has.
+ let used=0;const counted=(url,options)=>{used++;return fetchImpl(url,options);},room=()=>SYNC_LIMIT-used;
  try {
-  const credentials=await freshCredentials(row,env,fetchImpl,now+90000);
+  const credentials=await freshCredentials(row,env,counted,now+90000);
   const snapshot={fetchedAt:new Date().toISOString(),operations:{},errors:{},esi:{}};
   const paths={skills:'skills/',queue:'skillqueue/',wallet:'wallet/',ship:'ship/',location:'location/',jobs:'industry/jobs/?include_completed=false',journal:'wallet/journal/',transactions:'wallet/transactions/',attributes:'attributes/',clones:'clones/',implants:'implants/',assets:'assets/',mining:'mining/'};
   // ESI returns up to 2500 rows newest first; keep the latest 50 so snapshots stay small.
   const trim={journal:50,transactions:50,mining:400};
   // snapshot.esi keeps each endpoint's ETag and Expires; gauge stops the sync when ESI's budgets run low.
-  const prior=parseSnapshot(row),hints=prior.esi||{},gauge={stop:false};
-  const work=Object.entries(paths).map(([key,path])=>async()=>{
+  const prior=parseSnapshot(row),hints=prior.esi||{},gauge={stop:false},auth={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'};
+  // The assets read looks for the items inside the ship, so it waits for the ship answer (which is started before it).
+  let shipSettled;const shipKnown=new Promise(resolve=>{shipSettled=resolve;});
+  let fitNow;
+  const jobs=Object.entries(paths).map(([key,path])=>async()=>{
    const optional=OPERATIONS_SCOPES[key];
    if(optional&&!credentials.scopes.includes(optional)){snapshot.operations[key]={permission:false};return;}
    const old=optional?prior.operations?.[key]?.value:prior[key],hint=hints[key];
@@ -338,10 +375,15 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    // Stopped early: keep the last good data; the next sync asks again.
    if(gauge.stop)return keep();
    try {
-    const options={headers:{Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json',...(old!==undefined&&hint?.etag?{'If-None-Match':hint.etag}:{})}};
-    const got=await(key==='assets'?assetSummary:esiJson)(`${ESI}/characters/${id}/${path}`,options,fetchImpl,gauge);
+    let fit;
+    if(key==='assets'){await shipKnown;fit=fitCollector(snapshot.operations.ship?.value?.ship_item_id);}
+    // A different ship than the stored fit was read from needs the whole list again, so no ETag goes with the request.
+    const sameShip=!fit||!fit.result()||prior.operations?.fit?.value?.ship===fit.result().ship;
+    const options={headers:{...auth,...(old!==undefined&&hint?.etag&&sameShip?{'If-None-Match':hint.etag}:{})}};
+    const got=await(key==='assets'?assetSummary:esiJson)(`${ESI}/characters/${id}/${path}`,options,counted,gauge,fit);
     let value=got.value===undefined?old:got.value;
     if(trim[key]&&Array.isArray(value))value=value.slice(0,trim[key]);
+    if(key==='assets'&&got.value!==undefined)fitNow=fit.result();
     if(optional)snapshot.operations[key]={permission:true,value,fetched:snapshot.fetchedAt};
     else snapshot[key]=value;
     snapshot.esi[key]=got.value===undefined?{...hint,...got.hint}:got.hint; // a 304 may leave out the ETag
@@ -350,8 +392,57 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
     keep(error.message);
    }
   });
+  const shipAt=Object.keys(paths).indexOf('ship');
+  const settle=jobs[shipAt];jobs[shipAt]=async()=>{try{await settle();}finally{shipSettled();}};
   // Four at a time rather than all at once, so a low budget seen in one answer stops the requests not yet sent.
-  await Promise.all(Array.from({length:4},async()=>{while(work.length)await work.shift()();}));
+  await Promise.all(Array.from({length:4},async()=>{while(jobs.length)await jobs.shift()();}));
+  shipSettled();
+  // The current fit: from this run's asset pages, else the one stored (it stays valid until the next full asset read).
+  if(![OPERATIONS_SCOPES.assets,OPERATIONS_SCOPES.ship].every(scope=>credentials.scopes.includes(scope)))snapshot.operations.fit={permission:false};
+  else if(fitNow)snapshot.operations.fit={permission:true,value:fitNow,fetched:snapshot.fetchedAt};
+  else if(prior.operations?.fit?.value)snapshot.operations.fit=prior.operations.fit;
+  // Extras, one after another from the cursor: each costs one request (killmail details and planet pins a few more), only
+  // while the budget lasts. An endpoint ESI has not expired costs nothing. The first one the budget did not reach goes first next time.
+  const extra=async key=>{
+   if(!credentials.scopes.includes(OPERATIONS_SCOPES[key])){snapshot.operations[key]={permission:false};return true;}
+   const prev=prior.operations?.[key],old=prev?.value,hint=hints[key];
+   const waiting=old!==undefined&&(key==='killmails'?old.wait?.length>0:key==='planets'?old.pending:false);
+   const fresh=old!==undefined&&hint?.expires>Date.now();
+   const reuse=error=>{snapshot.operations[key]={...prev,permission:true,...(error?{error}:{})};if(hint)snapshot.esi[key]=hint;};
+   if(fresh&&!waiting){reuse();return true;}
+   if(gauge.stop||room()<1){reuse();return false;}
+   try{
+    let list,next=hint;
+    if(!fresh){
+     const got=await esiJson(`${ESI}/characters/${id}/${EXTRA_PATHS[key]}`,{headers:{...auth,...(old!==undefined&&hint?.etag?{'If-None-Match':hint.etag}:{})}},counted,gauge);
+     list=got.value;next=list===undefined?{...hint,...got.hint}:got.hint;
+    }
+    let value=old;
+    if(key==='killmails')value=await stepKillmails(list,old,{id,room,get:(kid,hash)=>esiJson(`${ESI}/killmails/${kid}/${hash}/`,{headers:{Accept:'application/json'}},counted,gauge).then(r=>r.value)});
+    else if(key==='planets')value=await stepPlanets(list,old,{room,get:planet=>esiJson(`${ESI}/characters/${id}/planets/${planet}/`,{headers:auth},counted,gauge).then(r=>r.value)});
+    else if(list!==undefined)value=SHAPE[key](list);
+    snapshot.operations[key]={permission:true,value,fetched:list!==undefined||waiting?snapshot.fetchedAt:prev?.fetched};
+    if(next)snapshot.esi[key]=next;
+   }catch(error){
+    if(error.retryAt)gauge.hold=Math.max(gauge.hold||0,error.retryAt);
+    reuse(error.message);
+   }
+   return true;
+  };
+  const start=Number.isInteger(prior.cursor)?prior.cursor%EXTRAS.length:0;let blocked=-1;
+  for(let i=0;i<EXTRAS.length;i++){const at=(start+i)%EXTRAS.length;if(!await extra(EXTRAS[at])&&blocked<0)blocked=at;}
+  snapshot.cursor=blocked<0?start:blocked;
+  // What changed since the last sync, for the alert pass (kept three days).
+  const events=diffEvents(prior,snapshot);
+  if(events.length)snapshot.events=events;
+  // Item names the alerts will use (the Worker has no name data): one lookup, only when alerts are on.
+  if(env.DISCORD_WEBHOOK_URL){
+   const ops=snapshot.operations,need=new Set([...(ops.jobs?.value||[]).flatMap(j=>[j.product_type_id,j.blueprint_type_id]),...(ops.orders?.value||[]).map(o=>o.type_id),...events.map(e=>e.type)].filter(Number.isSafeInteger));
+   const known=prior.names||{},missing=[...need].filter(t=>!known[t]).slice(0,200);
+   let found={};
+   if(missing.length&&room()>=1&&!gauge.stop)try{found=Object.fromEntries((await(await fetchOk(`${ESI}/universe/names/`,{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify(missing)},counted,gauge)).json()).map(r=>[r.id,String(r.name).slice(0,80)]));}catch{/* The alerts say "an item". */}
+   snapshot.names=Object.fromEntries([...need].map(t=>[t,known[t]||found[t]]).filter(([,n])=>n));
+  }
   // A trail of systems the pilot was seen in (newest last, 7 days, at most 200): the Exploration tab skips them.
   const here=snapshot.operations.location?.value?.solar_system_id,trail=(prior.operations?.trail?.value||[]).filter(([,at])=>Date.now()-at<604800000);
   if(Number.isSafeInteger(here)&&trail.at(-1)?.[0]!==here)trail.push([here,Date.now()]);
@@ -601,9 +692,14 @@ async function route(request,env,ctx,fetchImpl){
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
    return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),shareLevel:row.share_wing,lastError:row.last_error||null,fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
-    // Consent version 2 also covers ship, location and the mining ledger.
-    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null}:{})};
+    // Consent version 2 also covers ship, its current fit, location and the mining ledger.
+    ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null,fit:ops.fit?.value||null}:{})};
   })});
+ }
+ if(url.pathname==='/api/contract-items'&&request.method==='GET'){
+  await limit(env,request,'RATE_JOURNAL',`c:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  return response(await contractItems(s.character_id,Number(url.searchParams.get('id')),env,fetchImpl));
  }
  if(url.pathname==='/api/waypoints'&&request.method==='POST'){
   const s=await session(request,env);
@@ -640,7 +736,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);
@@ -718,6 +814,13 @@ export async function sampleActivity(env,fetchImpl=fetch,now=Date.now()){
 // the turn counter it bumps hands the skipped turn to the same pilot on the next run, so neither pilot always loses it.
 export const SYNC_EVERY=5*60000;
 export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
+ const result=await syncStep(env,fetchImpl,at);
+ // Discord alerts come from what is stored, after the sync: a few posts at most, and never a reason to fail the run.
+ try{const alerts=await sendAlerts(env,fetchImpl);if(alerts.sent||alerts.failed)Object.assign(result,{alerts:alerts.sent,...(alerts.failed?{alertsFailed:alerts.failed}:{})});}
+ catch{Object.assign(result,{alertsFailed:1});}
+ return result;
+}
+async function syncStep(env,fetchImpl,at){
  const sample=await env.DB.prepare("SELECT expires_at, turns FROM market_docs WHERE name = 'activity'").first();
  if(!sample||Date.now()>=sample.expires_at){const r=await sampleActivity(env,fetchImpl);return {job:'sample',kills:r.failed?'failed':'ok'};}
  const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
@@ -732,7 +835,9 @@ export async function cleanup(env,now=Date.now()){
  await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
-  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(now-180*86400000)]);
+  env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(now-180*86400000),
+  // Alert keys only stop a repeat; no event stays relevant for a month.
+  env.DB.prepare('DELETE FROM alerts WHERE sent_at < ?').bind(now-30*86400000)]);
  return {job:'cleanup'};
 }
 // event.cron says which trigger fired: the daily one cleans up, any other syncs. Each run logs one structured line.

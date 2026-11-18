@@ -4,11 +4,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign,createHmac,createHash} from 'node:crypto';
 import {signPipelineRequest} from '../worker/pipeline-auth.js';
-import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES} from '../worker/index.js';
+import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -39,6 +39,10 @@ function setup(options={}){
    if(init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
    return new Response(JSON.stringify(rows),{headers});
   }
+  // Public ESI routes the sync reads without a token: a killmail and the name lookup alerts use.
+  if(/^\/killmails\/\d+\/\w+\/$/.test(path)){const kid=Number(path.split('/')[2]);return json(options.killmail?.(kid)||{killmail_id:kid,killmail_time:new Date(Date.now()-kid*60000).toISOString(),solar_system_id:30000142,victim:{ship_type_id:605,character_id:kid%2?id:99},attackers:[{final_blow:true,corporation_id:1000044},{corporation_id:5}]});}
+  if(new URL(url).hostname==='discord.com'){if(options.webhookStatus>=400)return new Response('{}',{status:options.webhookStatus});(options.posts||=[]).push(JSON.parse(init.body));return new Response(null,{status:204});}
+  if(path==='/universe/names/')return json(JSON.parse(init.body).map(i=>({id:i,name:options.typeNames?.[i]||`Type ${i}`,category:'inventory_type'})));
   assert.match(init.headers.Authorization,/^Bearer /);
   const res=await character(url,path,init);
   // options.cache = {ttl(path) -> ms until Expires, unchanged: answer 304 to a matching ETag}; options.limitPath answers
@@ -56,16 +60,25 @@ function setup(options={}){
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
-  if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name'});
+  if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name',ship_item_id:1001});
   if(path.endsWith('/location/'))return json({solar_system_id:30000142});
-  if(path.endsWith('/industry/jobs/'))return json([]);
+  if(path.endsWith('/industry/jobs/'))return json(options.jobs||[]);
   if(path.endsWith('/wallet/journal/'))return json(Array.from({length:120},(_,i)=>({id:i,date:'2026-10-30T00:00:00Z',ref_type:'bounty_prizes',amount:1000+i,balance:5})));
   if(path.endsWith('/wallet/transactions/'))return json([{transaction_id:1,date:'2026-10-30T00:00:00Z',type_id:34,quantity:10,unit_price:5,is_buy:true,location_id:60003760}]);
   if(path.endsWith('/attributes/'))return json({charisma:19,intelligence:20,memory:20,perception:20,willpower:20,bonus_remaps:2});
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
   if(path.endsWith('/mining/'))return json([{date:'2026-11-01',solar_system_id:30000142,type_id:1230,quantity:100}]);
-  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true}]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':'2'}});}
+  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
+  if(path.endsWith('/orders/history/'))return json(options.history||[]);
+  if(path.endsWith('/orders/'))return json(options.orders||[]);
+  if(path.endsWith('/contracts/'))return json(options.contracts||[]);
+  if(/\/contracts\/\d+\/items\/$/.test(path))return options.contractItems?json(options.contractItems,options.contractItemsStatus||200):json({error:'none'},404);
+  if(path.endsWith('/killmails/recent/'))return json(options.kills||[]);
+  if(path.endsWith('/blueprints/'))return json(options.blueprints||[]);
+  if(/\/planets\/\d+\/$/.test(path))return json(options.planetPins||{links:[],pins:[{pin_id:1,extractor_details:{product_type_id:2268,heads:[{head_id:1}]},expiry_time:'2026-12-01T00:00:00Z'},{pin_id:2,factory_details:{schematic_id:121}},{pin_id:3,contents:[{type_id:2268,amount:300}]}],routes:[]});
+  if(path.endsWith('/planets/'))return json(options.planets||[]);
+  if(path.endsWith('/standings/'))return json(options.standings||[]);
   if(path.endsWith('/ui/autopilot/waypoint/'))return new Response(null,{status:options.gameOffline?404:204});
   throw new Error(`Unexpected request ${path}`);
  };
@@ -125,7 +138,7 @@ test('optional permission failure does not destroy the training snapshot',async(
  const app=setup({walletFail:true});await connect(app);const row=app.env.DB.raw.prepare('SELECT snapshot FROM pilots').get();const snap=JSON.parse(row.snapshot);assert.equal(snap.skills.total_sp,125000);assert.match(snap.operations.wallet.error,/temporarily unavailable/);assert.equal(snap.operations.ship.value.ship_type_id,605);
 });
 test('training-only consent does not fetch optional private endpoints',async()=>{
- const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets|mining)\//.test(call.url)));
+ const app=setup({scopes:SCOPES});await connect(app);assert.ok(!app.calls.some(call=>/\/(wallet|location|ship|industry\/jobs|clones|implants|assets|mining|orders|contracts|killmails|blueprints|planets|standings)\//.test(call.url)));
 });
 test('expired access token refreshes and persists encrypted rotation before ESI sync',async()=>{
  const app=setup();await connect(app);const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;c.refreshToken='old-refresh';app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P));
@@ -463,7 +476,7 @@ test('after Expires a sync sends If-None-Match and reuses stored data on 304, wi
  const options={cache:{ttl:()=>-1000}},app=setup(options);await connect(app);
  const first=snap(app);options.cache.unchanged=true;
  const before=app.calls.length;const row=await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(row.last_error,null);
- const calls=characterCalls(app,before);assert.equal(calls.length,13);
+ const calls=characterCalls(app,before);assert.equal(calls.length,13+EXTRAS.length);
  for(const c of calls)assert.equal(c.init.headers['If-None-Match'],`"${new URL(c.url).pathname}"`);
  assert.ok(!calls.some(c=>c.url.includes('page=2')),'an unchanged first page means unchanged assets');
  const second=snap(app);
@@ -841,4 +854,167 @@ test('each request logs its route, status and duration, and nothing about who or
 test('migration 0008 indexes the cleanup and Delete my data lookups',async()=>{
  const app=setup();const names=app.env.DB.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(r=>r.name);
  for(const n of ['oauth_states_expiry','sessions_character','journal_owner','journal_tombstones'])assert.ok(names.includes(n),n);
+});
+
+// ── Orders, contracts, losses, blueprints, planets, standings, the current fit and Discord alerts ──
+const NEW_SCOPES=['esi-markets.read_character_orders.v1','esi-contracts.read_character_contracts.v1','esi-killmails.read_killmails.v1','esi-characters.read_blueprints.v1','esi-planets.manage_planets.v1','esi-characters.read_standings.v1'];
+const hoursFromNow=h=>new Date(Date.now()+h*3600000).toISOString();
+const WEBHOOK='https://discord.com/api/webhooks/123456/abc-DEF_ghi';
+const expire=async app=>{const row=app.env.DB.raw.prepare('SELECT * FROM pilots').get();const c=await decrypt(row.credentials,app.env.TOKEN_ENCRYPTION_KEY,P);c.expires=0;app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, updated_at = 0, sync_lock_until = 0').run(await encrypt(c,app.env.TOKEN_ENCRYPTION_KEY,P));};
+const readyJob=(job_id,extra={})=>({job_id,activity_id:1,blueprint_type_id:1234,product_type_id:605,runs:1,status:'ready',end_date:hoursFromNow(-1),...extra});
+test('the new scopes are requested, optional, and a pilot without them keeps working',async()=>{
+ for(const scope of NEW_SCOPES){assert.ok(REQUESTED_SCOPES.includes(scope),scope);assert.ok(!SCOPES.includes(scope),`${scope} is not required`);}
+ const app=setup({scopes:REQUESTED_SCOPES.filter(s=>!NEW_SCOPES.includes(s))});await connect(app);
+ const got=snap(app);assert.equal(got.skills.total_sp,125000);
+ for(const key of ['orders','orderHistory','contracts','killmails','blueprints','planets','standings'])assert.deepEqual(got.operations[key],{permission:false},key);
+ assert.ok(!app.calls.some(c=>/\/(orders|contracts|killmails|blueprints|planets|standings)\//.test(c.url)),'nothing is asked without the scope');
+});
+test('a sync keeps compact orders, history, contracts, losses, blueprints, planets and standings, and only the ship\'s own items',async()=>{
+ const issued=hoursFromNow(-48);
+ const app=setup({
+  fit:[{type_id:2977,quantity:1,location_id:1001,location_flag:'HiSlot0'},{type_id:5973,quantity:1,location_id:1001,location_flag:'MedSlot0'},{type_id:2454,quantity:2,location_id:1001,location_flag:'DroneBay'},{type_id:34,quantity:900,location_id:1002,location_flag:'HiSlot0'},{type_id:34,quantity:5,location_id:1001,location_flag:'Cargo'}],
+  orders:[{order_id:1,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:5.5,volume_remain:10,volume_total:50,issued,duration:90,range:'region',min_volume:1,escrow:0,junk:'x'}],
+  history:[{order_id:2,type_id:35,location_id:60003760,region_id:10000002,is_buy_order:true,price:9,volume_remain:0,volume_total:10,issued,duration:30,range:'station'},{order_id:3,type_id:35,price:9,volume_remain:5,volume_total:10,issued:hoursFromNow(-24*80),duration:30,state:'expired'}],
+  contracts:[{contract_id:7,type:'courier',status:'outstanding',issuer_id:id,assignee_id:0,date_issued:issued,date_expired:hoursFromNow(10),reward:1e6,collateral:5e7,volume:100,start_location_id:60003760,end_location_id:60000001,days_to_complete:3,availability:'public',title:'Haul'},{contract_id:8,type:'item_exchange',status:'deleted',issuer_id:id,date_issued:issued,date_expired:hoursFromNow(10)}],
+  kills:[{killmail_id:1,killmail_hash:'aaa'},{killmail_id:2,killmail_hash:'bbb'}],
+  blueprints:[{item_id:1,type_id:1234,quantity:-1,runs:-1,material_efficiency:10,time_efficiency:20},{item_id:2,type_id:1234,quantity:-2,runs:5,material_efficiency:0,time_efficiency:0}],
+  planets:[{planet_id:40000001,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:issued}],
+  standings:[{from_id:500001,from_type:'faction',standing:0.5},{from_id:3009,from_type:'agent',standing:-3.4}]});
+ await connect(app);const got=snap(app).operations;
+ assert.deepEqual(got.fit.value,{ship:1001,items:[[2977,'HiSlot0',1],[5973,'MedSlot0',1],[2454,'DroneBay',2],[34,'Cargo',5]]},'items of the ship only, no full asset list');
+ assert.equal(got.orders.value[0].junk,undefined);assert.equal(got.orders.value[0].price,5.5);
+ assert.deepEqual(got.orderHistory.value.map(o=>o.order_id),[2],'history older than 30 days is dropped');
+ assert.deepEqual(got.contracts.value.map(c=>c.contract_id),[7]);assert.equal(got.contracts.value[0].collateral,5e7);
+ assert.deepEqual(got.killmails.value.losses.map(l=>l.id),[1],'losses are the kills whose victim is the pilot');assert.deepEqual(got.killmails.value.seen,[2]);
+ assert.equal(got.killmails.value.losses[0].corp,1000044);assert.equal(got.killmails.value.losses[0].attackers,2);
+ assert.deepEqual(got.blueprints.value.types,[[1234,1,1,10,20,5]]);
+ assert.equal(got.planets.value.planets[0].pins.ext[0][0],2268);assert.equal(got.planets.value.planets[0].pins.fac[0],121);
+ assert.deepEqual(got.standings.value[0],[3009,'agent',-3.4]);
+ const session=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${(await connect(app)).bearer}`}})).json();
+ for(const k of ['events','names','cursor','esi'])assert.equal(session[k],undefined,`${k} stays on the Worker`);
+ assert.ok(JSON.stringify(got).length<60000,'the snapshot stays small');
+});
+test('killmails are read once: a later sync asks only for the ones it has not seen',async()=>{
+ const options={kills:[{killmail_id:1,killmail_hash:'aaa'}],cache:{ttl:()=>-1000}},app=setup(options);await connect(app);
+ const detail=()=>app.calls.filter(c=>/\/killmails\/\d+\/\w+\/$/.test(c.url)).length;assert.equal(detail(),1);
+ options.kills=[{killmail_id:3,killmail_hash:'ccc'},{killmail_id:1,killmail_hash:'aaa'}];await expire(app);await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.equal(detail(),2,'only the new one');assert.deepEqual(snap(app).operations.killmails.value.losses.map(l=>l.id).sort(),[1,3]);
+});
+test('the 50 subrequest limit holds in the worst case: token refresh, 20 asset pages, 10 new killmails, 12 planets, alerts to send',async()=>{
+ const T0=Date.now();
+ const options={assetPages:25,posts:[],typeNames:{605:'Venture',1234:'Venture Blueprint'},
+  jobs:Array.from({length:8},(_,i)=>readyJob(i+1,{activity_id:5,product_type_id:1234})),
+  kills:Array.from({length:10},(_,i)=>({killmail_id:i*2+1,killmail_hash:`h${i}`})),
+  planets:Array.from({length:12},(_,i)=>({planet_id:40000001+i,planet_type:'lava',solar_system_id:30000142,upgrade_level:3,num_pins:4,last_update:hoursFromNow(-2)})),
+  orders:[{order_id:1,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:5.5,volume_remain:10,volume_total:50,issued:hoursFromNow(-48),duration:90}],
+  contracts:[{contract_id:7,type:'courier',status:'outstanding',issuer_id:id,date_issued:hoursFromNow(-48),date_expired:hoursFromNow(5)}],
+  blueprints:[{item_id:1,type_id:1234,quantity:-1,runs:-1,material_efficiency:10,time_efficiency:20}],standings:[{from_id:1,from_type:'faction',standing:1}]};
+ const app=setup(options);app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);
+ sampled(app);
+ let worst=0;const seen=new Set();
+ for(let run=0;run<8;run++){
+  await expire(app);app.env.DB.raw.exec('DELETE FROM alerts'); // every alert is due again, and the access token must be refreshed
+  const before=app.calls.length;await scheduledSync(app.env,app.fetchImpl,T0+run*SYNC_EVERY);
+  const used=app.calls.length-before;worst=Math.max(worst,used);assert.ok(used<=50,`run ${run} made ${used} subrequests`);
+  const ops=snap(app).operations;for(const key of Object.keys(ops))if(ops[key].value!==undefined)seen.add(key);
+ }
+ assert.ok(worst>=44,`the scenario really is a worst case (${worst})`);
+ for(const key of ['orders','orderHistory','contracts','killmails','blueprints','planets','standings','fit'])assert.ok(seen.has(key),`${key} arrives within a few runs`);
+ assert.equal(snap(app).operations.killmails.value.wait.length,0,'every killmail detail is read in the end');
+ assert.ok(snap(app).operations.planets.value.planets.every(p=>p.pins),'every planet\'s pins are read in the end');
+});
+test('a stored cursor past the last extra wraps instead of failing',async()=>{
+ const app=setup({});await connect(app);const first=snap(app);assert.ok(Number.isInteger(first.cursor));
+ app.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify({...first,cursor:99}));await expire(app);
+ assert.equal((await syncPilot(id,app.env,app.fetchImpl,{force:true})).last_error,null);
+});
+test('contract items are read on demand, only for the caller\'s own contracts',async()=>{
+ const app=setup({contracts:[{contract_id:7,type:'item_exchange',status:'outstanding',issuer_id:id,date_issued:hoursFromNow(-1),date_expired:hoursFromNow(48),price:1000}],contractItems:[{type_id:34,quantity:100,is_included:true,record_id:1,junk:1}]});
+ const {bearer}=await connect(app);const headers={Authorization:`Bearer ${bearer}`};
+ assert.equal((await app.request('/api/contract-items?id=7')).status,401);
+ assert.ok(!app.calls.some(c=>/contracts\/7\/items/.test(c.url)),'the cron never reads items');
+ const ok=await(await app.request('/api/contract-items?id=7',{headers})).json();assert.deepEqual(ok,{contractId:7,items:[{type_id:34,quantity:100,is_included:true}]});
+ assert.equal((await app.request('/api/contract-items?id=8',{headers})).status,404,'not in the pilot\'s list');
+ assert.equal((await app.request('/api/contract-items?id=abc',{headers})).status,400);
+ assert.equal(app.calls.filter(c=>/contracts\/8\/items/.test(c.url)).length,0,'a stranger\'s contract id never reaches ESI');
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until AS l FROM pilots').get().l,0,'the lock is released');
+ const courier=setup({contracts:[{contract_id:9,type:'courier',status:'outstanding',issuer_id:id,date_issued:hoursFromNow(-1),date_expired:hoursFromNow(48)}]});const c=await connect(courier);
+ assert.deepEqual(await(await courier.request('/api/contract-items?id=9',{headers:{Authorization:`Bearer ${c.bearer}`}})).json(),{contractId:9,items:[]},'a courier contract has none');
+ const old=setup({scopes:REQUESTED_SCOPES.filter(s=>!NEW_SCOPES.includes(s))});const o=await connect(old);
+ old.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify({operations:{contracts:{permission:true,value:[{contract_id:5}]}}}));
+ assert.equal((await old.request('/api/contract-items?id=5',{headers:{Authorization:`Bearer ${o.bearer}`}})).status,403,'without the contracts scope');
+});
+test('the wing summary carries the current fit only at consent level 2',async()=>{
+ const app=setup({fit:[{type_id:2977,quantity:1,location_id:1001,location_flag:'HiSlot0'}]});const {bearer}=await connect(app);
+ const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots[0];
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 2').run();assert.deepEqual((await wing()).fit,{ship:1001,items:[[2977,'HiSlot0',1]]});
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 1').run();assert.equal((await wing()).fit.ship,1001,'the pilot always sees their own');
+ const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('2977'),'never public');
+});
+const alertApp=async(options={})=>{
+ const o={posts:[],typeNames:{1234:'Venture Blueprint',34:'Tritanium',605:'Venture'},...options},app=setup(o);app.posts=o.posts;app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);app.env.DB.raw.exec('DELETE FROM alerts');return app;
+};
+test('Discord alerts: one message per new event, never repeated, and no place names',async()=>{
+ const {sendAlerts}=await import('../worker/alerts.js');
+ const app=await alertApp({
+  jobs:[readyJob(1,{activity_id:5,product_type_id:1234,station_id:60003760})],
+  contracts:[{contract_id:7,type:'courier',status:'outstanding',issuer_id:id,date_issued:hoursFromNow(-48),date_expired:hoursFromNow(5),start_location_id:60003760}]});
+ const first=await sendAlerts(app.env,app.fetchImpl);
+ const texts=app.posts?.map(p=>p.content)||[];
+ assert.equal(first.sent,3,texts.join('|'));
+ assert.ok(texts.includes("Fiofka's job (Venture blueprint copy) is ready"),texts.join('|'));
+ assert.ok(texts.some(t=>/^Fiofka's courier contract expires in \d+ h$/.test(t)),texts.join('|'));
+ assert.ok(texts.some(t=>/^Fiofka's skill queue ends in \d+ h$/.test(t)),texts.join('|'));
+ for(const t of texts)for(const place of ['Jita','60003760','30000142','Forge','Caldari'])assert.ok(!t.includes(place),`${place} stays out of "${t}"`);
+ assert.equal((await sendAlerts(app.env,app.fetchImpl)).sent,0,'the same events are not sent twice');
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM alerts').get().n,3);
+});
+test('Discord alerts: an empty queue, an outbid order, orders that ended, contracts that moved and a new loss',async()=>{
+ const {sendAlerts}=await import('../worker/alerts.js');
+ const old=hoursFromNow(-48),order=(order_id,extra={})=>({order_id,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:7,volume_remain:10,volume_total:50,issued:old,duration:90,...extra});
+ const options={posts:[],typeNames:{34:'Tritanium',605:'Venture'},orders:[order(1),order(2,{price:5})],kills:[],contracts:[{contract_id:7,type:'item_exchange',status:'outstanding',issuer_id:id,date_issued:old,date_expired:hoursFromNow(200)}]};
+ const app=setup(options);app.env.DISCORD_WEBHOOK_URL=WEBHOOK;await connect(app);
+ // The stored market says Tritanium sells at 5 in Jita: order 1 (7) is outbid, order 2 (5) is the best price.
+ app.env.DB.raw.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (?, ?, ?)').run(10000002,JSON.stringify({name:'The Forge',types:{34:{d:1,s:[[60003760,5,100]],b:[]}}}),Date.now());
+ app.env.DB.raw.prepare("UPDATE pilots SET snapshot = json_set(snapshot, '$.queue', json('[]'))").run();
+ app.env.DB.raw.exec('DELETE FROM alerts');
+ await sendAlerts(app.env,app.fetchImpl);
+ const first=options.posts.splice(0).map(p=>p.content);
+ assert.ok(first.includes("Fiofka's skill queue is empty"),first.join('|'));
+ assert.ok(first.includes("Fiofka's sell order for Tritanium was outbid"),first.join('|'));
+ assert.equal(first.filter(t=>/outbid/.test(t)).length,1,'only the order that is not the best');
+ // Next sync: order 1 filled (in history), order 2 gone with no history, the contract accepted, a new loss.
+ options.orders=[];options.history=[{...order(1),volume_remain:0}];options.contracts=[{contract_id:7,type:'item_exchange',status:'in_progress',issuer_id:id,date_issued:old,date_expired:hoursFromNow(200)}];options.kills=[{killmail_id:1,killmail_hash:'aaa'}];
+ await expire(app);await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ await sendAlerts(app.env,app.fetchImpl);
+ const second=options.posts.splice(0).map(p=>p.content);
+ assert.ok(second.includes("Fiofka's sell order for Tritanium filled"),second.join('|'));
+ assert.ok(second.includes("Fiofka's item exchange contract was accepted"),second.join('|'));
+ assert.ok(second.includes('Fiofka lost a Venture'),second.join('|'));
+ assert.ok(!second.some(t=>/outbid/.test(t)),'orders that are gone are not outbid');
+ for(const t of [...first,...second])assert.ok(!/Jita|Forge|30000142/.test(t),t);
+});
+test('Discord alerts do nothing without the secret, reject a bad URL, release a key when the post fails, and cap a run',async()=>{
+ const {sendAlerts,MAX_ALERTS}=await import('../worker/alerts.js');
+ const plain=setup({posts:[],jobs:[readyJob(1)]});await connect(plain);
+ const before=plain.calls.length;assert.deepEqual(await sendAlerts(plain.env,plain.fetchImpl),{sent:0,skipped:true});assert.equal(plain.calls.length,before,'no request at all');
+ plain.env.DISCORD_WEBHOOK_URL='https://evil.example/hook';assert.equal((await sendAlerts(plain.env,plain.fetchImpl)).sent,0);assert.equal(plain.calls.length,before);
+ const down=await alertApp({webhookStatus:500,jobs:[readyJob(1)]});
+ const r=await sendAlerts(down.env,down.fetchImpl);assert.equal(r.sent,0);assert.equal(r.failed,1);assert.equal(down.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM alerts').get().n,0,'a failed post can be tried again');
+ const many=await alertApp({jobs:Array.from({length:9},(_,i)=>readyJob(i+1))});
+ assert.equal((await sendAlerts(many.env,many.fetchImpl)).sent,MAX_ALERTS);assert.equal((await sendAlerts(many.env,many.fetchImpl)).sent,MAX_ALERTS,'the rest follows on the next runs');
+});
+test('the cron sends alerts after its sync, and a failing webhook never fails the run',async()=>{
+ const app=await alertApp({jobs:[readyJob(1)]});sampled(app);
+ app.env.DB.raw.exec('UPDATE pilots SET updated_at = 0');
+ const result=await scheduled({cron:'*/5 * * * *'},app.env,Date.now(),app.fetchImpl);
+ assert.equal(result.job,'sync');assert.ok(result.alerts>=1);
+ assert.ok(!/Fiofka|Venture/.test(JSON.stringify(result)),'the cron log names nobody');
+ const bad=await alertApp({webhookStatus:500,jobs:[readyJob(1)]});sampled(bad);bad.env.DB.raw.exec('UPDATE pilots SET updated_at = 0');
+ assert.equal((await scheduled({cron:'*/5 * * * *'},bad.env,Date.now(),bad.fetchImpl)).job,'sync');
+});
+test('the daily cleanup purges alert keys older than 30 days',async()=>{
+ const app=setup();const now=Date.now();
+ app.env.DB.raw.prepare('INSERT INTO alerts (key, sent_at) VALUES (?, ?)').run('old',now-31*86400000);app.env.DB.raw.prepare('INSERT INTO alerts (key, sent_at) VALUES (?, ?)').run('new',now-86400000);
+ await cleanup(app.env,now);assert.deepEqual(app.env.DB.raw.prepare('SELECT key FROM alerts').all().map(r=>r.key),['new']);
 });

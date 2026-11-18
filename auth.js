@@ -11,7 +11,16 @@ export const OPERATIONS_SCOPES = {
   attributes:'esi-skills.read_skills.v1',
   clones:'esi-clones.read_clones.v1',
   implants:'esi-clones.read_implants.v1',
-  assets:'esi-assets.read_assets.v1'
+  assets:'esi-assets.read_assets.v1',
+  // Optional like the rest: a pilot who has not reconnected keeps working and sees "Needs permission".
+  orders:'esi-markets.read_character_orders.v1',
+  orderHistory:'esi-markets.read_character_orders.v1',
+  contracts:'esi-contracts.read_character_contracts.v1',
+  killmails:'esi-killmails.read_killmails.v1',
+  // Read now so each pilot reconnects only once; the planner and standings views come later.
+  blueprints:'esi-characters.read_blueprints.v1',
+  planets:'esi-planets.manage_planets.v1',
+  standings:'esi-characters.read_standings.v1'
 };
 export const REQUESTED_SCOPES = [...new Set([...SCOPES, ...Object.values(OPERATIONS_SCOPES)])];
 export function base64url(bytes) {
