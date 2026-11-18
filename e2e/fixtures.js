@@ -4,7 +4,7 @@ export const names=['Fiofka','Decxus'];
 export const KEY='eve-flight-journal:v1';
 export const API='https://api.example';
 export const opaque='b'.repeat(43);
-const NAMES={500001:'Caldari State',3300:'Gunnery',3327:'Spaceship Command',3380:'Industry',605:'Heron',1234:'Heron Blueprint',34:'Tritanium',35:'Pyerite',587:'Rifter',9899:'Ocular Filter - Basic',30000142:'Jita',30002187:'Amarr',60003760:'Jita IV - Moon 4 - Caldari Navy Assembly Plant',30002813:'Tama',1000044:'Test Flight Academy',2124810474:'Fiofka',2124815118:'Decxus',
+const NAMES={2268:'Aqueous Liquids',2456:'Hobgoblin I Blueprint',691:'Rifter Blueprint',60008494:'Amarr VIII (Oris) - Emperor Family Academy',500001:'Caldari State',3300:'Gunnery',3327:'Spaceship Command',3380:'Industry',605:'Heron',1234:'Heron Blueprint',34:'Tritanium',35:'Pyerite',587:'Rifter',9899:'Ocular Filter - Basic',30000142:'Jita',30002187:'Amarr',60003760:'Jita IV - Moon 4 - Caldari Navy Assembly Plant',30002813:'Tama',1000044:'Test Flight Academy',2124810474:'Fiofka',2124815118:'Decxus',
  5001:'Overdrive Injector System II',5002:'5MN Quad LiF Restrained Microwarpdrive',5003:'Medium Shield Extender I',5004:'Gas Cloud Scoop I',5005:'Core Probe Launcher I',5006:'Small Polycarbon Engine Housing II',5007:'Hobgoblin I',5008:'Nanite Repair Paste',60008494:'Amarr VIII (Oris) - Emperor Family Academy'};
 export const JITA=60003760,AMARR=60008494;
 // type -> [group, category]; groups 255/257/268 are skill groups.
@@ -57,10 +57,16 @@ function privateRecord(id,state){
    {contract_id:7003,type:'courier',status:'in_progress',availability:'public',issuer_id:IDS[1],assignee_id:IDS[0],acceptor_id:IDS[0],date_issued:iso(-48),date_accepted:iso(-24),date_expired:iso(200),reward:900000,collateral:10000000,volume:900,days_to_complete:3,start_location_id:AMARR,end_location_id:JITA},
    {contract_id:7004,type:'item_exchange',status:'finished',availability:'public',issuer_id:IDS[1],acceptor_id:IDS[0],date_issued:iso(-96),date_expired:iso(-24),date_completed:iso(-48),price:1000000}]),
   killmails:ok({losses:!state.losses?[]:[{id:555,hash:'abc555',time:iso(-30),ship:587,system:30002813,attackers:3,corp:1000044,damage:1200},{id:554,hash:'abc554',time:iso(-24*9),ship:605,system:30000142,attackers:1,damage:300}],seen:[1],wait:[]}),
+  // Blueprints as the Worker keeps them: [type, originals, copies, ME, TE, runs on copies, location]. ownsStarters adds a Hobgoblin original and a Rifter copy.
+  blueprints:ok({count:3,types:[[1234,1,0,2,4,0,JITA],...(state.ownsStarters?[[2456,1,0,8,12,0,JITA],[691,0,2,4,6,5,AMARR]]:[])]}),
+  planets:ok({pending:false,planets:[
+   {id:40000001,type:'lava',system:30000142,level:3,num:9,updated:iso(-30),pins:{ext:[[2268,iso(-5),2,600,1800],[2268,iso(10),1,300,1800]],fac:[121],store:[[2268,300]],links:4,cap:12000,vault:[[2268,300]]}},
+   {id:40000002,type:'barren',system:30000144,level:5,num:14,updated:iso(-2),pins:{ext:[[2268,iso(72),3,900,3600]],fac:[],store:[],links:6}}]}),
+  standings:ok([[500001,'faction',5],[1000035,'npc_corp',4],[3009,'agent',2]]),
   clones:ok({home_location:{location_id:60003760,location_type:'station'},jump_clones:[{jump_clone_id:1,location_id:1035466617946,location_type:'structure',implants:[9899],name:'Staging'}],last_clone_jump_date:iso(-2)})
  };
  // A pilot who has not reconnected since the order, contract and loss scopes were added.
- if(state.oldScopes)for(const k of ['orders','orderHistory','contracts','killmails'])operations[k]={permission:false};
+ if(state.oldScopes)for(const k of ['orders','orderHistory','contracts','killmails','blueprints','planets','standings'])operations[k]={permission:false};
  if(state.trainingOnly)operations=Object.fromEntries(Object.keys(operations).map(k=>[k,{permission:false}]));
  if(state.oldSnapshot)for(const k of ['journal','transactions','attributes','implants','clones'])delete operations[k];
  return {characterId:id,name:names[IDS.indexOf(id)],expires:Date.now()+600000,fetchedAt:iso(0),queue,operations,
@@ -71,7 +77,9 @@ function wingRecord(id,state){
  if(id===IDS[0]){const r=privateRecord(id,state);return {characterId:id,name:'Fiofka',sharing:true,fetchedAt:r.fetchedAt,skills:r.skills,wallet:r.operations.wallet?.value??null,assets:r.operations.assets?.value||null};}
  // wingLevel 1 is the older consent: skills, wallet and assets, but no ship, location, mining, trail or jobs.
  const level=state?.wingLevel??2,r={characterId:id,name:'Decxus',sharing:true,shareLevel:level,lastError:state?.wingError||null,fetchedAt:iso(0),wallet:40000000,jobs:[{job_id:7,activity_id:4,blueprint_type_id:1234,runs:3,status:'active',start_date:iso(-2),end_date:iso(6),station_id:60003760}],assets:{items:2,locations:1,types:[[587,10],[34,500000]]},ship:{ship_type_id:587,ship_name:'Rifter rush',ship_item_id:2002},fit:{ship:2002,items:[[5001,'LoSlot0',1],[5007,'DroneBay',5]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}}
- if(level<2){delete r.jobs;delete r.ship;delete r.fit;}
+ r.blueprints={count:1,types:[[691,1,0,6,10,0,AMARR]]};
+ r.planets={pending:false,planets:[{id:40000003,type:'storm',system:30002187,level:4,num:7,updated:iso(-6),pins:{ext:[[2268,iso(20),2,450,1800]],fac:[],store:[],links:2}}]};
+ if(level<2){delete r.jobs;delete r.ship;delete r.fit;delete r.blueprints;delete r.planets;}
  return r;
 }
 // The mocked sessions: `opaque` with the pilot's index as its last character, or `reconnected` after a Reconnect.
@@ -100,7 +108,7 @@ export async function mockApp(page,options={}) {
   else if(/\/universe\/categories\/16\/$/.test(path))body={groups:[255,257,268]};
   else if(path.includes('/universe/categories/'))body={name:CATEGORIES[path.match(/(\d+)\/$/)[1]]};
   else if(path.includes('/universe/groups/'))body=GROUPS[path.match(/(\d+)\/$/)[1]];
-  else if(path.includes('/universe/types/')){const id=Number(path.match(/(\d+)\/$/)[1]);body={type_id:id,name:NAMES[id],group_id:(TYPES[id]||[1])[0],capacity:id===605?400:0};}
+  else if(path.includes('/universe/types/')){const id=Number(path.match(/(\d+)\/$/)[1]);body={type_id:id,name:NAMES[id],group_id:(TYPES[id]||[1])[0],capacity:id===605?400:0,volume:id===2268?0.5:1};}
   else if(path.includes('/markets/prices/'))body=PRICES.map(([type_id,average_price,adjusted_price])=>({type_id,average_price,adjusted_price}));
   else if(path.includes('/industry/systems/'))body=[[30000142,0.05,0.04],[30000144,0.02,0.01],[30003504,0.01,0.03],[30002813,0.001,0.001],[30002187,0.03,0.03]].map(([solar_system_id,m,r])=>({solar_system_id,cost_indices:[{activity:'manufacturing',cost_index:m},{activity:'researching_material_efficiency',cost_index:r}]}));
   else if(path.includes('/route/')){const [a,b]=path.match(/route\/(\d+)\/(\d+)/).slice(1);body=a===b?[Number(a)]:Array.from({length:10},(_,i)=>i);}
@@ -110,6 +118,9 @@ export async function mockApp(page,options={}) {
   else if(path.includes('/fw/systems/'))body=[{solar_system_id:30002813,occupier_faction_id:500001,owner_faction_id:500001,contested:'contested',victory_points:300,victory_points_threshold:3000}];
   else if(path.includes('/incursions/'))body=[{state:'mobilizing',influence:0.4,infested_solar_systems:[30002187],staging_solar_system_id:30002187,constellation_id:20000322,faction_id:500019,has_boss:true,type:'Incursion'}];
   else if(path.includes('/universe/stargates/'))body={destination:{system_id:{50000010:30000144,50000011:30002187}[path.match(/(\d+)\/$/)[1]]||30000142}};
+  else if(/\/universe\/stations\/\d+\/$/.test(path)){const id=Number(path.match(/(\d+)\/$/)[1]);if(state.noStationOwners)return route.fulfill({status:404,body:'{}'});body={station_id:id,name:NAMES[id],owner:id===JITA?1000035:1000084};}
+  else if(/\/corporations\/100003[5]\/$/.test(path))body={name:'Caldari Navy',ticker:'CN',member_count:0,faction_id:500001};
+  else if(/\/corporations\/1000084\/$/.test(path))body={name:'Emperor Family',ticker:'EF',member_count:0};
   else if(path.includes('/corporations/'))body={name:'Test Flight Academy',ticker:'TFA',member_count:120,tax_rate:0.1};
   else if(/\/characters\/\d+\/$/.test(path))body={name:path.includes(String(IDS[0]))?names[0]:names[1],corporation_id:1000044,birthday:'2026-01-01T00:00:00Z',security_status:0.5};
   else {privateEsi.push(path);return route.fulfill({status:404,body:'{}'});}
@@ -179,7 +190,7 @@ export async function mockApp(page,options={}) {
 export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText(/Synced|EVE data from|answering|expired/);}
 // The Echelon IA: old tab ids map to a view, and each view lives in one of seven destinations.
 const VIEW={overview:'bridge',empire:'strengths',wallet:'ledger',notes:'logbook',journal:'logbook'};
-export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
+export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',planets:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
 export const isMobile=page=>page.viewportSize().width<=720;
 // Navigate like a person: the rail on desktop, the tab bar or More sheet on a phone, then the view's sub-view tab.
 export async function tab(page,name){
