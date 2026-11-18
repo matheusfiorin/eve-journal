@@ -63,3 +63,8 @@ test('counts per group say how many modules and how many stacked items', () => {
 test('rows that are malformed are skipped rather than thrown on', () => {
   assert.deepEqual(fitCounts([null, [1], [1, 7, 1], 'x', [1, 'LoSlot0', 1]]).low, 1);
 });
+test('EFT leaves out special holds such as the ore hold, which are cargo rather than the fit', () => {
+  const names = new Map([[32880, 'Venture'], [25266, 'Gas Cloud Scoop I'], [30375, 'Fullerite-C28']]);
+  const text = eft({ship:32880, title:'G\'as', items:[[25266, 'HiSlot0', 1], [30375, 'SpecializedOreHold', 341]], nameOf:id => names.get(id)});
+  assert.equal(text, '[Venture, G\'as]\nGas Cloud Scoop I');
+});

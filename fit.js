@@ -30,12 +30,13 @@ export function fitGroups(items, catOf = () => null) {
   }
   return out;
 }
-/** Standard EFT text: [Ship, fit name], lows, mids, highs, rigs, subsystems, drones, fighters, holds, cargo; blocks split by a blank line. */
+/** Standard EFT text: [Ship, fit name], lows, mids, highs, rigs, subsystems, drones, fighters, cargo; blocks split by a blank line.
+ * Special holds (ore, gas, fleet hangar) are what the ship is carrying, not its fit: the card shows them, the text leaves them out. */
 export function eft({ship, title, items, nameOf, catOf}) {
   const g = fitGroups(items, catOf), n = id => nameOf(id);
   const slots = key => g[key].map(m => m.charge ? `${n(m.type)}, ${n(m.charge)}` : n(m.type));
   const stacks = key => g[key].map(m => `${n(m.type)} x${m.qty}`);
-  const blocks = [slots('low'), slots('mid'), slots('high'), slots('rig'), slots('sub'), stacks('drones'), stacks('fighters'), stacks('special'), stacks('cargo')].filter(b => b.length);
+  const blocks = [slots('low'), slots('mid'), slots('high'), slots('rig'), slots('sub'), stacks('drones'), stacks('fighters'), stacks('cargo')].filter(b => b.length);
   return `[${n(ship)}, ${title || n(ship)}]\n${blocks.map(b => b.join('\n')).join('\n\n')}`.trimEnd();
 }
 /** How many modules sit in each slot group, and the stacked quantities in the bays and holds. */
