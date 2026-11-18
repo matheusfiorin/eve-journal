@@ -77,7 +77,7 @@ function wingRecord(id,state){
  if(id===IDS[0]){const r=privateRecord(id,state);return {characterId:id,name:'Fiofka',sharing:true,fetchedAt:r.fetchedAt,skills:r.skills,wallet:r.operations.wallet?.value??null,assets:r.operations.assets?.value||null};}
  // wingLevel 1 is the older consent: skills, wallet and assets, but no ship, location, mining, trail or jobs.
  const level=state?.wingLevel??2,r={characterId:id,name:'Decxus',sharing:true,shareLevel:level,lastError:state?.wingError||null,fetchedAt:iso(0),wallet:40000000,jobs:[{job_id:7,activity_id:4,blueprint_type_id:1234,runs:3,status:'active',start_date:iso(-2),end_date:iso(6),station_id:60003760}],assets:{items:2,locations:1,types:[[587,10],[34,500000]]},ship:{ship_type_id:587,ship_name:'Rifter rush',ship_item_id:2002},fit:{ship:2002,items:[[5001,'LoSlot0',1],[5007,'DroneBay',5]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}}
- r.blueprints={count:1,types:[[691,1,0,6,10,0,AMARR]]};
+ r.blueprints={count:1,types:state?.ownsStarters?[[691,1,0,6,10,0,AMARR]]:[[1234,1,0,6,10,0,AMARR]]};
  r.planets={pending:false,planets:[{id:40000003,type:'storm',system:30002187,level:4,num:7,updated:iso(-6),pins:{ext:[[2268,iso(20),2,450,1800]],fac:[],store:[],links:2}}]};
  if(level<2){delete r.jobs;delete r.ship;delete r.fit;delete r.blueprints;delete r.planets;}
  return r;
