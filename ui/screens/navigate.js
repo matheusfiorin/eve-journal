@@ -49,10 +49,10 @@ export async function renderHauling() {
   const options = {lowsec:$('#haul-lowsec').checked, avoid, optimize:$('#haul-optimize').checked, end:$('#haul-end').value};
   let liveIntel = new Map(), liveNote = 'Loading live gate kills…';
   // The searches run in a Worker (ui/haulplan.js); the page stays usable while they do.
-  const planned = async () => planAll(g, snapshot, stops, {live:liveIntel, value, hull, now:Date.now()}, options);
+  const planNow = async () => planAll(g, snapshot, stops, {live:liveIntel, value, hull, now:Date.now()}, options);
   status.textContent = 'Planning…'; content.setAttribute('aria-busy', 'true');
   if (!content.children.length) content.innerHTML = skeleton('Planning the route…');
-  haulPlans = await planned();
+  haulPlans = await planNow();
   if (stale()) return;
   content.removeAttribute('aria-busy');
   const draw = () => {
@@ -106,7 +106,7 @@ export async function renderHauling() {
     liveNote = `Live: ${kills.filter(k => !k.zkb?.npc).length} kills in the last hour across ${plural(regions.length, 'region')} from zKillboard.`;
   } catch (error) { liveNote = `Live kills unavailable (${error.message}); using history only.`; }
   if (stale()) return;
-  haulPlans = await planned();
+  haulPlans = await planNow();
   if (stale()) return;
   draw();
 }
