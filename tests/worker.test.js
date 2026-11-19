@@ -52,7 +52,7 @@ function setup(options={}){
   if(options.limitPath&&path.endsWith(options.limitPath))return new Response('{}',{status:429,headers:{'Retry-After':'120'}});
   if(!options.cache)return new Response(res.body,{status:res.status,headers});
   const tag=`"${path}"`;headers.set('ETag',tag);headers.set('Expires',new Date(Date.now()+options.cache.ttl(path)).toUTCString());headers.set('Last-Modified','Fri, 13 Nov 2026 10:00:00 GMT');
-  if(options.cache.unchanged&&init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
+  if(options.cache.unchanged&&!options.cache.changed?.test(path)&&init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
   return new Response(res.body,{status:res.status,headers});
  };
  const character=async(url,path)=>{
@@ -61,7 +61,7 @@ function setup(options={}){
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
   if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name',ship_item_id:1001});
-  if(path.endsWith('/location/'))return json({solar_system_id:30000142});
+  if(path.endsWith('/location/'))return json({solar_system_id:30000142,...(options.dock?{station_id:options.dock}:{})});
   if(path.endsWith('/industry/jobs/'))return json(options.jobs||[]);
   if(path.endsWith('/wallet/journal/'))return json(Array.from({length:120},(_,i)=>({id:i,date:'2026-10-30T00:00:00Z',ref_type:'bounty_prizes',amount:1000+i,balance:5})));
   if(path.endsWith('/wallet/transactions/'))return json([{transaction_id:1,date:'2026-10-30T00:00:00Z',type_id:34,quantity:10,unit_price:5,is_buy:true,location_id:60003760}]);
@@ -69,7 +69,7 @@ function setup(options={}){
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
   if(path.endsWith('/mining/'))return json([{date:'2026-11-01',solar_system_id:30000142,type_id:1230,quantity:100}]);
-  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
+  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[]),...(options.hangar||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
   if(path.endsWith('/orders/history/'))return json(options.history||[]);
   if(path.endsWith('/orders/'))return json(options.orders||[]);
   if(path.endsWith('/contracts/'))return json(options.contracts||[]);
@@ -1133,4 +1133,84 @@ test('an order that vanishes waits for the hourly order history, then fires the 
  const later=snap();later.pendingOrders[0].vanishedAt=Date.now()-day-1000;app.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify(later));
  await resync();assert.equal(snap().pendingOrders,undefined);assert.equal(kinds().length,3);
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('pendingOrders'));
+});
+// ── Sell planner data: hangar stacks and the pickup station ──
+const DOCK=60003760,OTHER=60008494,hangar=(type,quantity,at=DOCK,extra={})=>({type_id:type,quantity,location_id:at,location_flag:'Hangar',...extra});
+test('hangar stacks: the docked station only, packaged stacks only, cargo and ships left out, capped at 300',async()=>{
+ const rows=[hangar(34,1000),hangar(34,500),hangar(35,7),hangar(587,1,DOCK,{is_singleton:true}),hangar(3293,1,DOCK,{is_singleton:true}),hangar(999,1,DOCK,{is_blueprint_copy:true}),
+  hangar(36,50,OTHER),{type_id:37,quantity:9,location_id:1001,location_flag:'Cargo'},{type_id:38,quantity:4,location_id:DOCK,location_flag:'Deliveries'},hangar(39,0)];
+ const app=setup({dock:DOCK,hangar:rows}),{bearer}=await connect(app),payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.deepEqual(payload.operations.stacks,{permission:true,value:{[DOCK]:[[34,1500],[35,7]]},fetched:payload.fetchedAt});
+ assert.equal(payload.operations.location.value.station_id,DOCK);assert.equal(payload.operations.ship.value.ship_type_id,605);
+ assert.deepEqual(payload.operations.fit.value.items,[[37,'Cargo',9]],'cargo stays in the fit, not in the stacks');
+ const many=setup({dock:DOCK,hangar:Array.from({length:400},(_,i)=>hangar(1000+i,i+1))}),b2=(await connect(many)).bearer;
+ const big=(await(await many.request('/api/session',{headers:{Authorization:`Bearer ${b2}`}})).json()).operations.stacks.value[DOCK];
+ assert.equal(big.length,300);assert.deepEqual(big[0],[1399,400],'the biggest stacks stay');
+ const text=JSON.stringify(await(await many.request('/api/public/pilots')).json());assert.ok(!text.includes('1399'),'never public');
+});
+test('cargo is the fit, and undocked pilots have no stacks',async()=>{
+ const app=setup({hangar:[hangar(34,5)],fit:[{type_id:37,quantity:9,location_id:1001,location_flag:'Cargo'}]});await connect(app);
+ assert.deepEqual(snap(app).operations.stacks.value,{});assert.deepEqual(snap(app).operations.fit.value.items,[[37,'Cargo',9]]);
+});
+test('the stacks follow the docked station, and an unchanged assets answer keeps them',async()=>{
+ const options={dock:DOCK,hangar:[hangar(34,5),hangar(35,6,OTHER)],cache:{ttl:()=>-1000}},app=setup(options);await connect(app);
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+ options.cache.unchanged=true;let before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.ok(!characterCalls(app,before).some(c=>c.url.includes('page=2')),'unchanged assets are not read again');
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]},'stored stacks stand on a 304');
+ // The pilot docks elsewhere: the stored stacks do not cover it, so the whole list is read once more.
+ options.dock=OTHER;options.cache.changed=/location/;before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ const calls=characterCalls(app,before),first=calls.find(c=>/\/assets\/$/.test(c.url));
+ assert.ok(first&&!first.init.headers['If-None-Match']&&calls.some(c=>c.url.includes('page=2')));
+ assert.deepEqual(snap(app).operations.stacks.value,{[OTHER]:[[35,6]]});
+ // Not expired: the pages are skipped, unless the stacks miss a station.
+ options.cache.ttl=path=>/location/.test(path)?-1000:3600000;options.cache.unchanged=false;
+ await syncPilot(id,app.env,app.fetchImpl,{force:true}); // refreshes the hints so the assets are fresh
+ options.dock=DOCK;before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.ok(characterCalls(app,before).some(c=>/\/assets\/$/.test(c.url)),'a new dock forces a read');assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+ before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.ok(!characterCalls(app,before).some(c=>/\/assets\/$/.test(c.url)),'covered and fresh: nothing is asked');
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+});
+test('a page newer than page 1 keeps the stored stacks too',async()=>{
+ const app=setup({dock:DOCK,hangar:[hangar(34,5)]});await connect(app);
+ let n=0;const shifting=async(url,init)=>{const r=await app.fetchImpl(url,init);if(!new URL(url).pathname.endsWith('/assets/'))return r;const h=new Headers(r.headers);h.set('Last-Modified',new Date(Date.UTC(2026,10,13,10,n++)).toUTCString());return new Response(r.body,{status:r.status,headers:h});};
+ app.env.DB.raw.prepare('UPDATE pilots SET snapshot = json_set(snapshot, \'$.operations.stacks.value\', json(?))').run('{"1":[[1,1]]}');
+ await syncPilot(id,app.env,shifting,{force:true});assert.deepEqual(snap(app).operations.stacks.value,{1:[[1,1]]},'not replaced by a mixed read');
+});
+test('without the assets scope there are no stacks',async()=>{
+ const app=setup({scopes:SCOPES.filter(s=>!/read_assets/.test(s)),hangar:[hangar(34,5)],dock:DOCK});await connect(app);
+ assert.deepEqual(snap(app).operations.stacks,{permission:false});
+});
+test('POST /api/sell-station needs a session, validates the id and is kept by the next sync',async()=>{
+ const options={dock:DOCK,hangar:[hangar(34,5),hangar(35,6,OTHER)]},app=setup(options),{bearer}=await connect(app);
+ const post=(body,auth=bearer,raw)=>app.request('/api/sell-station',{method:'POST',headers:{...(auth?{Authorization:`Bearer ${auth}`}:{}),'Content-Type':'application/json'},body:raw??JSON.stringify(body)});
+ assert.equal((await post({station:OTHER},null)).status,401);assert.equal((await post({station:OTHER},'x'.repeat(43))).status,401);
+ for(const station of [0,-5,1.5,'60008494',59999999,64000001,1e12,2**53,undefined,[],{},true])assert.equal((await post({station})).status,400,String(station));
+ assert.equal((await post(null,bearer,'not json')).status,400);assert.equal((await post(null,bearer,JSON.stringify({station:OTHER,pad:'x'.repeat(1100)}))).status,413);
+ assert.equal((await app.request('/api/sell-station',{headers:{Authorization:`Bearer ${bearer}`}})).status,404,'GET is not a route');
+ const ok=await post({station:OTHER});assert.equal(ok.status,200);assert.deepEqual(await ok.json(),{sellStation:OTHER});assert.equal(snap(app).sellStation,OTHER);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.equal(payload.sellStation,OTHER);assert.deepEqual(payload.operations.stacks.value,{[DOCK]:[[34,5]],[OTHER]:[[35,6]]});
+ assert.equal((await post({station:1e12+1})).status,200,'structures are accepted');assert.equal(snap(app).sellStation,1e12+1);
+ assert.equal((await post({station:null})).status,200);assert.equal(snap(app).sellStation,undefined);assert.equal(snap(app).operations.stacks.permission,true,'the rest of the snapshot stays');
+ assert.ok(!JSON.stringify(await(await app.request('/api/public/pilots')).json()).includes(String(OTHER)),'never public');
+});
+test('a pickup station chosen while a sync runs is not lost',async()=>{
+ const app=setup({dock:DOCK}),{bearer}=await connect(app);
+ let done=false;const racing=async(url,init)=>{if(!done&&String(url).endsWith('/skills/')){done=true;await app.request('/api/sell-station',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},body:JSON.stringify({station:OTHER})});}return app.fetchImpl(url,init);};
+ await syncPilot(id,app.env,racing,{force:true});assert.equal(snap(app).sellStation,OTHER);
+});
+test('/api/sell-station is rate limited with the journal limiter',async()=>{
+ const app=setup(),{bearer}=await connect(app);app.env.RATE_JOURNAL={limit:async()=>({success:false})};
+ const r=await app.request('/api/sell-station',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},body:JSON.stringify({station:null})});assert.equal(r.status,429);
+});
+test('the wing summary carries hangar stacks only at consent level 3',async()=>{
+ const app=setup({dock:DOCK,hangar:[hangar(34,5)]}),{bearer}=await connect(app,{wing3:true});
+ const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots;
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3').run();assert.deepEqual((await wing())[0].stacks,{[DOCK]:[[34,5]]});
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 1').run();assert.deepEqual((await wing())[0].stacks,{[DOCK]:[[34,5]]},'the pilot always sees their own');
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,2)").run(JSON.stringify({sellStation:OTHER,operations:{ship:{value:{ship_type_id:1}},stacks:{value:{[OTHER]:[[34,1]]}}}}));
+ const other=(await wing()).find(x=>x.name==='Decxus');assert.ok(other.ship);assert.equal(other.stacks,undefined);assert.ok(!JSON.stringify(other).includes('sellStation'));
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3 WHERE character_id = 2124815118').run();assert.deepEqual((await wing()).find(x=>x.name==='Decxus').stacks,{[OTHER]:[[34,1]]});
 });

@@ -81,6 +81,8 @@ export class BackendClient {
  async universe(version){const data=await this.call(`/api/market/universe?v=${encodeURIComponent(version)}`);if(typeof data.version!=='string'||!data.meta||typeof data.meta!=='object')throw new Error('Backend returned an invalid universe map.');return data;}
  // One contract's items, read on demand: the backend checks the contract is the pilot's own.
  async contractItems(id,contractId){const data=await this.call(`/api/contract-items?id=${encodeURIComponent(contractId)}`,{id});if(!Array.isArray(data.items))throw new Error('Backend returned an invalid contract.');return data.items;}
+ // Where the sell planner also looks for items: a station or structure id, or null for none (the docked station always counts).
+ async setSellStation(id,station){return this.call('/api/sell-station',{id,method:'POST',body:{station}});}
  async waypoints(id,systems){return this.call('/api/waypoints',{id,method:'POST',body:{systems}});}
  // Journal sync: records after a rev, and changes sent against the rev each was based on (see worker/index.js).
  // prefs=1: this client understands pilot preferences; older clients aren't sent them, as they'd take them for entries.

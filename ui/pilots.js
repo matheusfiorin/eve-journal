@@ -48,7 +48,7 @@ async function loadPrivate(p, force, shared) {
       const record = await S.backend.privatePilot(p.id, force);
       // A disconnect during the request must not restore private data.
       if (!S.backend.has(p.id)) return;
-      Object.assign(p, {skills:record.skills, queue:record.queue, ops:record.operations || {}, synced:record.fetchedAt, private:true});
+      Object.assign(p, {skills:record.skills, queue:record.queue, ops:record.operations || {}, sellStation:record.sellStation || null, synced:record.fetchedAt, private:true});
       if (record.lastError) p.error = record.lastError;
       return;
     } catch (error) { p.error = error.message; p.problem = problemOf(error); }

@@ -2,7 +2,7 @@ import {REQUESTED_SCOPES,OPERATIONS_SCOPES,base64url,challenge,validateToken} fr
 import {validateBackup,validatePref} from '../model.js';
 import {history,lastHour} from './activity.js';
 import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
-import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stepKillmails,stepPlanets,diffEvents,trackOrders} from './pilotdata.js';
+import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stackCollector,stacksCover,isStationId,stepKillmails,stepPlanets,diffEvents,trackOrders} from './pilotdata.js';
 import {sendAlerts} from './alerts.js';
 
 const EVE='https://login.eveonline.com';
@@ -362,12 +362,18 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
   const trim={journal:50,transactions:50,mining:400};
   // snapshot.esi keeps each endpoint's ETag and Expires; gauge stops the sync when ESI's budgets run low.
   const prior=parseSnapshot(row),hints=prior.esi||{},gauge={stop:false},auth={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'};
-  // The assets read looks for the items inside the ship, so it waits for the ship answer (which is started before it).
-  let shipSettled;const shipKnown=new Promise(resolve=>{shipSettled=resolve;});
-  let fitNow;
+  // The assets read looks for the items inside the ship and in the hangar the pilot is docked at, so it waits for the ship and
+  // location answers (both are started before it).
+  const settlers=[];const shipKnown=Promise.all(['ship','location'].map(()=>new Promise(resolve=>settlers.push(resolve))));
+  const shipSettled=()=>settlers.forEach(resolve=>resolve());
+  let fitNow,stacksNow;
   const jobs=Object.entries(paths).map(([key,path])=>async()=>{
    const optional=OPERATIONS_SCOPES[key];
    if(optional&&!credentials.scopes.includes(optional)){snapshot.operations[key]={permission:false};return;}
+   // Stations whose hangars are kept: where the pilot is docked now and the pickup station they chose. Stored stacks that miss one
+   // of them cannot stand, so the assets are read in full even if ESI says they are unchanged.
+   let fit,stacks,covered=true;
+   if(key==='assets'){await shipKnown;const at=snapshot.operations.location?.value;stacks=stackCollector([at?.station_id??at?.structure_id,prior.sellStation]);covered=stacksCover(prior.operations?.stacks?.value,Object.keys(stacks.result()).map(Number));}
    const old=optional?prior.operations?.[key]?.value:prior[key],hint=hints[key];
    const keep=error=>{
     if(optional)snapshot.operations[key]={...prior.operations?.[key],permission:true,...(error?{error}:{})};
@@ -375,19 +381,18 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
     if(hint)snapshot.esi[key]=hint;
    };
    // Not expired: ESI would hand back its cached copy, which is what is stored already.
-   if(old!==undefined&&hint?.expires>Date.now()){if(optional)snapshot.operations[key]=prior.operations[key];else snapshot[key]=old;snapshot.esi[key]=hint;return;}
+   if(old!==undefined&&hint?.expires>Date.now()&&covered){if(optional)snapshot.operations[key]=prior.operations[key];else snapshot[key]=old;snapshot.esi[key]=hint;return;}
    // Stopped early: keep the last good data; the next sync asks again.
    if(gauge.stop)return keep();
    try {
-    let fit;
-    if(key==='assets'){await shipKnown;fit=fitCollector(snapshot.operations.ship?.value?.ship_item_id);}
+    if(key==='assets')fit=fitCollector(snapshot.operations.ship?.value?.ship_item_id);
     // A different ship than the stored fit was read from needs the whole list again, so no ETag goes with the request.
     const sameShip=!fit||!fit.result()||prior.operations?.fit?.value?.ship===fit.result().ship;
-    const options={headers:{...auth,...(old!==undefined&&hint?.etag&&sameShip?{'If-None-Match':hint.etag}:{})}};
-    const got=await(key==='assets'?assetSummary:esiJson)(`${ESI}/characters/${id}/${path}`,options,counted,gauge,fit);
+    const options={headers:{...auth,...(old!==undefined&&hint?.etag&&sameShip&&covered?{'If-None-Match':hint.etag}:{})}};
+    const got=await(key==='assets'?assetSummary:esiJson)(`${ESI}/characters/${id}/${path}`,options,counted,gauge,key==='assets'?{add:rows=>{fit.add(rows);stacks.add(rows);}}:undefined);
     let value=got.value===undefined?old:got.value;
     if(trim[key]&&Array.isArray(value))value=value.slice(0,trim[key]);
-    if(key==='assets'&&got.value!==undefined)fitNow=fit.result();
+    if(key==='assets'&&got.value!==undefined){fitNow=fit.result();stacksNow=stacks.result();}
     if(optional)snapshot.operations[key]={permission:true,value,fetched:snapshot.fetchedAt};
     else snapshot[key]=value;
     snapshot.esi[key]=got.value===undefined?{...hint,...got.hint}:got.hint; // a 304 may leave out the ETag
@@ -396,8 +401,7 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
     keep(error.message);
    }
   });
-  const shipAt=Object.keys(paths).indexOf('ship');
-  const settle=jobs[shipAt];jobs[shipAt]=async()=>{try{await settle();}finally{shipSettled();}};
+  for(const [at,settled] of ['ship','location'].map((k,i)=>[Object.keys(paths).indexOf(k),settlers[i]])){const settle=jobs[at];jobs[at]=async()=>{try{await settle();}finally{settled();}};}
   // Four at a time rather than all at once, so a low budget seen in one answer stops the requests not yet sent.
   await Promise.all(Array.from({length:4},async()=>{while(jobs.length)await jobs.shift()();}));
   shipSettled();
@@ -405,6 +409,10 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
   if(![OPERATIONS_SCOPES.assets,OPERATIONS_SCOPES.ship].every(scope=>credentials.scopes.includes(scope)))snapshot.operations.fit={permission:false};
   else if(fitNow)snapshot.operations.fit={permission:true,value:fitNow,fetched:snapshot.fetchedAt};
   else if(prior.operations?.fit?.value)snapshot.operations.fit=prior.operations.fit;
+  // The hangar stacks follow the assets scope: from this run's pages, else the stored ones (kept on an unchanged answer).
+  if(!credentials.scopes.includes(OPERATIONS_SCOPES.assets))snapshot.operations.stacks={permission:false};
+  else if(stacksNow)snapshot.operations.stacks={permission:true,value:stacksNow,fetched:snapshot.fetchedAt};
+  else snapshot.operations.stacks=prior.operations?.stacks?.value?prior.operations.stacks:{permission:true,value:{},fetched:snapshot.fetchedAt};
   // Extras, one after another from the cursor: each costs one request (killmail details and planet pins a few more), only
   // while the budget lasts. An endpoint ESI has not expired costs nothing. The first one the budget did not reach goes first next time.
   const extra=async key=>{
@@ -455,6 +463,9 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
   if(snapshot.operations.location?.permission)snapshot.operations.trail={permission:true,value:trail.slice(-200)};
   if(!snapshot.skills&&!snapshot.queue&&Object.keys(snapshot.errors).length)throw Object.assign(new ServiceError('Training data could not be refreshed. Previous snapshot retained.',502),{hold:gauge.hold});
   const errors=Object.values(snapshot.errors);
+  // The pickup station may have been changed while this sync ran (it is written to the row, not through the sync lock): read it again.
+  const chosen=(await env.DB.prepare("SELECT json_extract(snapshot, '$.sellStation') AS station FROM pilots WHERE character_id = ?").bind(id).first())?.station;
+  if(isStationId(chosen))snapshot.sellStation=chosen;
   await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,gauge.hold||0,id,now+90000).run();
  }catch(error){
   await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(error instanceof ServiceError?error.message:'Synchronization failed. Reconnect if the problem persists.',error.hold||0,id,now+90000).run();
@@ -699,10 +710,22 @@ async function route(request,env,ctx,fetchImpl){
   return response({pilots:rows.results.filter(row=>ALLOWED.has(row.character_id)).map(row=>{
    const snap=parseSnapshot(row),ops=snap.operations||{};
    return {characterId:row.character_id,name:row.name,sharing:Boolean(row.share_wing),shareLevel:row.share_wing,lastError:row.last_error||null,fetchedAt:snap.fetchedAt||null,skills:snap.skills||null,wallet:ops.wallet?.value??null,assets:ops.assets?.value||null,
-    // Consent level 2: ship, location, trail, jobs and the mining ledger. Level 3 adds the fit, blueprints (with where they are) and planets (with their systems).
+    // Consent level 2: ship, location, trail, jobs and the mining ledger. Level 3 adds the fit, hangar stacks, blueprints (with where they are) and planets (with their systems).
     ...(row.share_wing>=2||row.character_id===s.character_id?{ship:ops.ship?.value||null,location:ops.location?.value||null,mining:ops.mining?.value||null,trail:ops.trail?.value||null,jobs:ops.jobs?.value||null}:{}),
-    ...(row.share_wing>=3||row.character_id===s.character_id?{fit:ops.fit?.value||null,blueprints:ops.blueprints?.value||null,planets:ops.planets?.value||null}:{})};
+    ...(row.share_wing>=3||row.character_id===s.character_id?{fit:ops.fit?.value||null,stacks:ops.stacks?.value||null,blueprints:ops.blueprints?.value||null,planets:ops.planets?.value||null}:{})};
   })});
+ }
+ // The pickup station the sell planner reads stacks from (besides the one the pilot is docked at); null clears it. The sync
+ // that follows keeps that hangar's stacks. json_set rather than a read and write, so a sync running now cannot lose it.
+ if(url.pathname==='/api/sell-station'&&request.method==='POST'){
+  await limit(env,request,'RATE_JOURNAL',`s:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  let body;try{body=JSON.parse(await readText(request,1024,'That request is too large.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Send JSON.');}
+  const station=body?.station;
+  if(station!==null&&!isStationId(station))throw new ServiceError('Choose a station or structure.');
+  const r=await env.DB.prepare(station===null?"UPDATE pilots SET snapshot = json_remove(snapshot, '$.sellStation') WHERE character_id = ?":"UPDATE pilots SET snapshot = json_set(snapshot, '$.sellStation', ?) WHERE character_id = ?").bind(...station===null?[s.character_id]:[station,s.character_id]).run();
+  if(!(r?.meta?.changes>0))throw new ServiceError('This pilot is no longer connected.',401);
+  return response({sellStation:station});
  }
  if(url.pathname==='/api/contract-items'&&request.method==='GET'){
   await limit(env,request,'RATE_JOURNAL',`c:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
@@ -744,7 +767,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);
