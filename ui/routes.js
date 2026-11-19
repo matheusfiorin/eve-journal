@@ -28,12 +28,12 @@ export function autopilotButton(ids, out, short = '') {
   const pilot = mine(), can = pilot?.id && S.backend?.has(pilot.id), full = can ? `Send to ${esc(pilot.name)}’s autopilot` : '';
   return `${can && ids.length ? `<button type="button" data-waypoints="${ids.join(',')}" data-out="${out}"${short ? ` aria-label="${full}" title="${full}"` : ''}>${short ? esc(short) : full}</button>` : ''}<span id="${out}" class="hint" role="status"></span>`;
 }
-// System-name suggestions for the inputs that use <datalist id="systems">: the first 50 matches for what is typed, filled
-// on input. (All ~5,400 names as <option>s were two thirds of the page's elements.)
-const SUGGESTIONS = 50;
-let names = null, wired = false;
-function suggest(text) {
-  const q = text.trim().toLowerCase(), found = [];
+// Name suggestions for the inputs that use <datalist id="systems"> or <datalist id="stations">: the first 50 matches for
+// what is typed, filled on input. (All ~5,400 system names as <option>s were two thirds of the page's elements.)
+const SUGGESTIONS = 50, lists = new Map();
+let wired = false;
+function suggest(id, text) {
+  const q = text.trim().toLowerCase(), found = [], names = lists.get(id);
   if (names && q) {
     const inside = [];
     for (const n of names) {
@@ -42,18 +42,21 @@ function suggest(text) {
     }
     found.push(...inside.slice(0, SUGGESTIONS - found.length));
   }
-  $('#systems').replaceChildren(...found.map(value => Object.assign(document.createElement('option'), {value})));
+  $(`#${id}`).replaceChildren(...found.map(value => Object.assign(document.createElement('option'), {value})));
 }
-export function fillSystemList(g) {
-  if (names?.g !== g) {
-    names = [...g.systems.values()].map(s => ({name:s.name, lower:s.name.toLowerCase()})).sort((a, b) => a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : 0);
-    names.g = g;
+function fill(id, source, build) {
+  if (lists.get(id)?.source !== source) {
+    const names = build().sort((a, b) => a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : 0);
+    names.source = source; lists.set(id, names);
   }
   if (!wired) {
     wired = true;
-    for (const type of ['input', 'focusin']) document.addEventListener(type, event => { if (event.target.matches?.('input[list="systems"]')) suggest(event.target.value); });
+    for (const type of ['input', 'focusin']) document.addEventListener(type, event => { const id = event.target.matches?.('input[list]') && event.target.getAttribute('list'); if (id && lists.has(id)) suggest(id, event.target.value); });
   }
 }
+export const fillSystemList = g => fill('systems', g, () => [...g.systems.values()].map(s => ({name:s.name, lower:s.name.toLowerCase()})));
+// stations: [{id, name}]; `source` is what they were built from, so a new snapshot refills the list. Fills <datalist id="stations">.
+export const fillStationList = (stations, source) => fill('stations', source, () => stations.map(s => ({name:s.name, lower:s.name.toLowerCase()})));
 export const hop = s => `<li class="sec-${secClass(s.sec)}" data-system="${s.id}" style="--c:${secColor(s.sec)}" title="${esc(s.name)} · security ${secShown(s.sec).toFixed(1)}"><span>${secShown(s.sec).toFixed(1)}</span>${esc(s.name)}</li>`;
 export function legHtml(title, place, r, extra = '') {
   if (!r) return `<div class="leg"><div class="leg-head"><b>${title}</b><span>${esc(place || '')}</span><small>No gate route found from here.</small></div></div>`;

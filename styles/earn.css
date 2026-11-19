@@ -193,3 +193,33 @@
 .bplib{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .bplib li{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface-sunk);min-height:44px}
 .bplib small{display:block;font-size:var(--fs-xs);color:var(--text-muted)}
+
+/* Sell: ships, pickup and items on top, plan cards and the chosen plan's itineraries below. */
+.sell-sec{margin:0 0 14px}.sell-sec>h3{margin:0 0 6px;font-size:var(--fs-sm);color:var(--text-muted);font-weight:500}
+.sell-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.sell-ship{display:grid;grid-template-columns:minmax(0,1.4fr) 130px minmax(0,1.6fr);gap:6px 14px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-left:2px solid var(--pilot);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.sell-ship .tf,.sell-lot .tf{margin:0}.sell-ship input[type=number],.sell-lot input[type=number]{margin:2px 0 0}
+.sell-ship small,.sell-lot small{display:block;font-size:var(--fs-xs);color:var(--text-muted)}
+.sell-ship .sw span b,.sell-lot .sw span b{display:block;overflow-wrap:anywhere}
+.sell-pick{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:end}.sell-pick .tf{flex:1 1 260px;margin:0}.sell-pick__line{margin:0;flex:1 1 260px;overflow-wrap:anywhere}
+.sell-lots{list-style:none;margin:0;padding:0;max-height:380px;overflow:auto;display:grid;gap:6px}
+.sell-lot{display:grid;grid-template-columns:minmax(0,1.6fr) 130px 90px;gap:6px 14px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.sell-lot.is-off{opacity:.55}.sell-lot__m3{text-align:right;color:var(--text-muted);font-size:var(--fs-sm)}
+.sell-paste{margin-top:10px}.sell-paste>summary{cursor:pointer;color:var(--accent-strong);font-size:var(--fs-sm);min-height:32px;display:flex;align-items:center}
+.sell-paste textarea{margin-top:6px;font-family:var(--ff-num)}
+.sell-opts{flex-wrap:wrap}.sell-opts label{flex:1 1 140px}.sell-opts .check{flex:none}
+.sell-modes{grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))}
+.sell-plan{margin-top:12px;display:grid;gap:12px}
+.sell-ship-plan{display:grid;gap:6px;padding:12px;border:1px solid var(--line);border-left:2px solid var(--pilot);border-radius:var(--r-ctl);background:var(--surface-sunk)}
+.sell-ship-plan__head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}.sell-ship-plan__head>div{flex:1 1 200px;min-width:0}.sell-ship-plan__head small{display:block;color:var(--text-muted);font-size:var(--fs-xs)}
+.sell-stops{margin:0;padding-left:20px;display:grid;gap:8px}.sell-stops small{color:var(--text-muted);font-size:var(--fs-xs)}.sell-stops .plain{margin:4px 0 0}
+.sell-stops li,.sell-unsold li{overflow-wrap:anywhere}
+.sell-unsold h4{margin:0 0 4px;font-size:var(--fs-sm)}.sell-notes{list-style:none;margin:0;padding:0;display:grid;gap:6px}.sell-notes .alert{margin:0}
+@media (max-width:720px){
+  .sell-ship,.sell-lot{grid-template-columns:minmax(0,1fr) auto}
+  .sell-ship .sw,.sell-lot .sw{grid-column:1/-1}.sell-ship__at{grid-column:1/-1}
+  .sell-lot__m3{align-self:end;padding-bottom:6px}
+  #sell[data-planned] .sell{display:flex;flex-direction:column}
+  #sell[data-planned] #sell-content{order:-1;margin:0 0 16px}#sell[data-planned] #sell-status{order:-2}
+}
+@media (pointer:coarse){ .sell input:not([type=checkbox]),.sell textarea{min-height:44px} .sell .sw,.sell label.check{min-height:44px} .sell button,.sell-paste>summary{min-height:44px} }

@@ -13,6 +13,7 @@ import {S, ROMAN, mine, wingmate, summary, ordered, opsOf} from '../state.js';
 import {esi, json, name, resolveNames, isStation} from '../esi.js';
 import {brokerFor, brokerNote, learnOwners} from '../brokers.js';
 import {render as renderPlanets, wire as wirePlanets} from './planets.js';
+import {render as renderSell, wire as wireSell} from './sell.js';
 import {$, esc, format, plural, pct, duration, scannedAgo, trainNext, routeAttrs, mapButton, tabReady, openDrawer, toast, skeleton, iskEcho, permissionBanner, wingNote} from '../shared.js';
 import {explored, markExplored} from '../prefs.js';
 import {ordersSection} from '../ordersview.js';
@@ -42,7 +43,7 @@ function table(view, label, cols, head, rows) {
 }
 const row = (i, find, cells, {dim, attrs = ''} = {}) => `<div class="rows__row${dim ? ' is-dim' : ''}" role="row" data-row tabindex="0" data-pick="${i}" data-find="${esc(find.toLowerCase())}" style="--i:${i}" ${attrs}>${cells.join('')}</div>`;
 const sorted = (view, list, cmps) => { const k = $(`#${PREFIX[view]}-sort`).value; return cmps[k] ? [...list].sort(cmps[k]) : list; };
-export {renderPlanets};
+export {renderPlanets, renderSell};
 function applyFilter(view) {
   const q = ($(`#${PREFIX[view]}-filter`)?.value || '').trim().toLowerCase(), rows = [...document.querySelectorAll(`#${view} [data-row]`)];
   rows.forEach(r => { r.hidden = Boolean(q) && !r.dataset.find.includes(q); });
@@ -567,7 +568,7 @@ function openRow(view, el) {
   openDrawer(spec);
 }
 export function wire() {
-  wirePlanets();
+  wirePlanets(); wireSell();
   $('#market-origin').onchange = $('#market-jumps').onchange = () => renderMarket();
   $('#market-budget').onchange = $('#market-cargo').onchange = event => { event.target.dataset.touched = '1'; renderMarket(); };
   $('#industry-system').onchange = $('#industry-over').onchange = $('#industry-category').onchange = () => renderIndustry();

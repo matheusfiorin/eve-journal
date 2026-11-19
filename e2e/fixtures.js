@@ -11,6 +11,13 @@ export const JITA=60003760,AMARR=60008494;
 const TYPES={34:[18,4],35:[18,4],605:[25,6],587:[25,6],16236:[25,6],9899:[300,20],5001:[700,7],5002:[700,7],5003:[700,7],5004:[700,7],5005:[700,7],5006:[700,7],5007:[702,18],5008:[701,8]};
 const GROUPS={700:{name:'Module',category_id:7},701:{name:'Hybrid Charge',category_id:8},702:{name:'Combat Drone',category_id:18},18:{name:'Mineral',category_id:4},25:{name:'Frigate',category_id:6},300:{name:'Cyber Learning',category_id:20},255:{name:'Gunnery',types:[3300],published:true},257:{name:'Spaceship Command',types:[3327],published:true},268:{name:'Production',types:[3380],published:true}};
 const CATEGORIES={4:'Material',6:'Ship',7:'Module',8:'Charge',18:'Drone',20:'Implant'};
+// Packaged volumes (m3 per unit) of the sell planner's stacks; every other type has none and falls back to volume.
+const PACKAGED={34:0.01,35:0.01,587:2500,9899:0.1,1230:0.1,16236:5000};
+// Buy orders per "region:type" for the sell planner. Tritanium: Jita 4.6 at the station, a ranged 4.8 order in Perimeter that
+// a ship docked in Jita can fill, and Amarr 7 three jumps away. Pyerite is thin in Jita (150 units) and 11 in Amarr.
+const buy=(order_id,type_id,location_id,system_id,price,volume_remain,range='station',min_volume=1)=>({order_id,type_id,location_id,system_id,price,volume_remain,volume_total:volume_remain,min_volume,range,is_buy_order:true,issued:new Date().toISOString(),duration:90});
+const BUY_ORDERS={'10000002:34':[buy(9001,34,JITA,30000142,4.6,1e6),buy(9002,34,60000001,30000144,4.8,2e5,'1')],'10000002:35':[buy(9003,35,JITA,30000142,9,150)],'10000002:587':[buy(9004,587,JITA,30000142,300000,20)],
+ '10000043:34':[buy(9005,34,AMARR,30002187,7,1e5)],'10000043:35':[buy(9006,35,AMARR,30002187,11,1e6)]};
 const PRICES=[[34,5,4],[35,10,9],[605,20000000,18000000],[587,400000,380000],[9899,1000000,900000]];
 // Jita - Perimeter - Niarja - Amarr in high-sec, with low-sec Tama hanging off Perimeter.
 const UNIVERSE={systems:{30000142:['Jita',0.946,10000002,[30000144],0,[0,0,0],[0,0],20000020],30000144:['Perimeter',0.95,10000002,[30000142,30003504,30002813],4,[1,0,1],[4,0],20000020],30003504:['Niarja',0.5,10000043,[30000144,30002187],3,[3,1,4],[8,4],20000322],30002187:['Amarr',1,10000043,[30003504],0,[5,1,7],[12,6],20000322],30002813:['Tama',0.3,10000002,[30000144],5,[2,-1,-2],[4,-5],20000021]},regions:{10000002:'The Forge',10000043:'Domain'},constellations:{20000020:['Kimotoro',10000002],20000021:['Okkamon',10000002],20000322:['Throne Worlds',10000043]},
@@ -36,7 +43,7 @@ function privateRecord(id,state){
   ship:ok(state.coercer?{ship_type_id:16236,ship_name:id===IDS[0]?'Hauler one':'Hauler two',ship_item_id:id===IDS[0]?1001:2002}:{ship_type_id:605,ship_name:'Our first explorer',ship_item_id:1001}),
   trail:ok([[30000144,Date.now()-2*3600000],[30000142,Date.now()-600000]]),
   mining:ok([{date:iso(-48).slice(0,10),solar_system_id:30000144,type_id:1230,quantity:20000},{date:iso(-24).slice(0,10),solar_system_id:30000144,type_id:17470,quantity:5000}]),
-  location:ok({solar_system_id:30000142,station_id:60003760}),
+  location:ok(state.undocked&&id===IDS[1]?{solar_system_id:30000144}:{solar_system_id:30000142,station_id:60003760}),
   jobs:ok(state.noJobs?[]:[{job_id:1,activity_id:1,blueprint_type_id:1234,product_type_id:605,runs:2,status:'active',start_date:iso(-24),end_date:iso(24),station_id:60003760,cost:125000},{job_id:2,activity_id:5,blueprint_type_id:1234,product_type_id:1234,runs:4,licensed_runs:300,status:'active',start_date:iso(-48),end_date:iso(-0.1),station_id:60003760}]),
   journal:ok([{id:2,date:iso(-1),ref_type:'bounty_prizes',amount:1500000,balance:12500000.25,description:'Bounty prizes in Jita'},{id:1,date:iso(-2),ref_type:'market_transaction',amount:-5500,balance:11000000.25}]),
   transactions:ok([{transaction_id:1,date:iso(-2),type_id:34,quantity:1000,unit_price:5.5,is_buy:true,location_id:60003760}]),
@@ -46,7 +53,7 @@ function privateRecord(id,state){
   // Packaged stacks in the hangar of the station the pilot is docked at (location above), and at state.sellStation when one is chosen.
   stacks:ok({[JITA]:id===IDS[0]?[[34,50000],[35,12000],[587,3],[9899,2]]:[[34,8000],[1230,30000]],...(state.sellStation?{[state.sellStation]:[[35,400]]}:{})}),
   // The current fit of the Heron above: item 1001's own items by slot flag (a charge shares its launcher's flag).
-  fit:ok({ship:state.staleFit?999:1001,items:[[5004,'HiSlot0',1],[5004,'HiSlot1',1],[5005,'HiSlot2',1],[5008,'HiSlot2',30],[5002,'MedSlot0',1],[5003,'MedSlot1',1],[5001,'LoSlot0',1],[5006,'RigSlot0',1],[5006,'RigSlot1',1],[5007,'DroneBay',2]]}),
+  fit:ok({ship:state.staleFit?999:state.coercer&&id===IDS[1]?2002:1001,items:[...(state.coercer?[id===IDS[0]?[34,'Cargo',1000]:[35,'Cargo',100]]:[]),[5004,'HiSlot0',1],[5004,'HiSlot1',1],[5005,'HiSlot2',1],[5008,'HiSlot2',30],[5002,'MedSlot0',1],[5003,'MedSlot1',1],[5001,'LoSlot0',1],[5006,'RigSlot0',1],[5006,'RigSlot1',1],[5007,'DroneBay',2]]}),
   orders:ok(state.noOrders?[]:[
    {order_id:1,type_id:34,location_id:60003760,region_id:10000002,is_buy_order:false,price:6,volume_remain:400,volume_total:1000,issued:iso(-48),duration:90},
    {order_id:2,type_id:35,location_id:60003760,region_id:10000002,is_buy_order:false,price:10,volume_remain:50,volume_total:50,issued:iso(-24),duration:30},
@@ -79,11 +86,11 @@ function privateRecord(id,state){
 function wingRecord(id,state){
  if(id===IDS[0]){const r=privateRecord(id,state);return {characterId:id,name:'Fiofka',sharing:true,fetchedAt:r.fetchedAt,skills:r.skills,wallet:r.operations.wallet?.value??null,assets:r.operations.assets?.value||null};}
  // wingLevel 1 is the oldest consent: skills, wallet and assets only. Level 2 adds ship, jobs and mining; level 3 (the default here) the fit, blueprints and planets.
- const level=state?.wingLevel??3,r={characterId:id,name:'Decxus',sharing:true,shareLevel:level,lastError:state?.wingError||null,fetchedAt:iso(0),wallet:40000000,jobs:[{job_id:7,activity_id:4,blueprint_type_id:1234,runs:3,status:'active',start_date:iso(-2),end_date:iso(6),station_id:60003760}],assets:{items:2,locations:1,types:[[587,10],[34,500000]]},ship:state?.coercer?{ship_type_id:16236,ship_name:'Hauler two',ship_item_id:2002}:{ship_type_id:587,ship_name:'Rifter rush',ship_item_id:2002},stacks:{[JITA]:[[34,8000],[1230,30000]]},fit:{ship:2002,items:[[5001,'LoSlot0',1],[5007,'DroneBay',5]]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}}
+ const level=state?.wingLevel??3,r={characterId:id,name:'Decxus',sharing:true,shareLevel:level,lastError:state?.wingError||null,fetchedAt:iso(0),wallet:40000000,jobs:[{job_id:7,activity_id:4,blueprint_type_id:1234,runs:3,status:'active',start_date:iso(-2),end_date:iso(6),station_id:60003760}],assets:{items:2,locations:1,types:[[587,10],[34,500000]]},ship:state?.coercer?{ship_type_id:16236,ship_name:'Hauler two',ship_item_id:2002}:{ship_type_id:587,ship_name:'Rifter rush',ship_item_id:2002},...(state?.coercer?{location:{solar_system_id:30000142,station_id:JITA}}:{}),stacks:{[JITA]:[[34,8000],[1230,30000]]},fit:{ship:2002,items:[[5001,'LoSlot0',1],[5007,'DroneBay',5],...(state?.coercer?[[35,'Cargo',100]]:[])]},skills:{total_sp:2000000,unallocated_sp:0,skills:[{skill_id:3380,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:1500000},{skill_id:3327,trained_skill_level:5,active_skill_level:5,skillpoints_in_skill:500000}]}}
  r.blueprints={count:1,types:state?.ownsStarters?[[691,1,0,6,10,0,AMARR]]:[[1234,1,0,6,10,0,AMARR]]};
  r.planets={pending:false,planets:[{id:40000003,type:'storm',system:30002187,level:4,num:7,updated:iso(-6),pins:{ext:[[2268,iso(20),2,450,1800]],fac:[],store:[],links:2}}]};
  if(level<3){delete r.fit;delete r.stacks;delete r.blueprints;delete r.planets;}
- if(level<2){delete r.jobs;delete r.ship;}
+ if(level<2){delete r.jobs;delete r.ship;delete r.location;}
  return r;
 }
 // The mocked sessions: `opaque` with the pilot's index as its last character, or `reconnected` after a Reconnect.
@@ -107,12 +114,13 @@ export async function mockApp(page,options={}) {
   let body;
   if(path.includes('/status/'))body={players:25432,server_version:'test',start_time:'2026-10-30T11:00:00Z'};
   else if(path.includes('/corporationhistory/'))body=[{corporation_id:1000044,start_date:'2026-01-01T00:00:00Z',record_id:1}];
-  else if(path.includes('/universe/ids/'))body={characters:state.missing?[]:IDS.map((id,i)=>({id,name:names[i]}))};
+  else if(path.includes('/universe/ids/')){const asked=JSON.parse(route.request().postData()||'[]'),types=asked.map(n=>Object.entries(NAMES).find(([,v])=>v.toLowerCase()===String(n).toLowerCase())).filter(Boolean).map(([id,name])=>({id:Number(id),name}));body={characters:state.missing?[]:IDS.map((id,i)=>({id,name:names[i]})),...(types.length?{inventory_types:types}:{})};}
+  else if(/\/markets\/\d+\/orders\//.test(path)){const q=new URL(route.request().url()).searchParams,region=path.match(/markets\/(\d+)/)[1];(state.orderCalls||=[]).push(`${region}:${q.get('type_id')}:${q.get('order_type')}:${q.get('page')}`);return route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-expose-headers':'x-pages,expires','x-pages':'1',expires:new Date(Date.now()+300000).toUTCString()},body:JSON.stringify(state.noOrderBooks?[]:BUY_ORDERS[`${region}:${q.get('type_id')}`]||[])});}
   else if(path.includes('/universe/names/'))body=JSON.parse(route.request().postData()).map(id=>({id,name:NAMES[id]||`Type ${id}`}));
   else if(/\/universe\/categories\/16\/$/.test(path))body={groups:[255,257,268]};
   else if(path.includes('/universe/categories/'))body={name:CATEGORIES[path.match(/(\d+)\/$/)[1]]};
   else if(path.includes('/universe/groups/'))body=GROUPS[path.match(/(\d+)\/$/)[1]];
-  else if(path.includes('/universe/types/')){const id=Number(path.match(/(\d+)\/$/)[1]);body={type_id:id,name:NAMES[id],group_id:(TYPES[id]||[1])[0],capacity:id===605?400:id===16236?375:0,volume:id===2268?0.5:1};}
+  else if(path.includes('/universe/types/')){const id=Number(path.match(/(\d+)\/$/)[1]);body={type_id:id,name:NAMES[id],group_id:(TYPES[id]||[1])[0],capacity:id===605?400:id===16236?375:0,volume:id===2268?0.5:1,...(PACKAGED[id]?{packaged_volume:PACKAGED[id]}:{})};}
   else if(path.includes('/markets/prices/'))body=PRICES.map(([type_id,average_price,adjusted_price])=>({type_id,average_price,adjusted_price}));
   else if(path.includes('/industry/systems/'))body=[[30000142,0.05,0.04],[30000144,0.02,0.01],[30003504,0.01,0.03],[30002813,0.001,0.001],[30002187,0.03,0.03]].map(([solar_system_id,m,r])=>({solar_system_id,cost_indices:[{activity:'manufacturing',cost_index:m},{activity:'researching_material_efficiency',cost_index:r}]}));
   else if(path.includes('/route/')){const [a,b]=path.match(/route\/(\d+)\/(\d+)/).slice(1);body=a===b?[Number(a)]:Array.from({length:10},(_,i)=>i);}
@@ -195,7 +203,7 @@ export async function mockApp(page,options={}) {
 export async function openApp(page){await page.goto('/');await expect(page.locator('#sync-status')).toContainText(/Synced|EVE data from|answering|expired/);}
 // The Echelon IA: old tab ids map to a view, and each view lives in one of seven destinations.
 const VIEW={overview:'bridge',empire:'strengths',wallet:'ledger',notes:'logbook',journal:'logbook'};
-export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',planets:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
+export const DEST={bridge:'bridge',strengths:'wing',goals:'wing',training:'pilot',skills:'pilot',clones:'pilot',industry:'earn',mining:'earn',exploration:'earn',market:'earn',jobs:'earn',planets:'earn',sell:'earn',map:'navigate',hauling:'navigate',ledger:'ledger',logbook:'logbook'};
 export const isMobile=page=>page.viewportSize().width<=720;
 // Navigate like a person: the rail on desktop, the tab bar or More sheet on a phone, then the view's sub-view tab.
 export async function tab(page,name){
