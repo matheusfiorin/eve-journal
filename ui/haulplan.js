@@ -38,29 +38,41 @@ function start() {
     worker.onmessage = ({data}) => {
       const w = waiting.get(data.id); if (!w) return;
       waiting.delete(data.id); clearTimeout(w.timer);
-      if (data.error) w.reject(new Error(data.error)); else w.resolve(data.plans);
+      if (data.error) w.reject(new Error(data.error)); else w.resolve('sell' in data ? data.sell : data.plans);
     };
     worker.onerror = event => fail(new Error(event.message || 'The route planner failed to start.'));
     worker.onmessageerror = () => fail(new Error('The route planner sent something unreadable.'));
   } catch { broken = true; worker = null; }
   return worker;
 }
-const viaWorker = (snapshot, stops, ctx, options) => new Promise((resolve, reject) => {
+const viaWorker = (snapshot, body) => new Promise((resolve, reject) => {
   const w = start();
   if (!w) { reject(new Error('No Worker.')); return; }
   const id = ++calls, timer = setTimeout(() => fail(new Error('The route planner took too long.')), 30000);
   waiting.set(id, {resolve, reject, timer});
   if (sent !== snapshot.key) { w.postMessage({setup:snapshot}); sent = snapshot.key; }
-  w.postMessage({id, key:snapshot.key, stops, ctx, options});
+  w.postMessage({id, key:snapshot.key, ...body});
 });
 // Plan every mode for `stops` (system ids) on the page's gate graph `g`. ctx: {value, hull, live, now}; options: {lowsec, avoid, optimize, end}.
 export async function planAll(g, snapshot, stops, ctx, options) {
   if (!broken) {
-    try { return fatten(await viaWorker(snapshot, stops, ctx, options), g); }
+    try { return fatten(await viaWorker(snapshot, {stops, ctx, options}), g); }
     catch { /* Plan here instead. */ }
   }
   await new Promise(resolve => setTimeout(resolve)); // let "Planning…" paint before the page is busy
   return planModes(g, stops, {history:snapshot.history, traffic:snapshot.traffic, ...ctx}, options);
+}
+// The Sell plan (sell.js) in the same Worker: one 'sell' message per plan, on the map the Worker already holds. sell.js
+// loads only when a Sell plan is asked for. input: planSell()'s arguments without g; risk: {live, now} (the snapshot
+// brings kill history and traffic).
+export async function planSellInWorker(g, snapshot, input) {
+  const sell = await import('../sell.js');
+  if (!broken) {
+    try { return await viaWorker(snapshot, {sell:sell.toSellMessage(input)}); }
+    catch { /* Plan here instead. */ }
+  }
+  await new Promise(resolve => setTimeout(resolve));
+  return sell.planSell({...input, g, risk:{history:snapshot.history, traffic:snapshot.traffic, ...input.risk}});
 }
 // Used by the Worker.
 export const workerGraph = snapshot => ({g:graph(snapshot.universe), history:snapshot.history, traffic:snapshot.traffic});
