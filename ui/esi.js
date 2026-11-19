@@ -1,7 +1,8 @@
 // Public HTTP: ESI, name lookups, skill groups, prices and asset categories (all cached in state.js maps).
 import {S, SKILL_GROUPS, CATS, names, corporations, typeGroup, assetCats} from './state.js';
 
-export async function json(url, options = {}) {
+// options.meta: resolve to {body, headers} instead of the body, for callers that read X-Pages or Expires.
+export async function json(url, {meta, ...options} = {}) {
   let response;
   try { response = await fetch(url, {...options, signal:AbortSignal.timeout(20000)}); }
   catch { throw new Error('Connection unavailable or timed out. Check your connection and try again.'); }
@@ -9,7 +10,7 @@ export async function json(url, options = {}) {
     const error = new Error(response.status === 429 || response.status === 420 ? 'EVE API rate limit reached. Wait before refreshing again.' : `The service returned ${response.status}. Please try again later.`);
     error.status = response.status; throw error;
   }
-  return response.json();
+  return meta ? {body:await response.json(), headers:response.headers} : response.json();
 }
 // Unversioned ESI routes, pinned to a compatibility date. A browser can't send ESI's X-Compatibility-Date or
 // X-User-Agent headers without a CORS preflight before every call, so both go as the query parameters ESI documents
