@@ -18,6 +18,7 @@ import com.echelon.eve.core.data.PilotRepository
 import com.echelon.eve.core.data.Prefs
 import com.echelon.eve.core.data.SyncCoordinator
 import com.echelon.eve.core.data.WingRepository
+import com.echelon.eve.core.js.PlannerBridge
 import com.echelon.eve.core.model.Pilot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,9 @@ class AppContainer(context: Context, val apiBase: String = BuildConfig.API_BASE)
     val wing = WingRepository(api, sessions)
     val market = MarketRepository(api, sessions, UniverseCache(File(app.filesDir, "universe")))
     val sync = SyncCoordinator(scope, pilots, wing, market, sessions, selected = { selectedPilot.value })
+
+    /** The web planners running in QuickJS (core.js.PlannerBridge); the engine starts on first use (a 70 kB script). */
+    val planners: PlannerBridge by lazy { PlannerBridge.fromAssets(app) }
 
     val imageLoader: ImageLoader = ImageLoader.Builder(app).components { add(OkHttpNetworkFetcherFactory(callFactory = { http })) }.crossfade(true).build()
 
