@@ -56,10 +56,12 @@ Enable all of these on the EVE application (client ID `a94f7ccbcc8b4b0d8f7fd90fe
 - `esi-killmails.read_killmails.v1` (the loss log)
 - `esi-characters.read_blueprints.v1`, `esi-planets.manage_planets.v1`, `esi-characters.read_standings.v1` (stored for the blueprint library, the Planets view and broker fees with standings)
 - `esi-ui.write_waypoint.v1` (Hauling: send a route to the in-game autopilot)
+- `esi-location.read_online.v1` (the Android app's live view: is the pilot online)
+- Corporation data for the Android app's Corp tab, all optional: `esi-corporations.read_starbases.v1`, `esi-corporations.read_structures.v1`, `esi-assets.read_corporation_assets.v1`, `esi-wallet.read_corporation_wallets.v1`, `esi-corporations.read_corporation_membership.v1`, `esi-industry.read_corporation_jobs.v1`, `esi-planets.read_customs_offices.v1`, `esi-corporations.read_divisions.v1`. ESI also needs the in-game role (Director, Station Manager or Accountant) for most of them; a section the pilot may not read shows "needs role X" instead of failing.
 
 A pilot who connected before a scope was added sees "Permission not granted" for that data and can press **Reconnect** to grant it.
 
-**Both pilots must reconnect once** to grant the six newest scopes (orders, contracts, killmails, blueprints, planets and standings). Until they do everything else keeps working. The scopes must also be ticked on the EVE application at [developers.eveonline.com](https://developers.eveonline.com/), or EVE refuses the login that asks for them.
+**Both pilots must reconnect once more** to grant the nine newest scopes (the online state and the eight corporation scopes above; earlier, orders, contracts, killmails, blueprints, planets and standings). Until they do everything else keeps working. The scopes must also be ticked on the EVE application at [developers.eveonline.com](https://developers.eveonline.com/), or EVE refuses the login that asks for them.
 
 ### Wingmate sharing
 
