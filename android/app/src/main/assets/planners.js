@@ -435,7 +435,7 @@
   function buildSeconds(base, l = {}, te = 0) {
     return base * (1 - 0.04 * (l.industry || 0)) * (1 - 0.03 * (l.advancedIndustry || 0)) * (1 - te / 100);
   }
-  function evaluate(s, { book: book2, adjusted, fees: fees2, index = 0, researchIndex = 0, levels = {}, alpha = false, capture = 0.05, skillOf, budget, owned }) {
+  function evaluate(s, { book: book2, adjusted: adjusted2, fees: fees2, index = 0, researchIndex = 0, levels = {}, alpha = false, capture = 0.05, skillOf, budget, owned: owned2 }) {
     const product = book2.items.get(s.type);
     if (!product?.sells.length) return null;
     const region = (loc) => book2.stations.get(loc)?.region;
@@ -445,7 +445,7 @@
     const bill = bills[0];
     if (!bill) return null;
     const ask = (type) => bill.asks[s.m.findIndex(([t]) => t === type)].price;
-    const own = owned?.(s.bp) || null, copy = own?.kind === "bpc", price = own ? 0 : s.price, te = own?.te || 0;
+    const own = owned2?.(s.bp) || null, copy = own?.kind === "bpc", price = own ? 0 : s.price, te = own?.te || 0;
     const from = own?.me || 0, me = copy ? from : Math.max(from, researchTarget(s.rank)), maxRuns = copy ? Math.max(1, own.runs || 1) : Infinity;
     const perUnit = s.t / s.q;
     const hub = Object.entries(product.byRegion || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -454,7 +454,7 @@
     const sellPrice = average ? Math.min(sell.price, average * 1.15) : sell.price;
     const daily = product.byRegion?.[hub] ?? product.daily;
     const capacity = slots(levels).build * 86400 / buildSeconds(perUnit, levels, te);
-    const eiv = s.m.reduce((t, [type, qty]) => t + qty * (adjusted.get(type) || 0), 0);
+    const eiv = s.m.reduce((t, [type, qty]) => t + qty * (adjusted2.get(type) || 0), 0);
     const jobFee = eiv * (index + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0)) / s.q;
     const revenue = sellPrice * (1 - fees2.salesTax - (fees2.brokerAt ? fees2.brokerAt(sell.loc) : fees2.brokerFee));
     const research = { me, from, seconds: researchTime(s.rank, from, me, levels), cost: researchCost(eiv, from, me, researchIndex, alpha) };
@@ -619,12 +619,12 @@
     }
     return out4.sort((a, b) => b.profit - a.profit).slice(0, limit);
   }
-  function stationTrades(market, { salesTax, brokerFee, brokerAt, capture = 0.05, budget = Infinity, limit = 60 }) {
+  function stationTrades(market, { salesTax, brokerFee: brokerFee2, brokerAt, capture = 0.05, budget = Infinity, limit = 60 }) {
     const out4 = [];
     for (const [type, item] of market.items) for (const sell of item.sells) {
       const buy = item.buys.find((b) => b.loc === sell.loc);
       if (!buy || buy.price >= sell.price) continue;
-      const fee = brokerAt ? brokerAt(sell.loc) : brokerFee;
+      const fee = brokerAt ? brokerAt(sell.loc) : brokerFee2;
       const unit = sell.price * (1 - salesTax - fee) - buy.price * (1 + fee);
       if (unit <= 0) continue;
       const units = Math.min(item.daily * capture, buy.volume, sell.volume, Math.floor(budget / (buy.price * (1 + fee))));
@@ -633,7 +633,7 @@
     }
     return out4.sort((a, b) => b.daily - a.daily).slice(0, limit);
   }
-  function manufacturing(market, recipes, { salesTax, brokerFee, brokerAt, adjusted, costIndex = 0, alpha = false }) {
+  function manufacturing(market, recipes, { salesTax, brokerFee: brokerFee2, brokerAt, adjusted: adjusted2, costIndex = 0, alpha = false }) {
     const cheapest = (type) => market.items.get(type)?.sells[0];
     const out4 = [];
     for (const [product, r] of Object.entries(recipes || {})) {
@@ -647,11 +647,11 @@
           break;
         }
         materials += ask.price * qty;
-        eiv += (adjusted.get(type) || 0) * qty;
+        eiv += (adjusted2.get(type) || 0) * qty;
       }
       if (missing) continue;
       const job = eiv * (costIndex + SCC.manufacturing + NPC_FACILITY_TAX + (alpha ? ALPHA_TAX : 0));
-      const revenue = sell.price * r.q * (1 - salesTax - (brokerAt ? brokerAt(sell.loc) : brokerFee));
+      const revenue = sell.price * r.q * (1 - salesTax - (brokerAt ? brokerAt(sell.loc) : brokerFee2));
       const profit = revenue - materials - job;
       out4.push({ type: Number(product), materials, job, revenue, profit, margin: profit / (materials + job), capital: materials + job, loc: sell.loc, daily: market.items.get(Number(product)).daily });
     }
@@ -1718,6 +1718,227 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     }
   });
 
+  // blueprints.js
+  function owned(rows) {
+    const by = /* @__PURE__ */ new Map();
+    for (const [type, originals, copies, me, te, runs, loc] of Array.isArray(rows) ? rows : [])
+      by.set(type, { type, kind: originals > 0 ? "bpo" : "bpc", originals, copies, me, te, runs: originals > 0 ? Infinity : runs, copyRuns: runs, loc });
+    return by;
+  }
+  var ownedLabel = (o) => o.kind === "bpo" ? `Owned (ME ${o.me}/TE ${o.te})` : `Copy, ${o.runs} ${o.runs === 1 ? "run" : "runs"}`;
+  function library(rows, nameOf, query = "") {
+    const q = query.trim().toLowerCase();
+    return [...owned(rows).values()].map((o) => ({ ...o, name: nameOf(o.type) || `Type ${o.type}`, label: ownedLabel(o) })).filter((o) => !q || `${o.name} ${o.kind === "bpo" ? "original bpo" : "copy bpc"} me ${o.me} te ${o.te}`.toLowerCase().includes(q)).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "bpo" ? -1 : 1) || a.name.localeCompare(b.name));
+  }
+
+  // standings.js
+  var BROKER = { base: 0.03, perLevel: 3e-3, perFaction: 3e-4, perCorp: 2e-4, floor: 0.01 };
+  var clamp = (v) => Math.max(-10, Math.min(10, Number.isFinite(v) ? v : 0));
+  function brokerFee(level = 0, faction2 = 0, corp = 0) {
+    return Math.max(BROKER.floor, BROKER.base - BROKER.perLevel * level - BROKER.perFaction * clamp(faction2) - BROKER.perCorp * clamp(corp));
+  }
+  var standingOf = (rows, id, type) => rows?.find((r) => r[0] === id && r[1] === type)?.[2] ?? 0;
+  function feeBook({ level = 0, standings, owner }) {
+    const explain = (loc) => {
+      const o = Array.isArray(standings) ? owner?.(loc) : null;
+      if (!o?.corp) return { fee: brokerFee(level), applied: false, why: Array.isArray(standings) ? "owner unknown" : "standings not read" };
+      const faction2 = o.faction ? standingOf(standings, o.faction, "faction") : 0, corp = standingOf(standings, o.corp, "npc_corp");
+      return { fee: brokerFee(level, faction2, corp), applied: true, faction: faction2, corp, factionId: o.faction, corpId: o.corp };
+    };
+    return { at: (loc) => explain(loc).fee, explain };
+  }
+
+  // android/js/plan/build.js
+  var HUB_SYSTEMS = [30000142, 30002187, 30002659, 30002510, 30002053];
+  var SKILL_LABELS = {
+    industry: "Industry",
+    advancedIndustry: "Advanced Industry",
+    massProduction: "Mass Production",
+    advancedMassProduction: "Advanced Mass Production",
+    science: "Science",
+    labOperation: "Laboratory Operation",
+    advancedLabOperation: "Advanced Laboratory Operation",
+    metallurgy: "Metallurgy",
+    research: "Research",
+    accounting: "Accounting",
+    brokerRelations: "Broker Relations"
+  };
+  var FLAGS = {
+    thin: ["Thin market", "Under 10 sold per day at the hub"],
+    crowded: ["Crowded", "10+ stations already list it"],
+    capital: ["Budget-sized", "Your wallet covers fewer runs than the market would take; output grows as you reinvest"],
+    slow: ["Slow seller", "The market takes under one a day"],
+    margin: ["Thin margin", "Under 10% after fees; a small undercut wipes it out"]
+  };
+  var isNpcStation = (id) => id >= 6e7 && id < 64e6;
+  var sysOut = (s) => s && { id: s.id, name: s.name, sec: s.sec, region: s.region };
+  var adjusted = /* @__PURE__ */ new Map();
+  var costIndices = /* @__PURE__ */ new Map();
+  var esiStamp = null;
+  var api4 = ({ graph: graph2, meta: meta2, book: book2 }) => ({
+    /** {prices:[{type_id, adjusted_price}], systems:[{solar_system_id, cost_indices:[{activity, cost_index}]}], stamp} */
+    "build.esi": ({ prices = [], systems = [], stamp = null }) => {
+      adjusted = new Map(prices.map((r) => [r.type_id, r.adjusted_price || 0]));
+      costIndices = new Map(systems.map((r) => [r.solar_system_id, Object.fromEntries((r.cost_indices || []).map((c) => [c.activity, c.cost_index]))]));
+      esiStamp = stamp;
+      return { prices: adjusted.size, systems: costIndices.size, stamp };
+    },
+    "build.esiStamp": () => esiStamp,
+    /**
+     * {system, budget?, category?, sort, showAll, me:{name, skills, wallet, blueprints, standings}, mate?:{…}, owners:{loc:[corp, faction]}}
+     * → {ready, summary, wing, picks, categories, facilities, guide, library, needOwners}
+     */
+    "build.plan": ({ system, budget, category = "", sort = "profit", showAll = false, me: meIn = {}, mate: mateIn = null, owners = {} }) => {
+      const g2 = graph2(), m = meta2(), b = book2(), catalog = m.starters || [];
+      if (!b.items.size || !catalog.length) return { ready: false };
+      const ownerOf = (loc) => {
+        const o = owners[loc];
+        return o ? { corp: o[0], faction: o[1] || void 0 } : void 0;
+      };
+      const at = (loc) => {
+        const st = b.stations.get(loc);
+        return { loc, system: st?.system ?? null, name: st?.name || `Station ${loc}` };
+      };
+      const sysName = (id) => g2.systems.get(id)?.name ?? null;
+      const idx = costIndices.get(system) || {};
+      const x = meIn, levels = skillLevels(x.skills, m.skills || {}), alpha = isAlpha(x.skills), s = slots(levels), known = Boolean(x.skills?.skills);
+      const broker = feeBook({ level: levelOf(x.skills, m.skills?.brokerRelations), standings: Array.isArray(x.standings) ? x.standings : void 0, owner: ownerOf });
+      const f = { ...fees(x.skills, m.skills), brokerAt: broker.at };
+      const myBps = owned(x.blueprints), theirBps = owned(mateIn?.blueprints);
+      const here = g2.systems.get(system);
+      const factories = here ? facilities(g2, system, 1, (id) => costIndices.get(id)?.manufacturing) : [];
+      const labs = here ? facilities(g2, system, 2, (id) => costIndices.get(id)?.researching_material_efficiency) : [];
+      const factory = factories[0], lab = labs[0];
+      const buildIndex = factory?.index ?? idx.manufacturing ?? 0, researchIndex = lab?.index ?? idx.researching_material_efficiency ?? 0;
+      const cache = /* @__PURE__ */ new Map();
+      const sellerNames = m.bpoSurvey?.names || {};
+      const sellerOf = (pick) => here ? nearest(g2, system, (pick.sellers || []).map(([loc, sys, price]) => ({ loc, system: sys, price, name: sellerNames[loc] || at(loc).name })), cache) : null;
+      const categories = [...new Set(catalog.map((item) => item.cat))].sort();
+      const skillOf = x.skills?.skills ? (id) => levelOf(x.skills, id) : void 0;
+      const priceFor = (pilot) => rank(catalog.filter((item) => !category || item.cat === category).map((item) => evaluate(item, { book: b, adjusted, index: buildIndex, researchIndex, ...pilot })), pilot.budget);
+      const ranked = priceFor({ fees: f, levels, alpha, skillOf, budget, owned: (bp) => myBps.get(bp) }).map((pick) => ({ ...pick, seller: pick.owned ? null : sellerOf(pick) }));
+      const SORTS = {
+        profit: (a, c) => c.profitDay - a.profitDay,
+        payback: (a, c) => a.payback - c.payback,
+        margin: (a, c) => c.margin - a.margin,
+        invest: (a, c) => a.invest - c.invest,
+        near: (a, c) => (a.owned ? -1 : a.seller?.route.jumps ?? 999) - (c.owned ? -1 : c.seller?.route.jumps ?? 999)
+      };
+      const overBudget = ranked.filter((pick) => !pick.affordable).length;
+      const list = (SORTS[sort] ? [...ranked].sort((a, c) => c.affordable - a.affordable || SORTS[sort](a, c)) : ranked).filter((pick) => showAll || pick.affordable).slice(0, 20);
+      const jobTax = buildIndex + NPC_FACILITY_TAX + SCC.manufacturing + (alpha ? ALPHA_TAX : 0);
+      const ox = mateIn, oLevels = ox ? skillLevels(ox.skills, m.skills || {}) : null;
+      const themRanked = ox ? priceFor({ fees: fees(ox.skills, m.skills), levels: oLevels, alpha: isAlpha(ox.skills), skillOf: ox.skills?.skills ? (id) => levelOf(ox.skills, id) : void 0, budget: ox.wallet ?? void 0, owned: (bp) => theirBps.get(bp) }) : [];
+      const [mePlan, themPlan = null] = wingAssign([{ ranked, slots: known ? s.build : 2, budget: budget ?? Infinity }, ...ox ? [{ ranked: themRanked, slots: ox.skills?.skills ? slots(oLevels).build : 2, budget: ox.wallet ?? Infinity }] : []]);
+      const ownerName = (pick) => mePlan.chosen.some((c) => c.bp === pick.bp) ? x.name : themPlan?.chosen.some((c) => c.bp === pick.bp) ? ox.name : null;
+      const skillName = (id) => m.skillNames?.[id] || `Skill ${id}`;
+      const legOut = (label, place, from, to, note) => {
+        const r = from && to ? leg(g2, from, to, cache) : null;
+        return { label, place, jumps: r ? r.jumps : null, risky: r ? r.risky : 0, note };
+      };
+      const pickOut = (pick) => {
+        const seller = pick.seller, start = seller?.place.system ?? system, mats = at(pick.materialsAt), hub = at(pick.sell.loc), fee = broker.explain(pick.sell.loc);
+        const legs = [];
+        if (!pick.owned) legs.push(seller ? { label: "Buy the blueprint", place: seller.place.name, jumps: seller.route.jumps, risky: seller.route.risky, note: `${Math.round(seller.place.price)}` } : { label: "Buy the blueprint", place: null, jumps: null, risky: 0, note: "none" });
+        if (lab && pick.research.me > pick.research.from) legs.push(legOut(`Research to ME ${pick.me}`, lab.station.name, start, lab.system.id, `ME index ${lab.index}`));
+        legs.push(legOut("Buy materials", mats.name, lab?.system.id ?? start, mats.system, pick.materialsRegion));
+        if (factory) legs.push(legOut("Build", factory.station.name, mats.system ?? start, factory.system.id, `index ${factory.index}`));
+        legs.push(legOut("Sell", hub.name, factory?.system.id ?? mats.system ?? start, hub.system, `${pick.sell.price}`));
+        const theirs = theirBps.get(pick.bp);
+        return {
+          bp: pick.bp,
+          type: pick.type,
+          name: pick.n,
+          cat: pick.cat,
+          rank: pick.rank,
+          affordable: pick.affordable,
+          plan: ownerName(pick),
+          owned: pick.owned ? ownedLabel(pick.owned) : null,
+          ownedKind: pick.owned?.kind ?? null,
+          ownedTe: pick.owned?.te ?? null,
+          ownedRuns: pick.owned?.kind === "bpc" ? pick.owned.runs : null,
+          mateOwns: !pick.owned && theirs ? ownedLabel(theirs) : null,
+          missing: (pick.missing || []).map(([id, lvl]) => ({ name: skillName(id), level: lvl })),
+          flags: pick.flags.filter((fl) => FLAGS[fl]).map((fl) => ({ key: fl, label: FLAGS[fl][0], why: FLAGS[fl][1] })),
+          profitDay: pick.profitDay,
+          payback: pick.payback,
+          invest: pick.invest,
+          margin: pick.margin,
+          me: pick.me,
+          runs: pick.runs,
+          price: pick.seller?.place.price ?? pick.listPrice,
+          sellers: (pick.sellers || []).length,
+          sellerJumps: seller ? seller.route.jumps : null,
+          research: { from: pick.research.from, me: pick.research.me, seconds: pick.research.seconds, cost: pick.research.cost },
+          unitsPerDay: pick.unitsPerDay,
+          sellPrice: pick.sellPrice,
+          profitAtZero: pick.profitAtZero,
+          broker: { fee: fee.fee, applied: fee.applied, at: hub.name },
+          daily: pick.daily,
+          listings: pick.listings,
+          trend: pick.trend ?? null,
+          materialsRegion: pick.materialsRegion,
+          bill: pick.bill.map((r) => ({ type: r.type, name: m.types?.[r.type]?.n ?? null, qty: r.qty, price: r.price, at: at(r.loc).name })),
+          legs
+        };
+      };
+      const pilotPlan = (who, pl, wallet, free) => ({ name: who.name, chosen: pl.chosen.map((c) => ({ name: c.n, owned: Boolean(c.owned) })), profitDay: pl.profitDay, spent: pl.spent, slots: free, wallet: wallet ?? null });
+      const crew = [pilotPlan(x, mePlan, budget, known ? s.build : 2), ...ox ? [pilotPlan(ox, themPlan, ox.wallet, ox.skills?.skills ? slots(oLevels).build : 2)] : []];
+      const affordable = ranked.filter((r) => r.affordable), top = affordable[0];
+      const cheaper = factory && factory.system.id !== system && factory.index < (idx.manufacturing ?? Infinity) * 0.8;
+      const facility = (fx, kind) => ({
+        station: fx.station.name,
+        system: sysOut(fx.system),
+        jumps: fx.jumps,
+        index: fx.index,
+        tax: fx.index + NPC_FACILITY_TAX + (kind === "ME" ? SCC.research : SCC.manufacturing) + (alpha ? ALPHA_TAX : 0)
+      });
+      const plan2 = stage(x.wallet), next = nextSkills2(levels, alpha);
+      const lib = (who) => who && who.blueprints !== void 0 ? library(who.blueprints, () => null).map((o) => ({ type: o.type, kind: o.kind, label: o.label, me: o.me, te: o.te, copies: o.copies, loc: o.loc ?? null })) : null;
+      const hubLocs = HUB_SYSTEMS.map((id) => [...b.stations].find(([, st]) => st.system === id)?.[0]).filter(Boolean);
+      const needOwners = Array.isArray(x.standings) ? [.../* @__PURE__ */ new Set([...hubLocs, ...list.map((p) => p.sell.loc)])].filter((loc) => isNpcStation(loc) && !owners[loc]) : [];
+      return {
+        ready: true,
+        categories,
+        summary: {
+          fit: affordable.length,
+          of: ranked.length,
+          best: top ? top.profitDay : null,
+          buildIn: factory?.system.name || here?.name || null,
+          buildIndex,
+          known,
+          alpha,
+          build: s.build,
+          science: s.science,
+          jobTax,
+          salesTax: f.salesTax,
+          brokerFee: brokerFee(levelOf(x.skills, m.skills?.brokerRelations)),
+          cheaper: cheaper ? { system: factory.system.name, jumps: factory.jumps, index: factory.index, here: idx.manufacturing || 0 } : null,
+          overBudget
+        },
+        wing: crew,
+        picks: list.map(pickOut),
+        facilities: { build: factories.map((fx) => facility(fx, "build")), research: labs.map((fx) => facility(fx, "ME")) },
+        guide: {
+          stage: plan2.name,
+          goal: plan2.goal,
+          steps: plan2.steps,
+          wallet: x.wallet ?? null,
+          train: next.map((k) => ({ ...k, name: SKILL_LABELS[k.key] || k.key })),
+          alpha,
+          fees: f.salesTax + f.brokerFee,
+          science: s.science,
+          scc: SCC,
+          npcTax: NPC_FACILITY_TAX
+        },
+        library: { me: lib(x), mate: ox ? lib(ox) : null },
+        needOwners,
+        survey: m.bpoSurvey ? { regions: m.bpoSurvey.regions, of: m.bpoSurvey.of } : null,
+        catalog: catalog.length
+      };
+    }
+  });
+
   // android/js/planners.js
   var universe = null;
   var g = null;
@@ -1737,7 +1958,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     return orders2;
   };
   var ctx = { graph: need, meta: needMeta, book: needBook };
-  var api4 = {
+  var api5 = {
     "universe.load": ({ universe: u }) => {
       universe = u;
       g = graph(u);
@@ -1786,15 +2007,16 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     "jobs.wing": ({ pilots = [], now = Date.now() }) => wingJobs(pilots.map((p) => ({ name: p.name, jobs: p.jobs || [], levels: p.skills?.skills ? skillLevels(p.skills, SLOT_SKILLS) : null })), now),
     ...api(ctx),
     ...api2(ctx),
-    ...api3(ctx)
+    ...api3(ctx),
+    ...api4(ctx)
   };
   var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports };
   globalThis.EchelonPlanners = {
     version: 1,
-    names: () => JSON.stringify(Object.keys(api4)),
+    names: () => JSON.stringify(Object.keys(api5)),
     modules: () => JSON.stringify(Object.fromEntries(Object.entries(modules).map(([k, m]) => [k, Object.keys(m).sort()]))),
     call(name, args) {
-      const fn = api4[name];
+      const fn = api5[name];
       if (!fn) throw new Error(`Unknown planner call ${name}`);
       return JSON.stringify(fn(args ?? {}) ?? null);
     }

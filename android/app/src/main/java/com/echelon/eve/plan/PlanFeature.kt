@@ -17,7 +17,7 @@ object PlanFeature : Feature {
         fun stub(key: String, title: String, summary: String, order: Int, icon: androidx.compose.ui.graphics.vector.ImageVector = EchelonIcons.Plan) =
             registry.register(destination, SubScreen(key, title, summary, icon, order) { Placeholder(title, summary) })
         registry.register(destination, SubScreen("explore", "Explore", "Where to scan for relic and data sites", EchelonIcons.Search, 10) { com.echelon.eve.plan.explore.ExploreRoute(it) })
-        stub("industry", "Build", "Which blueprint to buy and build", 20)
+        registry.register(destination, SubScreen("industry", "Build", "Which blueprint to buy and build", EchelonIcons.Plan, 20) { com.echelon.eve.plan.build.BuildRoute(it) })
         registry.register(destination, SubScreen("mining", "Mine", "What to mine and where", EchelonIcons.Plan, 30) { com.echelon.eve.plan.mine.MineRoute(it) })
         stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
         stub("sell", "Sell", "The best markets for a cargo", 50)

@@ -66,6 +66,26 @@ object PlanFixtures {
         ledgers = com.echelon.eve.plan.mine.Ledgers(com.echelon.eve.plan.mine.Ledger("ok", 52_000.0, 4_800_000.0, 6, listOf(com.echelon.eve.plan.mine.LedgerSystem("Hirtamon", 40_000.0, 3_700_000.0, 4))),
             com.echelon.eve.plan.mine.Ledger("no-permission")),
     )
+    val build = com.echelon.eve.plan.build.BuildResult(
+        ready = true, categories = listOf("Drone", "Frigate", "Charge"),
+        summary = com.echelon.eve.plan.build.BuildSummary(56, 64, 30_018_678.0, "Yashunen", 0.0118, true, false, 3, 1, 0.0543, 0.075, 0.03,
+            com.echelon.eve.plan.build.Cheaper("Yashunen", 9, 0.0118, 0.1722), 8),
+        wing = listOf(com.echelon.eve.plan.build.CrewPlan("Fiofka", listOf(com.echelon.eve.plan.build.Chosen("Warp Disrupt Probe"), com.echelon.eve.plan.build.Chosen("Hobgoblin I", true)), 31_800_000.0, 49_900_000.0, 3, 50_000_000.0),
+            com.echelon.eve.plan.build.CrewPlan("Decxus", emptyList(), wallet = 2_000_000.0, slots = 2)),
+        picks = listOf(
+            com.echelon.eve.plan.build.Pick(1, 1, "Warp Disrupt Probe", "Charge", 5, plan = "Fiofka", flags = listOf(com.echelon.eve.plan.build.Flag("crowded", "Crowded", "10+ stations already list it")),
+                profitDay = 30_018_678.0, payback = 10.3, invest = 49_928_404.0, margin = 0.21, me = 10, runs = 40, price = 2_344_200.0, sellers = 6, sellerJumps = 2,
+                research = com.echelon.eve.plan.build.Research(0, 10, 96_000.0, 1_200_000.0), unitsPerDay = 254.0, sellPrice = 118_000.0, profitAtZero = 20_000.0,
+                broker = com.echelon.eve.plan.build.Broker(0.03, false, "Jita IV - Moon 4 - Caldari Navy Assembly Plant"), daily = 5100.0, listings = 14, trend = 0.04, materialsRegion = "Domain",
+                bill = listOf(com.echelon.eve.plan.build.BillRow(34, "Tritanium", 1982, 3.08), com.echelon.eve.plan.build.BillRow(35, "Pyerite", 5616, 14.17)),
+                legs = listOf(com.echelon.eve.plan.build.Leg("Buy the blueprint", "Itamo VIII - Core Complexion Inc. Factory", 2), com.echelon.eve.plan.build.Leg("Research to ME 10", "Wuos VI - Zainou Biotech Research Center", 10),
+                    com.echelon.eve.plan.build.Leg("Buy materials", "Misaba V - Moon 3 - Zoar and Sons Factory", 52, 4), com.echelon.eve.plan.build.Leg("Sell", "Jita IV - Moon 4 - Caldari Navy Assembly Plant", 9))),
+            com.echelon.eve.plan.build.Pick(2, 2, "Rifter", "Frigate", 20, affordable = false, missing = listOf(com.echelon.eve.plan.build.Missing("Spaceship Command", 3)), profitDay = 290_000.0, payback = 13.0, invest = 3_250_000.0, margin = 0.12),
+        ),
+        guide = com.echelon.eve.plan.build.Guide("Weeks 2–4 · expand", 100_000_000.0, listOf("Run 4–8 BPOs across both pilots.", "Keep every slot busy."), 50_000_000.0,
+            listOf(com.echelon.eve.plan.build.TrainSkill("massProduction", "Mass Production", 2, 3, false, "+1 manufacturing slot per level")), fees = 0.105, scc = com.echelon.eve.plan.build.Scc(0.04, 0.02), npcTax = 0.0025),
+        library = com.echelon.eve.plan.build.Library(listOf(com.echelon.eve.plan.build.OwnedBp(2456, "bpo", "Owned (ME 10/TE 20)", 10, 20, loc = 60003760)), null),
+    )
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -86,6 +106,10 @@ class PlanSnapshotTest {
     @Test fun mine() = paparazzi.echelon {
         com.echelon.eve.plan.mine.MineScreen(com.echelon.eve.plan.mine.MineUi(Pilot.Fiofka, com.echelon.eve.plan.mine.MineSettings(), PlanFixtures.starts, PlanFixtures.mine, open = 30000133, canSend = true),
             com.echelon.eve.plan.mine.MineActions(), scroll = false)
+    }
+    @Test fun build() = paparazzi.echelon {
+        com.echelon.eve.plan.build.BuildScreen(com.echelon.eve.plan.build.BuildUi("Fiofka", com.echelon.eve.plan.build.BuildSettings(budget = "50m"), PlanFixtures.starts, PlanFixtures.build, open = 1,
+            names = mapOf(2456L to "Hobgoblin I Blueprint", 60003760L to "Jita IV - Moon 4 - Caldari Navy Assembly Plant"), mateName = "Decxus"), com.echelon.eve.plan.build.BuildActions(), scroll = false)
     }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)
