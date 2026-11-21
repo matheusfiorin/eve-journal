@@ -100,6 +100,7 @@ class WingChannel(
     fun identityChanged() { disconnect(keepHolds = true); ensure() }
 
     // Sending.
+    /** A private timer is sent so the room drops it, and leaves this copy too: the room's remove goes to everyone but the sender. */
     fun upsertTimer(timer: WingTimer) = send(WingMessage.TimerUpsert(newId(), timer.owner, clock(), timer)).also { applyTimer(timer) }
     fun removeTimer(timerId: String, from: Pilot) = send(WingMessage.TimerRemove(newId(), from.id, clock(), timerId)).also { _timers.update { it - timerId } }
     fun ping(from: Pilot, ping: WingPing) = send(WingMessage.Ping(newId(), from.id, clock(), ping))
@@ -217,7 +218,7 @@ class WingChannel(
         }
     }
 
-    private fun applyTimer(t: WingTimer) = _timers.update { it + (t.id to t) }
+    private fun applyTimer(t: WingTimer) = _timers.update { if (t.shared) it + (t.id to t) else it - t.id }
 
     private fun newId() = UUID.randomUUID().toString()
 

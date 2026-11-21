@@ -80,6 +80,7 @@ class TimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     private fun stop() {
+        running = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -139,13 +140,13 @@ object TimerNotifications {
     }
 
     fun update(context: Context, next: WingTimer, running: Int, now: Long) {
-        if (!allowed(context)) return
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         runCatching { NotificationManagerCompat.from(context).notify(TimerService.ONGOING_ID, ongoing(context, next, running, now)) }
     }
 
     /** "Gas site is done" (yours) or "Decxus’s Gas site is done". */
     fun done(context: Context, t: WingTimer, mine: Boolean) {
-        if (!allowed(context)) return
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val who = Pilot.of(t.owner)?.displayName
         val title = if (mine || who == null) "${t.label} is done" else "$who’s ${t.label} is done"
         val n = NotificationCompat.Builder(context, DONE).setSmallIcon(R.drawable.ic_emblem).setColor(0xFFA99BFF.toInt())
@@ -155,6 +156,4 @@ object TimerNotifications {
     }
 
     private const val DONE_ID = 4101
-
-    private fun allowed(context: Context) = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 }

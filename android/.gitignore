@@ -1,5 +1,7 @@
 .gradle/
-build/
+# Gradle's output only: a bare build/ would also hide source packages named build (plan/build).
+/build/
+/app/build/
 local.properties
 .idea/
 *.iml

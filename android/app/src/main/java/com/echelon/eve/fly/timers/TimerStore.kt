@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 import java.util.UUID
@@ -101,10 +102,17 @@ class TimerStore internal constructor(
         WingCodec.json.decodeFromString(LIST, text).filter { it.pausedAt != null || now - it.endsAt < DAY }.associateBy { it.id }
     }.getOrDefault(emptyMap())
 
+    private val writing = kotlinx.coroutines.sync.Mutex()
+
+    /** Writes the newest timers, one write at a time, so two quick changes can't interleave or land out of order. */
     private fun persist() {
-        val snapshot = local.value.values.toList()
         val f = file ?: return
-        scope.launch(io) { runCatching { f.parentFile?.mkdirs(); val tmp = File(f.path + ".tmp"); tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot)); tmp.renameTo(f) } }
+        scope.launch(io) {
+            writing.withLock {
+                val snapshot = local.value.values.toList()
+                runCatching { f.parentFile?.mkdirs(); val tmp = File(f.path + ".tmp"); tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot)); tmp.renameTo(f) }
+            }
+        }
     }
 
     companion object {
