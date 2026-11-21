@@ -19,7 +19,7 @@ object PlanFeature : Feature {
         registry.register(destination, SubScreen("explore", "Explore", "Where to scan for relic and data sites", EchelonIcons.Search, 10) { com.echelon.eve.plan.explore.ExploreRoute(it) })
         registry.register(destination, SubScreen("industry", "Build", "Which blueprint to buy and build", EchelonIcons.Plan, 20) { com.echelon.eve.plan.build.BuildRoute(it) })
         registry.register(destination, SubScreen("mining", "Mine", "What to mine and where", EchelonIcons.Plan, 30) { com.echelon.eve.plan.mine.MineRoute(it) })
-        stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
+        registry.register(destination, SubScreen("trade", "Trade", "Trade and haul opportunities", EchelonIcons.Swap, 40) { com.echelon.eve.plan.trade.TradeRoute(it) })
         stub("sell", "Sell", "The best markets for a cargo", 50)
         registry.register(destination, SubScreen("haul", "Haul routes", "Safest, balanced and shortest routes", EchelonIcons.Route, 60) { com.echelon.eve.plan.haul.HaulRoute(it) })
         stub("goals", "Wing goals", "Shared goals and their progress", 70, EchelonIcons.Wing)

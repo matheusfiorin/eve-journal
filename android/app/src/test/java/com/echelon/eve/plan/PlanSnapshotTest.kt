@@ -86,6 +86,17 @@ object PlanFixtures {
             listOf(com.echelon.eve.plan.build.TrainSkill("massProduction", "Mass Production", 2, 3, false, "+1 manufacturing slot per level")), fees = 0.105, scc = com.echelon.eve.plan.build.Scc(0.04, 0.02), npcTax = 0.0025),
         library = com.echelon.eve.plan.build.Library(listOf(com.echelon.eve.plan.build.OwnedBp(2456, "bpo", "Owned (ME 10/TE 20)", 10, 20, loc = 60003760)), null),
     )
+    private fun place(sys: String, station: String, price: Double = 0.0) = com.echelon.eve.plan.trade.Place(1, station, 1, sys, price)
+    val trade = com.echelon.eve.plan.trade.TradeResult(
+        ready = true,
+        hauls = listOf(com.echelon.eve.plan.trade.Haul(40, "Megacyte", place("Jita", "Jita IV - Moon 4 - Caldari Navy Assembly Plant", 2000.0), place("Abudban", "Abudban IV - Tribal Liberation Force Logistic Support", 2498.0),
+                12600, 126.0, 25_200_000.0, 3_914_190.0, 156_567.6, 0, 25),
+            com.echelon.eve.plan.trade.Haul(34, "Tritanium", place("Perimeter", "Perimeter II", 3.1), place("Amarr", "Amarr VIII (Oris)", 3.9), 500_000, 5000.0, 1_550_000.0, 380_000.0, 95_000.0, 1, 3)),
+        spreads = listOf(com.echelon.eve.plan.trade.Spread(31528, "Medium Hybrid Burst Aerator I", place("Jita", "Jita IV - Moon 4 - Caldari Business Tribunal"), 849_000.0, 1_120_000.0, 0.28, 27.0, 1_180_534.5, 380_000.0, 0)),
+        builds = listOf(com.echelon.eve.plan.trade.BuildMargin(587, "Rifter", place("Jita", "Jita IV - Moon 4"), 210_000.0, 12_000.0, 354_000.0, 131_905.0, 0.59, 40.0, 0)),
+        index = 0.1722, fees = com.echelon.eve.plan.trade.Fees(0.0668, 0.027, true, 1, 5000.0, 50_000_000.0),
+        brokers = listOf(com.echelon.eve.plan.trade.HubFee("Jita", 0.0254, true, 2.0, 5.0), com.echelon.eve.plan.trade.HubFee("Amarr", 0.027)),
+    )
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -110,6 +121,10 @@ class PlanSnapshotTest {
     @Test fun build() = paparazzi.echelon {
         com.echelon.eve.plan.build.BuildScreen(com.echelon.eve.plan.build.BuildUi("Fiofka", com.echelon.eve.plan.build.BuildSettings(budget = "50m"), PlanFixtures.starts, PlanFixtures.build, open = 1,
             names = mapOf(2456L to "Hobgoblin I Blueprint", 60003760L to "Jita IV - Moon 4 - Caldari Navy Assembly Plant"), mateName = "Decxus"), com.echelon.eve.plan.build.BuildActions(), scroll = false)
+    }
+    @Test fun trade() = paparazzi.echelon {
+        com.echelon.eve.plan.trade.TradeScreen(com.echelon.eve.plan.trade.TradeUi("Fiofka", com.echelon.eve.plan.trade.TradeSettings(cargo = "5000", budget = "50000000"), PlanFixtures.starts, PlanFixtures.trade, open = 0, canSend = true),
+            com.echelon.eve.plan.trade.TradeActions(), scroll = false)
     }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)

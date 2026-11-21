@@ -19,6 +19,8 @@ const sysOut = s => s && {id:s.id, name:s.name, sec:s.sec, region:s.region};
 
 // ESI's public lists, kept between calls: adjusted prices (markets/prices) and cost indices (industry/systems).
 let adjusted = new Map(), costIndices = new Map(), esiStamp = null;
+/** The lists for the other Plan adapters (Trade uses both). */
+export const esiLists = () => ({adjusted, costIndices});
 
 export const api = ({graph, meta, book}) => ({
   /** {prices:[{type_id, adjusted_price}], systems:[{solar_system_id, cost_indices:[{activity, cost_index}]}], stamp} */

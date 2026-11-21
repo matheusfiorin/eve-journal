@@ -1775,6 +1775,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
   var adjusted = /* @__PURE__ */ new Map();
   var costIndices = /* @__PURE__ */ new Map();
   var esiStamp = null;
+  var esiLists = () => ({ adjusted, costIndices });
   var api4 = ({ graph: graph2, meta: meta2, book: book2 }) => ({
     /** {prices:[{type_id, adjusted_price}], systems:[{solar_system_id, cost_indices:[{activity, cost_index}]}], stamp} */
     "build.esi": ({ prices = [], systems = [], stamp = null }) => {
@@ -1939,6 +1940,71 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     }
   });
 
+  // android/js/plan/trade.js
+  var HUBS = [[30000142, "Jita"], [30002187, "Amarr"], [30002659, "Dodixie"], [30002510, "Rens"], [30002053, "Hek"]];
+  var isNpcStation2 = (id) => id >= 6e7 && id < 64e6;
+  var api5 = ({ graph: graph2, meta: meta2, book: book2 }) => ({
+    /**
+     * {from, maxJumps, cargo, budget?, me:{skills, standings}, owners:{loc:[corp, faction]}}
+     * → {ready, hauls, spreads, builds, tooDear, index, fees, brokers, needOwners, regions, items}
+     */
+    "trade.plan": ({ from, maxJumps = 5, cargo = 5e3, budget = null, me = {}, owners = {} }) => {
+      const g2 = graph2(), m = meta2(), b = book2(), { adjusted: adjusted2, costIndices: costIndices2 } = esiLists();
+      if (!b.items.size) return { ready: false };
+      const types = m.types || {}, skills = me.skills;
+      const ownerOf = (loc) => {
+        const o = owners[loc];
+        return o ? { corp: o[0], faction: o[1] || void 0 } : void 0;
+      };
+      const standings = Array.isArray(me.standings) ? me.standings : void 0;
+      const broker = feeBook({ level: levelOf(skills, m.skills?.brokerRelations), standings, owner: ownerOf });
+      const f = { ...fees(skills, m.skills), brokerAt: broker.at };
+      const hold = Math.max(1, cargo || 5e3), cap = budget === null || budget === void 0 ? Infinity : Math.max(0, budget);
+      const cache = /* @__PURE__ */ new Map(), sys = (loc) => b.stations.get(loc)?.system, station = (loc) => b.stations.get(loc)?.name || `Station ${loc}`;
+      const jumps = (a, c) => a && c && g2.systems.has(a) && g2.systems.has(c) ? leg(g2, a, c, cache)?.jumps ?? null : null;
+      const near = (j) => j !== null && j <= maxJumps;
+      const item = (id) => types[id]?.n || null, sysName = (id) => g2.systems.get(id)?.name || null;
+      const place = (loc) => ({ loc, station: station(loc), system: sys(loc) ?? null, systemName: sysName(sys(loc)) });
+      const index = costIndices2.get(from)?.manufacturing || 0;
+      const haulRows = hauls(b, { salesTax: f.salesTax, cargo: hold, volumeOf: (id) => types[id]?.v, budget: cap, limit: 40 }).map((h) => ({ ...h, toA: jumps(from, sys(h.from.loc)), ab: jumps(sys(h.from.loc), sys(h.to.loc)) })).filter((h) => near(h.toA) && h.ab !== null).map((h) => ({ ...h, perJump: h.profit / Math.max(1, h.toA + h.ab) })).sort((a, c) => c.perJump - a.perJump).slice(0, 12);
+      const tradeRows = stationTrades(b, { ...f, budget: cap, limit: 60 }).map((t) => ({ ...t, j: jumps(from, sys(t.loc)) })).filter((t) => near(t.j)).slice(0, 12);
+      const allBuilds = manufacturing(b, m.recipes, { ...f, adjusted: adjusted2, costIndex: index, alpha: isAlpha(skills) });
+      const buildRows = allBuilds.filter((x) => x.capital <= cap).slice(0, 12).map((x) => ({ ...x, j: jumps(from, sys(x.loc)) }));
+      const hubLocs = HUBS.map(([id, hub]) => ({ hub, loc: [...b.stations].find(([, st]) => st.system === id)?.[0] })).filter((h) => h.loc !== void 0);
+      const shown = [...haulRows.map((h) => h.to.loc), ...tradeRows.map((t) => t.loc), ...buildRows.map((x) => x.loc)];
+      return {
+        ready: true,
+        hauls: haulRows.map((h) => ({
+          type: h.type,
+          name: item(h.type),
+          from: { ...place(h.from.loc), price: h.from.price },
+          to: { ...place(h.to.loc), price: h.to.price },
+          units: h.units,
+          m3: h.m3,
+          invest: h.invest,
+          profit: h.profit,
+          perJump: h.perJump,
+          toA: h.toA,
+          ab: h.ab,
+          whole: h.invest >= cap * 0.95
+        })),
+        spreads: tradeRows.map((t) => ({ type: t.type, name: item(t.type), at: place(t.loc), buy: t.buy, sell: t.sell, margin: t.margin, volume: t.volume, capital: t.capital, daily: t.daily, jumps: t.j })),
+        builds: buildRows.map((x) => ({ type: x.type, name: item(x.type), at: place(x.loc), materials: x.materials, job: x.job, revenue: x.revenue, profit: x.profit, margin: x.margin, daily: x.daily, jumps: x.j })),
+        tooDear: allBuilds.filter((x) => x.profit > 0 && x.capital > cap).length,
+        index,
+        recipesError: m.recipesError ?? null,
+        fees: { salesTax: f.salesTax, brokerFee: brokerFee(levelOf(skills, m.skills?.brokerRelations)), known: Boolean(skills?.skills), brokerLevel: levelOf(skills, m.skills?.brokerRelations), cargo: hold, budget: Number.isFinite(cap) ? cap : null },
+        brokers: hubLocs.map((h) => {
+          const x = broker.explain(h.loc);
+          return { hub: h.hub, fee: x.fee, applied: x.applied, faction: x.faction ?? null, corp: x.corp ?? null };
+        }),
+        needOwners: standings ? [.../* @__PURE__ */ new Set([...hubLocs.map((h) => h.loc), ...shown])].filter((loc) => isNpcStation2(loc) && !owners[loc]) : [],
+        regions: b.regions ?? null,
+        items: Object.keys(types).length
+      };
+    }
+  });
+
   // android/js/planners.js
   var universe = null;
   var g = null;
@@ -1958,7 +2024,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     return orders2;
   };
   var ctx = { graph: need, meta: needMeta, book: needBook };
-  var api5 = {
+  var api6 = {
     "universe.load": ({ universe: u }) => {
       universe = u;
       g = graph(u);
@@ -2008,15 +2074,16 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     ...api(ctx),
     ...api2(ctx),
     ...api3(ctx),
-    ...api4(ctx)
+    ...api4(ctx),
+    ...api5(ctx)
   };
   var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports };
   globalThis.EchelonPlanners = {
     version: 1,
-    names: () => JSON.stringify(Object.keys(api5)),
+    names: () => JSON.stringify(Object.keys(api6)),
     modules: () => JSON.stringify(Object.fromEntries(Object.entries(modules).map(([k, m]) => [k, Object.keys(m).sort()]))),
     call(name, args) {
-      const fn = api5[name];
+      const fn = api6[name];
       if (!fn) throw new Error(`Unknown planner call ${name}`);
       return JSON.stringify(fn(args ?? {}) ?? null);
     }

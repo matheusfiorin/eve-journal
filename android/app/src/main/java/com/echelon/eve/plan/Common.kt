@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.echelon.eve.ui.theme.Echelon
 import androidx.compose.ui.Modifier
 import com.echelon.eve.ui.theme.Spacing
 import kotlinx.serialization.Serializable
@@ -27,5 +30,14 @@ fun PlanPage(modifier: Modifier = Modifier, scroll: Boolean = true, content: @Co
     ) {
         content()
         Spacer(Modifier.size(Spacing.lg))
+    }
+}
+
+/** A label over a long value (a station name, a sentence): for facts too wide for a KeyValueRow. */
+@Composable
+fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = Echelon.type.label, color = Echelon.colors.textMuted)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = Echelon.colors.text)
     }
 }
