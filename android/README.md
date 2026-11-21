@@ -21,6 +21,9 @@ The planner bundle in `app/src/main/assets/planners.js` is built from the web's 
 `npm run bundle:android` at the repository root after changing any planner, and commit the result (CI checks it is
 current).
 
+Background pushes from the wing room are optional: put the Firebase console's `google-services.json` in `app/` and the
+build applies the google-services plugin. Without it everything else works the same.
+
 Release builds are signed in CI from the `ANDROID_KEYSTORE_*` secrets; see `.github/workflows/android.yml`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the packages, the design system and how to add a screen.
