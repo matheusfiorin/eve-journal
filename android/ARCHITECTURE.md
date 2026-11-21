@@ -25,7 +25,8 @@ com.echelon.eve
 │   └── catalog    DesignCatalog: every component on one page (and its screenshot test)
 ├── nav            the shell: Destination, routes, FeatureRegistry, top/bottom bars, hubs, Settings, Welcome
 ├── fly          timers (shared with the wing, foreground service), where I am, current fit, skill queue, jobs
-├── plan, corp   feature packages (stubs from the scaffold)
+├── plan         explore, build, mine, trade, sell, haul routes, wing goals (the web's planners via the bridge)
+├── corp         feature package (stubs from the scaffold)
 ```
 
 Rules: `ui` depends on nothing in the app but itself. `core` never imports `ui` or `nav` (`core.data.Prefs` reads
@@ -132,6 +133,26 @@ pilot). It connects while held, folds the room's messages into StateFlows, and r
   board's order) are pure functions in `fly/timers/Timers.kt`, tested in `TimersTest`.
 - Fit and jobs reuse the web's `fit.js` and `jobs.js` through the bridge (`fit.groups`, `fit.eft`, `jobs.wing`). Encode
   ESI records for the bridge with defaults on (`EchelonJson` leaves them out, and jobs.js reads `status`).
+
+## The Plan feature (plan)
+
+- Seven screens, each a package under `plan/`: `explore`, `build`, `mine`, `trade`, `sell`, `haul`, `goals`. Every
+  screen but Wing goals runs the web's own planner through one adapter file in `android/js/plan/` (the web's
+  render function minus the HTML: inputs in as JSON, the screen's rows out), so the numbers match the website.
+- `PlanEngine.ready()` (`container.plan`) loads into the bridge, once per market update: the gate map
+  (`universe.load`), region 0's meta (`market.meta`: traffic, risk, skill ids, ores, starters) and the scanned
+  regions' order book (`market.book`). Adapters read them through the `ctx` in `android/js/planners.js`.
+- Public data the market does not carry is fetched by the app and handed in: ESI adjusted prices and industry cost
+  indices (hourly, `build.esi`, shared with Trade), station owners for standings-based broker fees (a second pass
+  when the adapter returns `needOwners`), live zKillboard kills and stargate destinations (Haul), EVE-Scout
+  wormholes (Explore), live buy orders per region and type (Sell: 6 at once, 150 per plan, 5-minute cache).
+- What the website syncs through the journal syncs here too, through `PrefJournal`: scan marks
+  (`explored:<id>`, newest per system) and the Haul plan (`haul:<id>`, newest wins). Wing goals read and write the
+  journal's `goal` records directly; a write races the website at the record's rev, and a lost race keeps this
+  phone's version as a "(conflict copy)", as the web does.
+- Tests: every adapter is pinned to what Node prints for the same call on `src/test/resources/plan-fixture.json`
+  (the web's e2e market with times pinned; regenerate with `node scripts/android-plan-fixture.mjs`), plus a
+  screenshot golden per screen in `PlanSnapshotTest`.
 
 ## Sign-in and sessions (core.auth)
 

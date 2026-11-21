@@ -112,6 +112,12 @@ object PlanFixtures {
         com.echelon.eve.plan.sell.SellPlan("most", "Most ISK", emptyList(), 3, 489_787.5, 3.4, -2_250_774.8, 0.99,
             ships = listOf(com.echelon.eve.plan.sell.ShipPlan(2124810474, "Miner", listOf(30000142, 30000144, 30003504, 30002187), listOf("Jita", "Perimeter", "Niarja", "Amarr"), 3, 489_787.5, "Jita"))),
     ), listOf(com.echelon.eve.plan.sell.SellNote("thin", 35, 500.0, 1.0, "here")))
+    private fun g(json: String) = com.echelon.eve.plan.goals.Goal(com.echelon.eve.core.api.EchelonJson.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject, 1)
+    val goals = listOf(
+        g("""{"id":"1","title":"Fly our first exploration fleet","pilot":"Both pilots","done":false,"category":"Exploration","due":"2026-11-30","steps":[{"text":"Train Astrometrics III","done":true},{"text":"Fit two Herons","done":false}],"notes":"Meet in Jita on Saturday.","updatedAt":1}"""),
+        g("""{"id":"2","title":"Build 100 Hobgoblins","pilot":"Fiofka","done":false,"category":"Industry","due":"2026-11-01","target":30000000,"result":12000000,"updatedAt":1}"""),
+        g("""{"id":"3","title":"Buy a Venture","pilot":"Decxus","done":true,"category":"Ships","updatedAt":1}"""),
+    )
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -146,6 +152,8 @@ class PlanSnapshotTest {
             mapOf(34L to com.echelon.eve.plan.sell.TypeInfo("Tritanium", 0.01, 0.0), 35L to com.echelon.eve.plan.sell.TypeInfo("Pyerite", 0.01, 0.0), 32880L to com.echelon.eve.plan.sell.TypeInfo("Venture", 0.0, 5000.0)),
             result = PlanFixtures.sell, mode = "here", status = "2 plans · buy orders as of just now · 4 requests to EVE.", canSend = setOf(2124810474)), com.echelon.eve.plan.sell.SellActions(), scroll = false)
     }
+    @Test fun goals() = paparazzi.echelon { com.echelon.eve.plan.goals.GoalsScreen(com.echelon.eve.plan.goals.GoalsUi(PlanFixtures.goals, filter = "all", today = "2026-11-21"), com.echelon.eve.plan.goals.GoalsActions(), scroll = false) }
+    @Test fun goalForm() = paparazzi.echelon { com.echelon.eve.plan.goals.GoalsScreen(com.echelon.eve.plan.goals.GoalsUi(emptyList(), showForm = true, fields = com.echelon.eve.plan.goals.GoalFields(title = "Fly a fleet", pilot = "Fiofka"), formProblem = "Write the target date as YYYY-MM-DD."), com.echelon.eve.plan.goals.GoalsActions(), scroll = false) }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)
     }
