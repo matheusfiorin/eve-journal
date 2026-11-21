@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.plan.PlanPage
+import com.echelon.eve.plan.Sys
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.ChoiceChip
 import com.echelon.eve.ui.components.EchelonCard
@@ -41,8 +42,6 @@ import com.echelon.eve.ui.theme.Spacing
 import kotlinx.serialization.Serializable
 
 // The bridge's explore.rank and explore.shortcuts answers (android/js/plan/explore.js).
-
-@Serializable data class Sys(val id: Long, val name: String, val sec: Double, val region: Long)
 
 @Serializable
 data class ExploreRow(

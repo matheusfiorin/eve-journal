@@ -13,6 +13,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.echelon.eve.ui.theme.Spacing
+import kotlinx.serialization.Serializable
+
+/** A solar system as the Plan adapters in android/js/plan return it. */
+@Serializable data class Sys(val id: Long, val name: String, val sec: Double, val region: Long)
 
 /** A Plan screen's frame: a scrolling column with the gutter (Paparazzi's tall pages pass scroll = false). */
 @Composable

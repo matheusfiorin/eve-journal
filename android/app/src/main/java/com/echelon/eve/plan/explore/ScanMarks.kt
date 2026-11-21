@@ -4,6 +4,7 @@ import com.echelon.eve.core.api.ApiError
 import com.echelon.eve.core.api.EchelonApi
 import com.echelon.eve.core.auth.SessionStore
 import com.echelon.eve.core.model.Pilot
+import com.echelon.eve.plan.PrefJournal
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,13 +67,14 @@ object Marks {
 private data class Saved(val marks: Map<Long, Long> = emptyMap(), val rev: Int = 0, val agreed: Map<Long, Long> = emptyMap())
 
 class ScanMarks(
-    private val api: EchelonApi,
+    api: EchelonApi,
     private val sessions: SessionStore,
     private val dir: File?,
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val journal = PrefJournal(api)
     private val mutex = Mutex()
     private val saved = mutableMapOf<Pilot, Saved>()
     private val _marks = MutableStateFlow<Map<Pilot, Map<Long, Long>>>(emptyMap())
@@ -106,40 +108,22 @@ class ScanMarks(
      */
     suspend fun sync(p: Pilot): Boolean = mutex.withLock {
         val token = sessions.token(p.id) ?: return@withLock false
+        val id = "explored:${p.id}"
         try {
             var s = load(p)
-            var (remote, rev) = pull(token, p) ?: (s.agreed to s.rev)
+            var copy = journal.pull(token, id)
             repeat(2) {
+                val remote = Marks.of(copy.record)
                 val merged = Marks.merge(s.marks, remote, clock())
-                if (merged == Marks.age(remote, clock()) && rev > 0) { store(p, Saved(merged, rev, merged)); return@withLock true }
-                if (merged.isEmpty() && rev == 0) { store(p, Saved(merged, 0, emptyMap())); return@withLock true }
-                val out = api.post<JsonObject>("/api/journal", token, buildJsonObject {
-                    put("changes", buildJsonArray { add(buildJsonObject { put("kind", "pref"); put("id", "explored:${p.id}"); put("base", rev); put("record", Marks.record(p, merged)) }) })
-                })
-                val applied = (out["applied"] as? JsonArray)?.firstOrNull() as? JsonObject
-                if (applied != null) { val r = applied["rev"]?.jsonPrimitive?.intOrNull ?: rev; store(p, Saved(merged, r, merged)); return@withLock true }
-                val conflict = (out["conflicts"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@withLock false
-                s = s.copy(marks = merged)
-                remote = Marks.of(conflict["record"] as? JsonObject); rev = conflict["rev"]?.jsonPrimitive?.intOrNull ?: rev
+                if (copy.record != null && merged == Marks.age(remote, clock())) { store(p, Saved(merged, copy.rev, merged)); return@withLock true }
+                if (merged.isEmpty() && copy.record == null) { store(p, Saved(merged, 0, emptyMap())); return@withLock true }
+                when (val r = journal.push(token, id, copy.rev, Marks.record(p, merged))) {
+                    is PrefJournal.Push.Applied -> { store(p, Saved(merged, r.rev, merged)); return@withLock true }
+                    is PrefJournal.Push.Conflict -> { s = s.copy(marks = merged); copy = r.copy }
+                    PrefJournal.Push.Refused -> return@withLock false
+                }
             }
             false
         } catch (e: ApiError) { false }
-    }
-
-    /** The pilot's `explored` record and its rev, read through every page of their journal. */
-    private suspend fun pull(token: String, p: Pilot): Pair<Map<Long, Long>, Int>? {
-        var since = 0L
-        var found: Pair<Map<Long, Long>, Int>? = null
-        repeat(20) {
-            val page = api.journalPull(token, since)
-            (page["records"] as? JsonArray)?.forEach { r ->
-                val o = r as? JsonObject ?: return@forEach
-                if (o["kind"]?.jsonPrimitive?.contentOrNull == "pref" && o["id"]?.jsonPrimitive?.contentOrNull == "explored:${p.id}")
-                    found = Marks.of(o["record"] as? JsonObject) to (o["rev"]?.jsonPrimitive?.intOrNull ?: 0)
-            }
-            if (page["more"]?.jsonPrimitive?.booleanOrNull != true) return found
-            since = page["rev"]?.jsonPrimitive?.longOrNull ?: return found
-        }
-        return found
     }
 }

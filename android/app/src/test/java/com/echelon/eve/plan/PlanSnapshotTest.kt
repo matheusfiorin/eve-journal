@@ -10,7 +10,6 @@ import com.echelon.eve.plan.explore.ExploreSettings
 import com.echelon.eve.plan.explore.ExploreUi
 import com.echelon.eve.plan.explore.Explorer
 import com.echelon.eve.plan.explore.Shortcut
-import com.echelon.eve.plan.explore.Sys
 import com.echelon.eve.plan.explore.TrainStep
 import com.echelon.eve.testing.echelon
 import com.echelon.eve.testing.echelonPaparazzi
@@ -38,6 +37,19 @@ object PlanFixtures {
         train = listOf(TrainStep("hacking", 0, 3, "Data sites: more virus coherence", "Hacking"), TrainStep("archaeology", 1, 3, "Relic sites: more virus coherence", "Archaeology")),
         visited = 1, trafficHours = 30.0,
     )
+    private fun step(s: Sys, p: Double, stop: Boolean = false, live: com.echelon.eve.plan.haul.HaulLive? = null) = com.echelon.eve.plan.haul.HaulStep(s, stop, p, if (s.sec >= 0.45) "hi" else "low", 3, 1200, live)
+    val haul = com.echelon.eve.plan.haul.HaulResult(
+        hull = com.echelon.eve.plan.haul.HaulHull("dst", "Deep space transport", 62500.0, "Heavy tank and a warp-core bonus."), suggested = "dst",
+        modes = mapOf(
+            "safest" to com.echelon.eve.plan.haul.HaulMode(listOf(sys(30000142, "Jita", 0.946, 10000002), sys(30002187, "Amarr", 1.0, 10000043)), emptyList(), 45, 0.9921, 3_900_000.0, 49.5),
+            "balanced" to com.echelon.eve.plan.haul.HaulMode(listOf(sys(30000142, "Jita", 0.946, 10000002), sys(30002187, "Amarr", 1.0, 10000043)), emptyList(), 35, 0.9889, 5_500_000.0, 38.5,
+                steps = listOf(step(sys(30000142, "Jita", 0.946, 10000002), 0.0002, true), step(sys(30000144, "Perimeter", 0.95, 10000002), 0.0011),
+                    step(sys(30003504, "Niarja", 0.5, 10000043), 0.031, live = com.echelon.eve.plan.haul.HaulLive(4, 3, NOW - 9 * 60_000, dictor = true, ships = listOf(24690))),
+                    step(sys(30002187, "Amarr", 1.0, 10000043), 0.0004, true))),
+            "shortest" to com.echelon.eve.plan.haul.HaulMode(unreachable = listOf(sys(30000142, "Jita", 0.946, 10000002), sys(30002187, "Amarr", 1.0, 10000043))),
+        ),
+        live = com.echelon.eve.plan.haul.HaulLiveSummary(23), killDays = 7,
+    )
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -49,6 +61,11 @@ class PlanSnapshotTest {
     @Test fun explore() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(from = 30000142), PlanFixtures.starts, PlanFixtures.explore, shortcuts = PlanFixtures.shortcuts, regionName = PlanFixtures.region, open = 30041407),
             now, ExploreActions(), canSend = true, scroll = false)
+    }
+    @Test fun haul() = paparazzi.echelon {
+        com.echelon.eve.plan.haul.HaulScreen(com.echelon.eve.plan.haul.HaulUi(com.echelon.eve.plan.haul.HaulForm(value = "500m", volume = "20000"), PlanFixtures.haul,
+            liveNote = "Live: 23 kills in the last hour across 6 regions from zKillboard.", names = mapOf(24690L to "Catalyst"), canSend = true, pilotName = "Fiofka"),
+            now, com.echelon.eve.plan.haul.HaulActions(), scroll = false)
     }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)

@@ -15,6 +15,7 @@ import * as sell from '../../sell.js';
 import * as fit from '../../fit.js';
 import * as jobs from '../../jobs.js';
 import * as planExplore from './plan/explore.js';
+import * as planHaul from './plan/haul.js';
 
 // The gate map is about 1 MB: it is loaded once with universe.load and kept, with its graph.
 let universe = null, g = null, meta = null;
@@ -45,6 +46,7 @@ const api = {
   // Every pilot's industry jobs in one list (ready first), with slot use: pilots are [{name, jobs, skills}], skills as ESI sends them.
   'jobs.wing': ({pilots = [], now = Date.now()}) => jobs.wingJobs(pilots.map(p => ({name:p.name, jobs:p.jobs || [], levels:p.skills?.skills ? industry.skillLevels(p.skills, industry.SLOT_SKILLS) : null})), now),
   ...planExplore.api(ctx),
+  ...planHaul.api(ctx),
 };
 
 // Every planner module stays reachable for the Plan agent's adapters, and keeps esbuild from dropping it.

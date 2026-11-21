@@ -30,6 +30,8 @@ import java.util.WeakHashMap
 class PlanEngine(private val c: AppContainer) {
     /** Systems each pilot marked scanned, synced with the website (Explore). */
     val marks = com.echelon.eve.plan.explore.ScanMarks(c.api, c.sessions, java.io.File(c.app.filesDir, "plan"))
+    /** Each pilot's Haul plan, synced with the website (Haul routes). */
+    val haul = com.echelon.eve.plan.haul.HaulPrefs(c.api, c.sessions, java.io.File(c.app.filesDir, "plan"))
     private val mutex = Mutex()
     private var universeVersion: String? = null
     private var metaStamp: String? = null

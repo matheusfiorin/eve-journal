@@ -156,7 +156,7 @@
     return { from, to, systems, jumps: list.length - 1, risky: systems.slice(1).filter((s) => secClass(s.sec) !== "hi").length };
   }
   function facilities(g2, from, flag, indexOf, { maxJumps = 10, limit = 3 } = {}) {
-    const route = paths(g2, from), seen = /* @__PURE__ */ new Set(), out2 = [];
+    const route = paths(g2, from), seen = /* @__PURE__ */ new Set(), out3 = [];
     for (const station of g2.stations.values()) {
       const system = g2.systems.get(station.system);
       if (!(station.flags & flag) || seen.has(system.id) || secClass(system.sec) !== "hi") continue;
@@ -165,9 +165,9 @@
       const index = indexOf(system.id);
       if (!Number.isFinite(index)) continue;
       seen.add(system.id);
-      out2.push({ station, system, jumps: list.length - 1, index });
+      out3.push({ station, system, jumps: list.length - 1, index });
     }
-    return out2.sort((a, b) => a.index - b.index || a.jumps - b.jumps).slice(0, limit);
+    return out3.sort((a, b) => a.index - b.index || a.jumps - b.jumps).slice(0, limit);
   }
   function nearest(g2, from, places, cache = /* @__PURE__ */ new Map()) {
     let best = null;
@@ -224,10 +224,10 @@
   function oresAt(sec, region) {
     const s = secShown(sec), f = faction(region);
     if (s >= 0.5) {
-      const out2 = ["Veldspar", "Scordite"];
-      if (s <= 0.9 && (f === "amarr" || f === "caldari")) out2.push("Pyroxeres");
-      if (s <= 0.9 && (f === "gallente" || f === "minmatar" || f === "caldari" && s <= 0.7)) out2.push("Plagioclase");
-      return out2;
+      const out3 = ["Veldspar", "Scordite"];
+      if (s <= 0.9 && (f === "amarr" || f === "caldari")) out3.push("Pyroxeres");
+      if (s <= 0.9 && (f === "gallente" || f === "minmatar" || f === "caldari" && s <= 0.7)) out3.push("Plagioclase");
+      return out3;
     }
     if (s > 0 && f) return [...LOW[f], ...s <= 0.2 ? [DEEP_LOW[f]] : []];
     return [];
@@ -266,7 +266,7 @@
   }
   var DOCK_SECONDS = 240;
   function sites(g2, from, { values, rate, hold, activity = {}, maxJumps = 10, lowsec = false, session = 7200, limit = 8 }) {
-    const route = paths(g2, from, { safe: !lowsec }), out2 = [];
+    const route = paths(g2, from, { safe: !lowsec }), out3 = [];
     const fill = hold / rate, efficiency = fill / (fill + DOCK_SECONDS);
     for (const system of g2.systems.values()) {
       if (!system.belts || !lowsec && secClass(system.sec) !== "hi" || secClass(system.sec) === "null") continue;
@@ -281,9 +281,9 @@
       const risk = 1 / (1 + kills) * (secClass(system.sec) === "hi" ? 1 : 0.6);
       const crowd = jumps > 1e3 ? 0.7 : jumps > 300 ? 0.85 : 1;
       const score = iskHour * risk * crowd * Math.max(0, session - travel) / session;
-      out2.push({ system, jumps: list.length - 1, ores, iskHour, kills, traffic: jumps, risk, crowd, score, lowsec: list.slice(1).some((id) => secClass(g2.systems.get(id).sec) !== "hi") });
+      out3.push({ system, jumps: list.length - 1, ores, iskHour, kills, traffic: jumps, risk, crowd, score, lowsec: list.slice(1).some((id) => secClass(g2.systems.get(id).sec) !== "hi") });
     }
-    return out2.sort((a, b) => b.score - a.score).slice(0, limit);
+    return out3.sort((a, b) => b.score - a.score).slice(0, limit);
   }
   function ledger(rows, ores, values, names = (id) => `System ${id}`) {
     const grade = new Map(ores.flatMap((o) => Object.entries(o.grades).map(([id, bonus]) => [Number(id), { ore: o, bonus }])));
@@ -311,7 +311,7 @@
   var PIRATES = { amarr: "Sansha / Blood Raiders", caldari: "Guristas", gallente: "Serpentis", minmatar: "Angel Cartel" };
   var pirates = (region) => PIRATES[faction(region)] || "Varies by region";
   function rankSystems(g2, from, { traffic = {}, kills = {}, hour = {}, bands = /* @__PURE__ */ new Set(["hi"]), maxJumps = 10, visited = /* @__PURE__ */ new Map(), tolerance = "normal", now = Date.now(), limit = 20 } = {}) {
-    const route = paths(g2, from, { safe: !bands.has("low") && !bands.has("null") }), out2 = [];
+    const route = paths(g2, from, { safe: !bands.has("low") && !bands.has("null") }), out3 = [];
     for (const system of g2.systems.values()) {
       const band = secClass(system.sec);
       if (!bands.has(band)) continue;
@@ -327,14 +327,14 @@
       const near = Math.exp(-jumps / 10);
       const seen = visited.get(system.id), ago = seen ? (now - seen) / 36e5 : Infinity;
       const fresh = ago < 24 ? 0.15 : ago < 72 ? 0.6 : 1;
-      out2.push({ system, jumps, traffic: day, kills: dead, deadEnd: system.links.length === 1, visited: seen, quiet, safe, score: quiet * safe * pocket * near * fresh, pirates: pirates(system.region) });
+      out3.push({ system, jumps, traffic: day, kills: dead, deadEnd: system.links.length === 1, visited: seen, quiet, safe, score: quiet * safe * pocket * near * fresh, pirates: pirates(system.region) });
     }
-    return out2.sort((a, b) => b.score - a.score).slice(0, limit);
+    return out3.sort((a, b) => b.score - a.score).slice(0, limit);
   }
   function visitedMap(...sources) {
-    const out2 = /* @__PURE__ */ new Map();
-    for (const list of sources) for (const [id, at] of list || []) if (!(out2.get(id) >= at)) out2.set(id, at);
-    return out2;
+    const out3 = /* @__PURE__ */ new Map();
+    for (const list of sources) for (const [id, at] of list || []) if (!(out3.get(id) >= at)) out3.set(id, at);
+    return out3;
   }
   var PLAN = [
     ["astrometrics", 3, "Stronger probes and faster scans: find sites at all"],
@@ -358,12 +358,12 @@
     return Object.entries(EXPLORERS).map(([key, e]) => ({ ...e, key, level: level(key) })).sort((a, b) => b.level - a.level)[0];
   }
   function shortcuts(g2, from, signatures, { maxJumps = 15, limit = 8 } = {}) {
-    const route = paths(g2, from, { safe: false }), out2 = [];
+    const route = paths(g2, from, { safe: false }), out3 = [];
     for (const s of signatures || []) {
       if (s.signature_type !== "wormhole" || !g2.systems.has(s.in_system_id)) continue;
       const list = route.path(s.in_system_id);
       if (!list || list.length - 1 > maxJumps) continue;
-      out2.push({
+      out3.push({
         hub: s.out_system_name,
         system: g2.systems.get(s.in_system_id),
         jumps: list.length - 1,
@@ -374,7 +374,7 @@
         lowsec: list.some((id) => secClass(g2.systems.get(id).sec) !== "hi")
       });
     }
-    return out2.sort((a, b) => a.jumps - b.jumps).slice(0, limit);
+    return out3.sort((a, b) => a.jumps - b.jumps).slice(0, limit);
   }
 
   // industry.js
@@ -595,7 +595,7 @@
     return { items, stations };
   }
   function hauls(market, { salesTax, cargo, volumeOf, budget = Infinity, limit = 60 }) {
-    const out2 = [];
+    const out3 = [];
     for (const [type, item] of market.items) {
       const m3 = volumeOf(type);
       if (!(m3 > 0)) continue;
@@ -615,12 +615,12 @@
           if (!best || profit > best.profit) best = { type, from, to, unit, units, profit, invest: from.price * units, m3: units * m3 };
         }
       }
-      if (best) out2.push(best);
+      if (best) out3.push(best);
     }
-    return out2.sort((a, b) => b.profit - a.profit).slice(0, limit);
+    return out3.sort((a, b) => b.profit - a.profit).slice(0, limit);
   }
   function stationTrades(market, { salesTax, brokerFee, brokerAt, capture = 0.05, budget = Infinity, limit = 60 }) {
-    const out2 = [];
+    const out3 = [];
     for (const [type, item] of market.items) for (const sell of item.sells) {
       const buy = item.buys.find((b) => b.loc === sell.loc);
       if (!buy || buy.price >= sell.price) continue;
@@ -629,13 +629,13 @@
       if (unit <= 0) continue;
       const units = Math.min(item.daily * capture, buy.volume, sell.volume, Math.floor(budget / (buy.price * (1 + fee))));
       if (!(units > 0)) continue;
-      out2.push({ type, loc: sell.loc, buy: buy.price, sell: sell.price, unit, margin: unit / buy.price, volume: item.daily, units, capital: units * buy.price * (1 + fee), daily: unit * units });
+      out3.push({ type, loc: sell.loc, buy: buy.price, sell: sell.price, unit, margin: unit / buy.price, volume: item.daily, units, capital: units * buy.price * (1 + fee), daily: unit * units });
     }
-    return out2.sort((a, b) => b.daily - a.daily).slice(0, limit);
+    return out3.sort((a, b) => b.daily - a.daily).slice(0, limit);
   }
   function manufacturing(market, recipes, { salesTax, brokerFee, brokerAt, adjusted, costIndex = 0, alpha = false }) {
     const cheapest = (type) => market.items.get(type)?.sells[0];
-    const out2 = [];
+    const out3 = [];
     for (const [product, r] of Object.entries(recipes || {})) {
       const sell = cheapest(Number(product));
       if (!sell) continue;
@@ -653,9 +653,9 @@
       const job = eiv * (costIndex + SCC.manufacturing + NPC_FACILITY_TAX + (alpha ? ALPHA_TAX : 0));
       const revenue = sell.price * r.q * (1 - salesTax - (brokerAt ? brokerAt(sell.loc) : brokerFee));
       const profit = revenue - materials - job;
-      out2.push({ type: Number(product), materials, job, revenue, profit, margin: profit / (materials + job), capital: materials + job, loc: sell.loc, daily: market.items.get(Number(product)).daily });
+      out3.push({ type: Number(product), materials, job, revenue, profit, margin: profit / (materials + job), capital: materials + job, loc: sell.loc, daily: market.items.get(Number(product)).daily });
     }
-    return out2.sort((a, b) => b.profit - a.profit);
+    return out3.sort((a, b) => b.profit - a.profit);
   }
 
   // hauling.js
@@ -689,12 +689,12 @@
   var PODS = /* @__PURE__ */ new Set([670, 33328]);
   function campIntel(kills, { combat = {}, gateTo = /* @__PURE__ */ new Map(), now = Date.now(), window = 3600 } = {}) {
     var _a;
-    const sb = new Set(combat.sb || []), dictor = new Set(combat.dictor || []), out2 = /* @__PURE__ */ new Map();
+    const sb = new Set(combat.sb || []), dictor = new Set(combat.dictor || []), out3 = /* @__PURE__ */ new Map();
     for (const k of kills || []) {
       if (k.zkb?.npc) continue;
       const time = Date.parse(k.killmail_time), age = (now - time) / 1e3;
       if (!(age >= 0 && age <= window)) continue;
-      const s = out2.get(k.solar_system_id) || { kills: 0, pods: 0, gates: {}, gateKills: 0, sb: 0, dictor: 0, last: 0, ships: {}, value: 0 };
+      const s = out3.get(k.solar_system_id) || { kills: 0, pods: 0, gates: {}, gateKills: 0, sb: 0, dictor: 0, last: 0, ships: {}, value: 0 };
       s.kills++;
       s.value += k.zkb?.totalValue || 0;
       s.last = Math.max(s.last, time);
@@ -708,9 +708,9 @@
       if (k.attackers?.some((a) => sb.has(a.weapon_type_id))) s.sb++;
       if (k.attackers?.some((a) => dictor.has(a.ship_type_id))) s.dictor++;
       for (const a of k.attackers || []) if (a.ship_type_id) s.ships[a.ship_type_id] = (s.ships[a.ship_type_id] || 0) + 1;
-      out2.set(k.solar_system_id, s);
+      out3.set(k.solar_system_id, s);
     }
-    return out2;
+    return out3;
   }
   var FLOOR = { hi: 2e-4, low: 5e-3, null: 0.02 };
   function systemRisk(system, { history = {}, traffic = {}, live = /* @__PURE__ */ new Map(), value = 0, hull = "t1", via = [], now = Date.now() } = {}) {
@@ -1103,13 +1103,13 @@
       for (const loc of pickLocs) if (!(stops.length && cands[stops[0]].loc === loc)) w.push({ sys: sysOf(loc) ?? fixed.get(loc), loc, kind: "pickup" });
       stops.forEach((c, k) => w.push({ sys: cands[c].sys, loc: cands[c].loc, kind: "stop", k }));
       if (o.returnHome && w.length > 1) w.push({ sys: home[s].sys, loc: home[s].loc, kind: "home" });
-      let out2 = 0, back = 0;
+      let out3 = 0, back = 0;
       for (let i = 1; i < w.length; i++) {
         const j = jumps(w[i - 1].sys, w[i].sys);
         if (w[i].kind === "home") back += j;
-        else out2 += j;
+        else out3 += j;
       }
-      return { w, out: out2, jumps: out2 + back };
+      return { w, out: out3, jumps: out3 + back };
     }
     function lossOf(s, tr, a, stops, pickLocs) {
       const n = stops.length, ownAt = new Float64Array(n + 1), hangAt = new Float64Array(n + 1), sold = new Float64Array(T);
@@ -1153,7 +1153,7 @@
       picks.forEach((p, i) => {
         if (p.sys !== void 0 && hang2[i].some((q) => q > 0) && jumps(home[s].sys, p.sys) <= o.maxJumps) choices.push([i]);
       });
-      const out2 = [], sub = [];
+      const out3 = [], sub = [];
       const consider = (from) => {
         const a = allocate(s, from, maskOf(sub), rem2, hang2), pickLocs = pickedAt(a);
         if (from.length && !pickLocs.length) {
@@ -1169,7 +1169,7 @@
           if (k && bound2 <= best2) break;
           const score = bound2 - lossOf(s, tr, a, perm, pickLocs).loss;
           if (!k || score > best2) {
-            out2.push({ s, from, stops: perm, net, jumps: tr.jumps, score });
+            out3.push({ s, from, stops: perm, net, jumps: tr.jumps, score });
             best2 = Math.max(best2, score);
           }
         }
@@ -1184,17 +1184,17 @@
         }
       };
       visit(0);
-      return out2;
+      return out3;
     }
     const shortlist = (list) => {
-      const out2 = new Set([...list].sort((a, b) => b.score - a.score).slice(0, o.keep)), byJumps = /* @__PURE__ */ new Map();
+      const out3 = new Set([...list].sort((a, b) => b.score - a.score).slice(0, o.keep)), byJumps = /* @__PURE__ */ new Map();
       for (const e of list) if (!byJumps.has(e.jumps) || e.net > byJumps.get(e.jumps).net) byJumps.set(e.jumps, e);
       let most2 = -Infinity;
       for (const [, e] of [...byJumps].sort((a, b) => a[0] - b[0])) if (e.net > most2) {
         most2 = e.net;
-        out2.add(e);
+        out3.add(e);
       }
-      return [...out2];
+      return [...out3];
     };
     const rem = Float64Array.from(ord, (r) => r.volume), hang = stock.map((a) => a.slice());
     function run(seq, together, wantLoss) {
@@ -1325,12 +1325,12 @@
     for (let t = 0; t < T; t++) if (Q[t] > 0 && (!quoted[t] || floored[t] || !buyer[t])) unsold.push({ type: typeIds[t], qty: Q[t], reason: why(t) });
     return { plans, unsold, notes };
     function build(r, key, label) {
-      const res = run(r.seq, r.together, () => true), out2 = ships.map((sh, s) => ({ pilot: sh.pilot, name: sh.name, route: [home[s].sys], stops: [], jumps: 0, net: 0, expectedLoss: 0 }));
+      const res = run(r.seq, r.together, () => true), out3 = ships.map((sh, s) => ({ pilot: sh.pilot, name: sh.name, route: [home[s].sys], stops: [], jumps: 0, net: 0, expectedLoss: 0 }));
       const left = stock.map((a) => a.slice()), used = new Float64Array(ships.length), visited = /* @__PURE__ */ new Set(), unsold2 = [];
       let umask = 0;
       const sold = new Float64Array(T);
       for (const p of res.parts) {
-        const s = p.e.s, x = out2[s], at = [];
+        const s = p.e.s, x = out3[s], at = [];
         Object.assign(x, { route: p.route, jumps: p.tr.jumps, net: p.net, expectedLoss: p.loss });
         for (const w of p.tr.w) {
           if (w.kind === "start" || w.kind === "home") {
@@ -1378,7 +1378,7 @@
         if (share > 0.5 && !(thin.get(t)?.share >= share)) thin.set(t, { kind: "thin", type: typeIds[t], qty: sold[t], volume: book2, share, plan: key });
       }
       const kept = unsold2.reduce((v, u) => v + u.qty * (tNo.has(u.type) ? worth[tNo.get(u.type)] : 0), 0);
-      return { key, label, also: [], jumps: res.jumps, net: res.net, expectedLoss: res.loss, score: res.score, soldShare: res.net + kept > 0 ? res.net / (res.net + kept) : 0, together: !!r.together, ships: out2, unsold: unsold2 };
+      return { key, label, also: [], jumps: res.jumps, net: res.net, expectedLoss: res.loss, score: res.score, soldShare: res.net + kept > 0 ? res.net / (res.net + kept) : 0, together: !!r.together, ships: out3, unsold: unsold2 };
     }
     function why(t, hangar) {
       if (!quoted[t]) return "no quotes";
@@ -1420,22 +1420,22 @@
   }
   var order = (flag) => Number(/(\d+)$/.exec(flag)?.[1] ?? 0);
   function fitGroups(items, catOf = () => null) {
-    const out2 = Object.fromEntries(SLOTS.map(([g2]) => [g2, []]));
+    const out3 = Object.fromEntries(SLOTS.map(([g2]) => [g2, []]));
     const rows = (items || []).filter((r) => Array.isArray(r) && typeof r[1] === "string" && groupOf(r[1]) !== null).map(([type, flag, qty]) => ({ type, flag, qty: qty || 1, group: groupOf(flag) })).sort((a, b) => order(a.flag) - order(b.flag));
     for (const r of rows) {
       const slot = FITTED.includes(r.group);
       if (slot && catOf(r.type) === "Charge") {
-        const module = out2[r.group].find((m) => m.flag === r.flag && !m.charge);
+        const module = out3[r.group].find((m) => m.flag === r.flag && !m.charge);
         if (module) {
           module.charge = r.type;
           continue;
         }
       }
-      const same = !slot && out2[r.group].find((m) => m.type === r.type);
+      const same = !slot && out3[r.group].find((m) => m.type === r.type);
       if (same) same.qty += r.qty;
-      else out2[r.group].push(r);
+      else out3[r.group].push(r);
     }
-    return out2;
+    return out3;
   }
   function eft({ ship, title, items, nameOf, catOf }) {
     const g2 = fitGroups(items, catOf), n = (id) => nameOf(id);
@@ -1550,6 +1550,82 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     "explore.shortcuts": ({ from, signatures = [], maxJumps = 15 }) => shortcuts(graph2(), from, signatures, { maxJumps }).map((c) => ({ hub: c.hub, system: out(c.system), jumps: c.jumps, size: c.size ?? null, hours: c.hours ?? null, signature: c.signature ?? null, lowsec: c.lowsec }))
   });
 
+  // android/js/plan/haul.js
+  var out2 = (s) => s && { id: s.id, name: s.name, sec: s.sec, region: s.region };
+  var api2 = ({ graph: graph2, meta: meta2 }) => ({
+    /** The hulls and modes the screen offers, with the web's words. */
+    "haul.options": () => ({ hulls: Object.entries(HULLS).map(([key, h]) => ({ key, name: h.name, cargo: h.cargo, why: h.why })), modes: Object.entries(MODES).map(([key, m]) => ({ key, label: m.label })) }),
+    /**
+     * {stops:[ids], value, volume, hull?, lowsec, avoid:[ids], optimize, end:'fixed'|'return', kills?:[zKillboard kills], gateTo?:{gateId:systemId}, now}
+     * → {hull, suggested, fits, modes:{safest|balanced|shortest: plan}, regions:[ids], gates:[ids], live:{kills, regions}|null, killDays}
+     */
+    "haul.plan": ({ stops = [], value = 0, volume = 0, hull = null, lowsec = false, avoid = [], optimize = false, end = "fixed", kills = null, gateTo = {}, now = Date.now() }) => {
+      const g2 = graph2(), m = meta2();
+      const ids = stops.filter((id) => g2.systems.has(id));
+      if (ids.length < 2) return { error: "need-two-stops" };
+      const suggested = suggestHull(volume, value), use = HULLS[hull] ? hull : suggested;
+      const history = m.risk?.s || {}, traffic = Object.fromEntries(Object.entries(m.activity || {}).map(([id, a]) => [id, a[2]]));
+      const live = kills ? campIntel(kills, { combat: m.combat, gateTo: new Map(Object.entries(gateTo).map(([k, v]) => [Number(k), v])), now }) : /* @__PURE__ */ new Map();
+      const ctx2 = { history, traffic, live, value, hull: use, now };
+      const options = { lowsec, avoid: new Set(avoid), optimize, end };
+      const modes = {}, crossed = /* @__PURE__ */ new Set();
+      for (const mode of Object.keys(MODES)) {
+        const p = plan(g2, ids, ctx2, { ...options, mode });
+        if (p.unreachable) {
+          modes[mode] = { unreachable: p.unreachable.map((id) => out2(g2.systems.get(id))) };
+          continue;
+        }
+        for (const id of p.route) crossed.add(g2.systems.get(id).region);
+        modes[mode] = {
+          stops: p.stops.map((id) => out2(g2.systems.get(id))),
+          route: p.route,
+          jumps: p.jumps,
+          survival: p.survival,
+          expectedLoss: p.expectedLoss,
+          minutes: p.minutes,
+          lowsec: p.lowsec,
+          steps: p.steps.map((st) => {
+            const c = live.get(st.system.id);
+            const gateKills = c ? Object.entries(c.gates).filter(([to]) => to === "?" || st.via.includes(Number(to))).reduce((t, [, x]) => t + x.n, 0) : 0;
+            return {
+              system: out2(st.system),
+              stop: st.stop,
+              p: st.p,
+              band: secClass(st.system.sec),
+              d24: Math.round((history[st.system.id] || [0])[0]),
+              perHour: traffic[st.system.id] || 0,
+              live: c ? {
+                kills: c.kills,
+                gateKills,
+                last: c.last || null,
+                sb: Boolean(c.sb),
+                dictor: Boolean(c.dictor),
+                ships: Object.entries(c.ships || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id]) => Number(id))
+              } : null
+            };
+          })
+        };
+      }
+      const keys = Object.keys(MODES);
+      for (const [i, k] of keys.entries()) {
+        const same = keys.slice(0, i).find((j) => modes[j].route && modes[j].route.join() === modes[k].route?.join());
+        if (same) modes[k].sameAs = same;
+      }
+      const onRoute = new Set(Object.values(modes).flatMap((p) => p.route || []));
+      const gates = kills ? [...new Set(kills.filter((k) => onRoute.has(k.solar_system_id) && k.zkb?.locationID >= 5e7 && k.zkb?.locationID < 6e7).map((k) => k.zkb.locationID))] : [];
+      return {
+        hull: { key: use, ...HULLS[use] },
+        suggested,
+        fits: volume <= HULLS[use].cargo,
+        modes,
+        regions: [...crossed].slice(0, 12),
+        gates,
+        live: kills ? { kills: kills.filter((k) => !k.zkb?.npc).length } : null,
+        killDays: m.risk?.since ? Math.max(1, Math.round((now - m.risk.since) / 864e5)) : 0
+      };
+    }
+  });
+
   // android/js/planners.js
   var universe = null;
   var g = null;
@@ -1564,7 +1640,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     return meta;
   };
   var ctx = { graph: need, meta: needMeta };
-  var api2 = {
+  var api3 = {
     "universe.load": ({ universe: u }) => {
       universe = u;
       g = graph(u);
@@ -1587,11 +1663,11 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     },
     // Jumps from one system to every system within max (whatever the security), as {systemId: jumps}.
     "route.within": ({ from, max = 5 }) => {
-      const d = hops(need(), from, max), ids = [...systemIndex(need()).keys()], out2 = {};
+      const d = hops(need(), from, max), ids = [...systemIndex(need()).keys()], out3 = {};
       ids.forEach((id, i) => {
-        if (d[i] >= 0) out2[id] = d[i];
+        if (d[i] >= 0) out3[id] = d[i];
       });
-      return out2;
+      return out3;
     },
     "route.secShown": ({ sec }) => secShown(sec),
     // The Fly feature. A fit's rows are [type_id, location_flag, quantity]; `charges` lists the type ids whose category is
@@ -1606,15 +1682,16 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     },
     // Every pilot's industry jobs in one list (ready first), with slot use: pilots are [{name, jobs, skills}], skills as ESI sends them.
     "jobs.wing": ({ pilots = [], now = Date.now() }) => wingJobs(pilots.map((p) => ({ name: p.name, jobs: p.jobs || [], levels: p.skills?.skills ? skillLevels(p.skills, SLOT_SKILLS) : null })), now),
-    ...api(ctx)
+    ...api(ctx),
+    ...api2(ctx)
   };
   var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports };
   globalThis.EchelonPlanners = {
     version: 1,
-    names: () => JSON.stringify(Object.keys(api2)),
+    names: () => JSON.stringify(Object.keys(api3)),
     modules: () => JSON.stringify(Object.fromEntries(Object.entries(modules).map(([k, m]) => [k, Object.keys(m).sort()]))),
     call(name, args) {
-      const fn = api2[name];
+      const fn = api3[name];
       if (!fn) throw new Error(`Unknown planner call ${name}`);
       return JSON.stringify(fn(args ?? {}) ?? null);
     }

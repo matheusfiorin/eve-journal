@@ -21,7 +21,7 @@ object PlanFeature : Feature {
         stub("mining", "Mine", "What to mine and where", 30)
         stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
         stub("sell", "Sell", "The best markets for a cargo", 50)
-        stub("haul", "Haul routes", "Safest, balanced and shortest routes", 60, EchelonIcons.Route)
+        registry.register(destination, SubScreen("haul", "Haul routes", "Safest, balanced and shortest routes", EchelonIcons.Route, 60) { com.echelon.eve.plan.haul.HaulRoute(it) })
         stub("goals", "Wing goals", "Shared goals and their progress", 70, EchelonIcons.Wing)
     }
 }
