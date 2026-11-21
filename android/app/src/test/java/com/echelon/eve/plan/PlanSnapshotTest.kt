@@ -97,6 +97,21 @@ object PlanFixtures {
         index = 0.1722, fees = com.echelon.eve.plan.trade.Fees(0.0668, 0.027, true, 1, 5000.0, 50_000_000.0),
         brokers = listOf(com.echelon.eve.plan.trade.HubFee("Jita", 0.0254, true, 2.0, 5.0), com.echelon.eve.plan.trade.HubFee("Amarr", 0.027)),
     )
+    val sellGathered = com.echelon.eve.plan.sell.Gathered(
+        ships = listOf(com.echelon.eve.plan.sell.SellShip(2124810474, "Fiofka", "Miner", 32880, 30000142, "Jita", 60003760, "Jita IV - Moon 4 - Caldari Navy Assembly Plant", true)),
+        rows = listOf(com.echelon.eve.plan.sell.SellRow("s:1:34", 34, 100000, com.echelon.eve.plan.sell.From("ship", pilot = 2124810474), "Miner’s hold"),
+            com.echelon.eve.plan.sell.SellRow("h:1:35", 35, 1000, com.echelon.eve.plan.sell.From("hangar", station = 60003760), "Hangar at Jita IV - Moon 4 - Caldari Navy Assembly Plant", pasted = true)),
+        notes = listOf(com.echelon.eve.plan.sell.GatherNote("Decxus", "Decxus has not shared a ship with the wing.")),
+        pickup = 60003760, pickupName = "Jita IV - Moon 4 - Caldari Navy Assembly Plant", canPick = true,
+    )
+    val sell = com.echelon.eve.plan.sell.SellResult(listOf(
+        com.echelon.eve.plan.sell.SellPlan("here", "Sell here", listOf("best"), 0, 420_412.5, 0.0, 420_412.5, 0.99,
+            ships = listOf(com.echelon.eve.plan.sell.ShipPlan(2124810474, "Miner", listOf(30000142), listOf("Jita"), 0, 420_412.5, "Jita", listOf(com.echelon.eve.plan.sell.Stop(60003760, "Jita IV - Moon 4 - Caldari Navy Assembly Plant", "Jita", 30000142,
+                listOf(com.echelon.eve.plan.sell.Pickup(35, 500)), listOf(com.echelon.eve.plan.sell.Sale(34, 100000, 4.5, 416_250.0), com.echelon.eve.plan.sell.Sale(35, 500, 9.0, 4_162.5, true, "Structure in Perimeter", "range 1 jump")))))),
+            unsold = listOf(com.echelon.eve.plan.sell.Unsold(35, 500, "no buyer on route", "Jita IV - Moon 4 - Caldari Navy Assembly Plant"))),
+        com.echelon.eve.plan.sell.SellPlan("most", "Most ISK", emptyList(), 3, 489_787.5, 3.4, -2_250_774.8, 0.99,
+            ships = listOf(com.echelon.eve.plan.sell.ShipPlan(2124810474, "Miner", listOf(30000142, 30000144, 30003504, 30002187), listOf("Jita", "Perimeter", "Niarja", "Amarr"), 3, 489_787.5, "Jita"))),
+    ), listOf(com.echelon.eve.plan.sell.SellNote("thin", 35, 500.0, 1.0, "here")))
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -125,6 +140,11 @@ class PlanSnapshotTest {
     @Test fun trade() = paparazzi.echelon {
         com.echelon.eve.plan.trade.TradeScreen(com.echelon.eve.plan.trade.TradeUi("Fiofka", com.echelon.eve.plan.trade.TradeSettings(cargo = "5000", budget = "50000000"), PlanFixtures.starts, PlanFixtures.trade, open = 0, canSend = true),
             com.echelon.eve.plan.trade.TradeActions(), scroll = false)
+    }
+    @Test fun sell() = paparazzi.echelon {
+        com.echelon.eve.plan.sell.SellScreen(com.echelon.eve.plan.sell.SellUi(com.echelon.eve.plan.sell.SellForm(), PlanFixtures.sellGathered,
+            mapOf(34L to com.echelon.eve.plan.sell.TypeInfo("Tritanium", 0.01, 0.0), 35L to com.echelon.eve.plan.sell.TypeInfo("Pyerite", 0.01, 0.0), 32880L to com.echelon.eve.plan.sell.TypeInfo("Venture", 0.0, 5000.0)),
+            result = PlanFixtures.sell, mode = "here", status = "2 plans · buy orders as of just now · 4 requests to EVE.", canSend = setOf(2124810474)), com.echelon.eve.plan.sell.SellActions(), scroll = false)
     }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)

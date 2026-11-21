@@ -19,6 +19,7 @@ import * as planHaul from './plan/haul.js';
 import * as planMine from './plan/mine.js';
 import * as planBuild from './plan/build.js';
 import * as planTrade from './plan/trade.js';
+import * as planSell from './plan/sell.js';
 
 // The gate map is about 1 MB: it is loaded once with universe.load and kept, with its graph.
 let universe = null, g = null, meta = null, orders = null;
@@ -56,6 +57,7 @@ const api = {
   ...planMine.api(ctx),
   ...planBuild.api(ctx),
   ...planTrade.api(ctx),
+  ...planSell.api(ctx),
 };
 
 // Every planner module stays reachable for the Plan agent's adapters, and keeps esbuild from dropping it.
