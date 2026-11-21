@@ -52,7 +52,9 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
-        unitTests.all { it.maxHeapSize = "2g" }
+        // Paparazzi loads layoutlib's android classes into its JVM, which makes OkHttp in a later test class pick its
+        // Android platform: one JVM per test class keeps the two apart.
+        unitTests.all { it.maxHeapSize = "2g"; it.forkEvery = 1 }
     }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }

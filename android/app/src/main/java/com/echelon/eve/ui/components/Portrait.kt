@@ -46,6 +46,9 @@ fun Portrait(characterId: Long?, pilot: PilotColors, modifier: Modifier = Modifi
     Box(modifier.size(size).border(ring, pilot.color, RoundedCornerShape(Radii.control)).padding(ring + 1.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(Radii.chip)
         Box(Modifier.matchParentSize().clip(shape).background(c.surface2))
+        // The initial in the pilot's colour until the image arrives (and when offline).
+        val initial = com.echelon.eve.core.model.Pilot.of(characterId)?.displayName?.take(1)
+        if (initial != null) androidx.compose.material3.Text(initial, style = Echelon.type.hero.copy(fontSize = androidx.compose.ui.unit.TextUnit(size.value * .42f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified), color = pilot.color.copy(alpha = .8f))
         if (characterId != null) AsyncImage(EveImages.portrait(characterId, size), contentDescription, Modifier.matchParentSize().clip(shape), contentScale = ContentScale.Crop)
     }
 }

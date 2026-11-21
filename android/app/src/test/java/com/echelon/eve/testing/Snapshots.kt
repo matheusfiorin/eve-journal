@@ -7,6 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.android.ide.common.rendering.api.SessionParams.RenderingMode
 import com.echelon.eve.ui.components.GridBackground
 import com.echelon.eve.ui.theme.Backdrop
@@ -28,7 +31,9 @@ fun echelonPaparazzi(tall: Boolean = false) = Paparazzi(
 /** Renders [content] in EchelonTheme on the app ground. The starfield is still (inspection mode), so goldens are stable. */
 fun Paparazzi.echelon(name: String? = null, pilot: PilotColors = PilotColors.Fiofka, backdrop: Backdrop = Backdrop.Space, content: @Composable () -> Unit) =
     snapshot(name) {
-        CompositionLocalProvider(LocalInspectionMode provides true) {
+        // NavHost keeps its back stack's state in a ViewModelStore, which an activity normally provides.
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        CompositionLocalProvider(LocalInspectionMode provides true, LocalViewModelStoreOwner provides owner) {
             EchelonTheme(ThemeSettings(backdrop = backdrop), pilot) { GridBackground(Modifier.fillMaxSize()) { content() } }
         }
     }
