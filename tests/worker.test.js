@@ -85,6 +85,7 @@ function setup(options={}){
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
   if(path.endsWith('/mining/'))return json([{date:'2026-11-01',solar_system_id:30000142,type_id:1230,quantity:100}]);
+  if(path.endsWith('/assets/')&&options.assetRows){const page=Number(new URL(url).searchParams.get('page')||1);return new Response(JSON.stringify(options.assetRows[page-1]||[]),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||options.assetRows.length),'Last-Modified':'Fri, 13 Nov 2026 10:00:00 GMT'}});}
   if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[]),...(options.hangar||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
   if(path.endsWith('/orders/history/'))return json(options.history||[]);
   if(path.endsWith('/orders/'))return json(options.orders||[]);
@@ -1484,4 +1485,61 @@ test('corp: the daily cleanup drops snapshots of corporations nobody belongs to;
  app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = 5').run();await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM corp_snapshots').get().n,0);
  app.env.DB.raw.prepare('INSERT INTO asset_cache (character_id, data, fetched_at, expires_at) VALUES (?, ?, ?, ?)').run(id,'x',Date.now(),Date.now()+1000);
  assert.equal((await app.request('/api/disconnect',{method:'POST',...auth})).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,0);
+});
+
+// GET /api/assets: the caller's own assets as a tree, read live, cached in D1 (migration 0012).
+const STATION=60003760,STRUCT=1030000000001;
+const assetRows=[[{item_id:10,type_id:605,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:true},
+ {item_id:11,type_id:3293,quantity:1,location_id:10,location_type:'item',location_flag:'FighterBay',is_singleton:false},
+ {item_id:12,type_id:34,quantity:500,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:false},
+ {item_id:13,type_id:17363,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:true},
+ {item_id:14,type_id:35,quantity:9,location_id:13,location_type:'item',location_flag:'Unlocked',is_singleton:false},
+ {item_id:15,type_id:36,quantity:3,location_id:STRUCT,location_type:'other',location_flag:'Hangar',is_singleton:false},
+ {item_id:16,type_id:37,quantity:2,location_id:30000142,location_type:'solar_system',location_flag:'Hangar',is_singleton:true},
+ {item_id:17,type_id:38,quantity:1,location_id:999,location_type:'item',location_flag:'Hangar',is_singleton:false}]];
+const assetApp=async(extra={})=>{const options={assetRows,...extra},app=setup(options),c=await connect(app);return {app,options,auth:{headers:{Authorization:`Bearer ${c.bearer}`}}};};
+test('assets: a tree by location with containers nested, station names resolved, structures unnamed',async()=>{
+ const {app,auth}=await assetApp();
+ const r=await app.request('/api/assets?location=all',auth);assert.equal(r.status,200);const body=await r.json();
+ assert.equal(body.cached,false);assert.equal(body.truncated,false);assert.equal(body.items,8);
+ const at=lid=>body.locations.find(l=>l.id===lid);
+ assert.deepEqual([at(STATION).kind,at(STATION).name,at(STATION).count],['station',`Type ${STATION}`,3]);
+ const ship=at(STATION).items.find(i=>i.item_id===10);assert.equal(ship.singleton,true);assert.deepEqual(ship.contents,[{item_id:11,type_id:3293,quantity:1,flag:'FighterBay',singleton:false}]);
+ assert.equal(at(STATION).items.find(i=>i.item_id===13).contents[0].quantity,9,'items in a container');
+ assert.deepEqual([at(STRUCT).kind,at(STRUCT).name],['structure',null],'a structure has no name without its scope');
+ assert.equal(at(30000142).kind,'solar_system');
+ assert.equal(at(999).kind,'other','an item whose container was not listed is its own root, not dropped');
+ const names=app.calls.filter(c=>c.url.endsWith('/universe/names/'));assert.equal(names.length,1);assert.deepEqual(JSON.parse(names[0].init.body),[STATION],'only stations are looked up');
+ const one=await(await app.request(`/api/assets?location=${STATION}`,auth)).json();assert.equal(one.locations.length,1);assert.equal(one.locations[0].id,STATION);
+ assert.equal((await app.request('/api/assets?location=12345',auth)).status,404);
+ for(const q of ['','?location=abc','?location=-1'])assert.equal((await app.request(`/api/assets${q}`,auth)).status,q===''?200:400,q);
+ assert.equal((await app.request('/api/assets?location=all')).status,401);
+});
+test('assets: cached in D1 (gzipped) for ten minutes at least and refetched after',async()=>{
+ const {app,auth}=await assetApp(),base=app.calls.filter(c=>/\/assets\/$/.test(c.url)).length,count=()=>app.calls.filter(c=>/\/assets\/$/.test(c.url)).length-base;
+ await app.request('/api/assets?location=all',auth);assert.equal(count(),1);
+ const row=app.env.DB.raw.prepare('SELECT * FROM asset_cache').get();assert.ok(!row.data.includes('item_id')&&!row.data.includes('['),'compressed, not plain JSON');
+ assert.ok(row.expires_at-row.fetched_at>=ASSET_TTL);assert.ok(row.expires_at-row.fetched_at<=3600000);
+ const again=await(await app.request(`/api/assets?location=${STATION}`,auth)).json();assert.equal(again.cached,true);assert.equal(count(),1,'browsing another location costs no ESI call');assert.equal(again.fetchedAt,new Date(row.fetched_at).toISOString());
+ app.env.DB.raw.prepare('UPDATE asset_cache SET expires_at = ?').run(Date.now()-1);
+ assert.equal((await(await app.request('/api/assets?location=all',auth)).json()).cached,false);assert.equal(count(),2);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,1);
+});
+test('assets: pages are capped (the request stays inside 50 subrequests), a missing scope is refused, a failed read caches nothing',async()=>{
+ const pages=Array.from({length:30},(_,p)=>[{item_id:100+p,type_id:34,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:false}]);
+ const {app,auth}=await assetApp({assetRows:pages,assetPages:30});
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length,body=await(await app.request('/api/assets?location=all',auth)).json();
+ assert.equal(body.truncated,true);assert.equal(body.items,20);assert.equal(app.calls.slice(before).filter(c=>/assets\/(\?page=\d+)?$/.test(c.url)).length,20);assert.ok(app.calls.length-before<=30,'well inside the 50');
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until AS l FROM pilots').get().l,0);
+ const noScope=setup({scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-assets.read_assets.v1')}),c=await connect(noScope);
+ assert.equal((await noScope.request('/api/assets?location=all',{headers:{Authorization:`Bearer ${c.bearer}`}})).status,403);
+ const mid=await assetApp({assetRows:pages,assetPages:5,limitPath:'/assets/'});assert.equal((await mid.app.request('/api/assets?location=all',mid.auth)).status,502);assert.equal(mid.app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,0);
+ app.env.RATE_JOURNAL=limiter(0);assert.equal((await app.request('/api/assets?location=all',auth)).status,429);
+});
+test('assetTree: nesting depth is bounded and roots keep every item',()=>{
+ const rows=[[1,1,1,100,'Hangar',1,0,0]];for(let i=2;i<=12;i++)rows.push([i,1,1,i-1,'Unlocked',0,2,0]);
+ const [loc]=assetTree(rows,{},100);let depth=0,n=loc.items[0];while(n.contents){depth++;n=n.contents[0];}assert.ok(depth<=7,'a chain deeper than the cap stops');
+ assert.deepEqual(assetTree([],{}),[]);
 });
