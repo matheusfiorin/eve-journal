@@ -60,7 +60,7 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        optIn.addAll("androidx.compose.material3.ExperimentalMaterial3Api", "androidx.compose.animation.ExperimentalSharedTransitionApi")
+        optIn.addAll("androidx.compose.material3.ExperimentalMaterial3Api", "androidx.compose.ui.text.ExperimentalTextApi", "androidx.compose.animation.ExperimentalSharedTransitionApi")
     }
 }
 
