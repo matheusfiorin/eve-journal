@@ -4,8 +4,10 @@ import {history,lastHour} from './activity.js';
 import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
 import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stackCollector,stacksCover,isStationId,stepKillmails,stepPlanets,diffEvents,trackOrders} from './pilotdata.js';
 import {sendAlerts} from './alerts.js';
+import {WingRoom} from './wingroom.js';
 import {CORP_SECTIONS,roleNote,towerSize,starbaseHealth,structureHealth,withHealth} from './corp.js';
 
+export {WingRoom};
 const EVE='https://login.eveonline.com';
 // Unversioned ESI routes answer as they did on the compatibility date sent with each request
 // (developers.eveonline.com/docs/services/esi/overview). Checked against ESI's changelog (read again on
@@ -551,6 +553,31 @@ async function dueCorp(env,now=Date.now()){
  }
  return null;
 }
+// The wing room (worker/wingroom.js, a Durable Object): the Worker only authenticates and forwards. A browser cannot set headers on
+// a WebSocket, so POST /api/wing/ticket hands out a 60-second ticket, an HMAC of the pilot and expiry under the encryption key (no
+// state to keep; it names the pilot and nothing else), accepted as ?ticket= on /api/wing/socket.
+const TICKET_MS=60000;
+async function ticketMac(env,text){
+ const key=await crypto.subtle.importKey('raw',unbase64(env.TOKEN_ENCRYPTION_KEY),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ return base64url(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(`wing-ticket:${text}`))));
+}
+async function wingPilot(request,url,env){
+ const ticket=url.searchParams.get('ticket');
+ if(ticket){
+  const [pilot,exp,mac]=ticket.split('.');
+  if(!/^\d+$/.test(pilot||'')||!/^\d+$/.test(exp||'')||Number(exp)<Date.now()||!mac||await hash(mac)!==await hash(await ticketMac(env,`${pilot}.${exp}`)))throw new ServiceError('This wing ticket expired. Ask for a new one.',401);
+  if(!await env.DB.prepare('SELECT 1 AS ok FROM pilots WHERE character_id = ?').bind(Number(pilot)).first())throw new ServiceError('This pilot is no longer connected.',401);
+  return Number(pilot);
+ }
+ return (await session(request,env)).character_id;
+}
+function wingRoom(env){
+ if(!env.WING_ROOM)throw new ServiceError('The wing room is not available.',503);
+ return env.WING_ROOM.get(env.WING_ROOM.idFromName('wing'));
+}
+async function wingCall(env,pilot,path,init={}){
+ return wingRoom(env).fetch(new Request(`https://wing-room${path}`,{...init,headers:{...init.headers,'X-Wing-Pilot':String(pilot),'X-Wing-Name':ALLOWED.get(pilot)||''}}));
+}
 // A sync stops asking ESI after this many fetches (token and key calls included): the free plan allows 50 subrequests per
 // invocation, and the alert posts that follow a cron sync need a few of them.
 export const SYNC_LIMIT=44;
@@ -749,7 +776,7 @@ async function forget(request,env,fetchImpl){
   env.DB.prepare(`DELETE FROM journal WHERE ${mine} AND ${top}`).bind(...args),
   env.DB.prepare(`UPDATE journal SET data = NULL, updated_at = ? WHERE ${mine}`).bind(Date.now(),...args),
   env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(me),
-  env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(me),
+  env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(me),env.DB.prepare('DELETE FROM push_tokens WHERE character_id = ?').bind(me),
   env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(me)];
  // Goals become tombstones with fresh revs, so the wingmate's device learns they are gone (40 at a time: D1 caps the statements in a batch).
  let goalsLeft=false;
@@ -973,6 +1000,42 @@ async function route(request,env,ctx,fetchImpl){
   const s=await session(request,env);
   return response(await contractItems(s.character_id,Number(url.searchParams.get('id')),env,fetchImpl));
  }
+ if(url.pathname==='/api/wing/ticket'&&request.method==='POST'){
+  await limit(env,request,'RATE_JOURNAL',`t:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  if(!ALLOWED.has(s.character_id))throw new ServiceError('This pilot is not in the wing.',403);
+  const exp=Date.now()+TICKET_MS;
+  return response({ticket:`${s.character_id}.${exp}.${await ticketMac(env,`${s.character_id}.${exp}`)}`,expires:exp});
+ }
+ if(url.pathname==='/api/wing/socket'&&request.method==='GET'){
+  if(request.headers.get('Upgrade')!=='websocket')throw new ServiceError('Open this with a WebSocket.',426);
+  await limit(env,request,'RATE_JOURNAL',`w:${(await hash(request.headers.get('Authorization')||url.searchParams.get('ticket')||'')).slice(0,16)}`);
+  const pilot=await wingPilot(request,url,env);
+  if(!ALLOWED.has(pilot))throw new ServiceError('This pilot is not in the wing.',403);
+  return wingCall(env,pilot,'/socket',{headers:{Upgrade:'websocket'}});
+ }
+ // REST fallback for clients without a socket: the room's timers, and one change at a time ({timer} or {remove:id}).
+ if(url.pathname==='/api/wing/timers'&&(request.method==='GET'||request.method==='POST')){
+  await limit(env,request,'RATE_JOURNAL',`m:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  if(!ALLOWED.has(s.character_id))throw new ServiceError('This pilot is not in the wing.',403);
+  if(request.method==='GET')return new Response((await wingCall(env,s.character_id,'/state')).body,{headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+  const body=await readText(request,8192,'That request is too large.');
+  const r=await wingCall(env,s.character_id,'/timer',{method:'POST',body});
+  return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+ }
+ // The app's FCM device token, so the wing room can push to it when the app is closed (it does nothing without the FCM secrets).
+ if((url.pathname==='/api/push/register'||url.pathname==='/api/push/unregister')&&request.method==='POST'){
+  await limit(env,request,'RATE_JOURNAL',`p:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  let body;try{body=JSON.parse(await readText(request,2048,'That request is too large.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Send JSON.');}
+  if(typeof body?.token!=='string'||!/^[\w:.-]{20,1024}$/.test(body.token))throw new ServiceError('Send the device token.');
+  if(url.pathname.endsWith('unregister')){await env.DB.prepare('DELETE FROM push_tokens WHERE token = ? AND character_id = ?').bind(body.token,s.character_id).run();return response({registered:false});}
+  // A token belongs to one pilot (a phone handed to the other one re-registers it); each pilot keeps their five newest.
+  await env.DB.batch([env.DB.prepare('INSERT INTO push_tokens (token, character_id, updated_at) VALUES (?, ?, ?) ON CONFLICT(token) DO UPDATE SET character_id = excluded.character_id, updated_at = excluded.updated_at').bind(body.token,s.character_id,Date.now()),
+   env.DB.prepare('DELETE FROM push_tokens WHERE character_id = ? AND token NOT IN (SELECT token FROM push_tokens WHERE character_id = ? ORDER BY updated_at DESC LIMIT 5)').bind(s.character_id,s.character_id)]);
+  return response({registered:true});
+ }
  if(url.pathname==='/api/live'&&request.method==='GET'){
   await limit(env,request,'RATE_LIVE',`l:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
   const s=await session(request,env);
@@ -1020,7 +1083,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!row)throw new ServiceError('This pilot is no longer connected.',401);
   if(url.pathname==='/api/disconnect'){
    const revoked=await revokeGrant(row.character_id,env,fetchImpl,'Disconnect');
-   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
+   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM push_tokens WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
    return response({disconnected:true,revoked});
   }
   if(url.pathname==='/api/sync'){row=await syncPilot(row.character_id,env,fetchImpl);if(!row)throw new ServiceError('This pilot is no longer connected.',401);}
@@ -1029,7 +1092,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/live','/api/corp','/api/assets','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/wing/ticket','/api/wing/socket','/api/wing/timers','/api/push/register','/api/push/unregister','/api/live','/api/corp','/api/assets','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);

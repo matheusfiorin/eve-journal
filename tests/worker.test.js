@@ -8,7 +8,7 @@ import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,d
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql','0012_corp_assets.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql','0012_corp_assets.sql','0013_push_tokens.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -214,7 +214,7 @@ test('v:1 credentials keep working and are rewritten as v:2 on the next refresh;
  assert.match(moved.last_error,/Synchronization failed/);assert.equal(app.calls.length,before,'no EVE call is made with it');
 });
 test('journal records are bound to kind and id; v:1 rows are still served and become v:2 when next written',async()=>{
- const {app,a,call}=await wingApp(),key=app.env.TOKEN_ENCRYPTION_KEY;
+ const {app,a,call}=await wingRouteApp(),key=app.env.TOKEN_ENCRYPTION_KEY;
  await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:entry}]});
  const stored=app.env.DB.raw.prepare("SELECT data FROM journal WHERE id = 'e1'").get().data;
  assert.deepEqual(await decrypt(stored,key,'entry:e1'),entry);await assert.rejects(decrypt(stored,key,'entry:e2'));await assert.rejects(decrypt(stored,key,'goal:e1'));
@@ -365,7 +365,7 @@ test('disconnect waits for a running sync before revoking, so it revokes the lat
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);
 });
 const other=2124815118;
-async function wingApp(){
+async function wingRouteApp(){
  const options={};const app=setup(options);const a=(await connect(app)).bearer;
  options.character=other;const b=(await connect(app,{character:other})).bearer;options.character=id;
  const call=async(bearer,method,body,query='')=>{const res=await app.request(`/api/journal${query}`,{method,headers:{Authorization:`Bearer ${bearer}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:res.status,body:await res.json()};};
@@ -374,7 +374,7 @@ async function wingApp(){
 const goal={id:'g1',title:'Fly a Heron',pilot:'Both pilots',done:false};
 const entry={id:'e1',title:'First trip',pilot:'Fiofka',date:'2026-11-01',body:'JOURNAL-SECRET-4411'};
 test('journal sync: goals reach both pilots, entries only their author, and nothing is stored in plain text',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  const put=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
  assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.kind,x.rev]),[['goal',1],['entry',2]]);
  const mine=await call(a,'GET',null,'?since=0');assert.deepEqual(mine.body.records.map(r=>r.id),['g1','e1']);assert.equal(mine.body.rev,2);assert.deepEqual(mine.body.records[1].record,entry);
@@ -387,7 +387,7 @@ test('journal sync: goals reach both pilots, entries only their author, and noth
  assert.equal((await app.request('/api/journal')).status,401);
 });
 test('journal sync: a stale base is a conflict that returns the stored copy; deletes leave a tombstone; disconnect keeps the journal',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
  const edit=await call(b,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,done:true}}]});assert.deepEqual(edit.body.applied,[{kind:'goal',id:'g1',rev:2}]);
  const stale=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,title:'Fly a Buzzard'}}]});
@@ -401,7 +401,7 @@ test('journal sync: a stale base is a conflict that returns the stored copy; del
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM journal').get().n,1);
 });
 test('journal sync: a change based on a row the server no longer has is applied, not a 500, and purging never lowers the rev',async()=>{
- const {app,a,call}=await wingApp();
+ const {app,a,call}=await wingRouteApp();
  const ghost=await call(a,'POST',{changes:[{kind:'entry',id:'e9',base:7,record:{...entry,id:'e9'}},{kind:'goal',id:'g9',base:3,record:null}]});
  assert.equal(ghost.status,200);assert.deepEqual(ghost.body.applied.map(x=>[x.id,x.rev]).sort(),[['e9',1],['g9',0]]);
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
@@ -412,7 +412,7 @@ test('journal sync: a change based on a row the server no longer has is applied,
  const next=await call(a,'POST',{changes:[{kind:'goal',id:'g2',base:0,record:{...goal,id:'g2'}}]});assert.equal(next.body.applied[0].rev,4);
 });
 test('journal sync keeps fields a newer build added and edit times, within the same size limits',async()=>{
- const {a,call,app}=await wingApp();
+ const {a,call,app}=await wingRouteApp();
  const newer={...entry,updatedAt:1762000000000,mood:{stars:4,tags:['calm']}};
  assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:newer}]})).status,200);
  assert.deepEqual((await call(a,'GET',null,'?since=0')).body.records[0].record,newer,'mood is not stripped');
@@ -429,7 +429,7 @@ test('journal sync keeps fields a newer build added and edit times, within the s
 const explored={id:`explored:${id}`,marks:{30000142:1762000000000,30003504:1762100000000}};
 const haul={id:`haul:${id}`,stops:['Jita','Amarr'],value:'100000000',volume:'5000',avoid:'Uedama',updatedAt:1762000000000};
 test('journal sync: a pilot\'s prefs reach only that pilot, only clients that ask, and only the pilot named in the id can write them',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  const put=await call(a,'POST',{changes:[{kind:'pref',id:explored.id,base:0,record:explored},{kind:'pref',id:haul.id,base:0,record:haul},{kind:'goal',id:'g1',base:0,record:goal}]});
  assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.id,x.rev]),[[explored.id,1],[haul.id,2],['g1',3]]);
  const mine=await call(a,'GET',null,'?since=0&prefs=1');assert.deepEqual(mine.body.records.map(r=>r.id),[explored.id,haul.id,'g1']);assert.deepEqual(mine.body.records[1].record,haul);
@@ -445,7 +445,7 @@ test('journal sync: a pilot\'s prefs reach only that pilot, only clients that as
  assert.equal((await call(a,'GET',null,'?since=3&prefs=1')).body.records[0].record.extra,undefined,'unknown fields are not stored');
 });
 test('journal sync: prefs are validated per kind with size caps, and never deleted',async()=>{
- const {call,a}=await wingApp();const send=async(record,extra={})=>(await call(a,'POST',{changes:[{kind:'pref',id:record?.id??explored.id,base:0,record,...extra}]})).status;
+ const {call,a}=await wingRouteApp();const send=async(record,extra={})=>(await call(a,'POST',{changes:[{kind:'pref',id:record?.id??explored.id,base:0,record,...extra}]})).status;
  assert.equal(await send(null),400);
  assert.equal(await send({...explored,marks:{Jita:1}}),400);assert.equal(await send({...explored,marks:{30000142:-1}}),400);assert.equal(await send({...explored,marks:[1]}),400);
  assert.equal(await send({...explored,marks:Object.fromEntries(Array.from({length:1001},(_,i)=>[30000000+i,1]))}),400,'at most 1000 marks');
@@ -787,7 +787,7 @@ test('consent records the three choices separately; level 3 needs the wing box, 
  const again=setup();await connect(again,{wing:true,wing3:true,alerts:true});await connect(again,{wing:false});assert.deepEqual({...again.env.DB.raw.prepare('SELECT share_wing, share_alerts FROM pilots').get()},{share_wing:0,share_alerts:0});
 });
 test('Delete my data removes the journal, prefs, grant, pilot and sessions; goals and the wingmate stay',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  assert.equal((await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry},{kind:'pref',id:explored.id,base:0,record:explored}]})).status,200);
  assert.equal((await call(b,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:{...entry,id:'e2',pilot:'Decxus'}}]})).status,200);
  const forget=(bearer,body)=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},...(body?{body:JSON.stringify(body)}:{})});
@@ -806,7 +806,7 @@ test('Delete my data removes the journal, prefs, grant, pilot and sessions; goal
  const next=await call(b,'POST',{changes:[{kind:'entry',id:'e3',base:0,record:{...entry,id:'e3',pilot:'Decxus'}}]});assert.ok(next.body.applied[0].rev>3);
 });
 test('Delete my data: wing goals go only when asked and confirmed, as tombstones the wingmate learns of',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
  const forget=body=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${a}`},body:JSON.stringify(body)});
  assert.equal((await forget({goals:true})).status,400,'unconfirmed');
@@ -1542,4 +1542,145 @@ test('assetTree: nesting depth is bounded and roots keep every item',()=>{
  const rows=[[1,1,1,100,'Hangar',1,0,0]];for(let i=2;i<=12;i++)rows.push([i,1,1,i-1,'Unlocked',0,2,0]);
  const [loc]=assetTree(rows,{},100);let depth=0,n=loc.items[0];while(n.contents){depth++;n=n.contents[0];}assert.ok(depth<=7,'a chain deeper than the cap stops');
  assert.deepEqual(assetTree([],{}),[]);
+});
+
+// The wing room (worker/wingroom.js) and its routes. The Durable Object class is tested directly with a fake state over SQLite.
+const wingMod=await import('../worker/wingroom.js');
+const {WingRoom,cleanTimer,timerExpiry,fcmJwt,DAY,MAX_ITEMS}=wingMod;
+const FIO=2124810474,DEC=2124815118;
+function fakeState(){
+ const raw=new DatabaseSync(':memory:'),sockets=[],alarms=[];
+ return {raw,sockets,alarms,storage:{sql:{exec(text,...bind){const st=raw.prepare(text);return {toArray:()=>st.columns().length?st.all(...bind):(st.run(...bind),[])};}},setAlarm:async at=>{alarms.push(at);}},
+  acceptWebSocket(ws){sockets.push(ws);},getWebSockets:()=>sockets.filter(w=>!w.closed)};
+}
+function fakeSocket(){const ws={sent:[],closed:false,att:null,send(m){this.sent.push(JSON.parse(m));},serializeAttachment(a){this.att=a;},deserializeAttachment(){return this.att;},close(){this.closed=true;},last(type){return [...this.sent].reverse().find(m=>m.type===type);}};return ws;}
+function room(env={},extra={}){const state=fakeState(),r=new WingRoom(state,env,extra);return {state,r,join(pilot,name){const ws=fakeSocket();r.attach(ws,pilot,name);return ws;}};}
+const send=(r,ws,msg)=>r.webSocketMessage(ws,typeof msg==='string'?msg:JSON.stringify(msg));
+const gas={id:'t1',kind:'gas',label:'Gas site',startedAt:Date.now(),durationMs:3600000,owner:1,shared:true,meta:{system:'x'}};
+test('wing room: a connecting app gets the state first, and presence is announced to both',()=>{
+ const {join}=room(),a=join(FIO,'Fiofka');assert.equal(a.sent[0].type,'state');assert.deepEqual(a.sent[0].timers,[]);assert.deepEqual(a.sent[0].items,[]);
+ const b=join(DEC,'Decxus');assert.equal(b.sent[0].type,'state');assert.deepEqual(b.last('presence').presence.map(p=>p.pilot).sort(),[FIO,DEC]);
+ assert.deepEqual(a.last('presence').presence.map(p=>p.pilot).sort(),[FIO,DEC],'the first app hears the second join');
+});
+test('wing room: timers fan out to the other pilot only, `from` and `owner` are the authenticated pilot, private timers stay private',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');a.sent.length=0;b.sent.length=0;
+ await send(r,a,{type:'timer.upsert',from:DEC,id:'m1',timer:{...gas,owner:DEC}});
+ const got=b.sent.find(m=>m.type==='timer.upsert');assert.equal(got.from,FIO);assert.equal(got.timer.owner,FIO);assert.equal(got.id,'m1');assert.ok(Math.abs(got.at-Date.now())<5000);
+ assert.ok(!a.sent.some(m=>m.type==='timer.upsert'),'not echoed to the sender');
+ // Another pilot cannot change or remove it.
+ await send(r,b,{type:'timer.upsert',timer:{...gas,label:'mine now'}});assert.equal(b.last('error').code,'not_your_timer');
+ await send(r,b,{type:'timer.remove',timer:{id:'t1'}});assert.equal(b.last('error').code,'not_your_timer');
+ // A reconnecting app sees it in the snapshot.
+ const c=join(DEC,'Decxus');assert.equal(c.sent[0].timers[0].id,'t1');
+ await send(r,a,{type:'timer.upsert',timer:{...gas,shared:false}});assert.equal(b.last('timer.remove').timer.id,'t1','making a timer private removes it for the wingmate');
+ assert.deepEqual(join(DEC,'Decxus').sent[0].timers,[]);
+ await send(r,a,{type:'timer.upsert',id:'p',timer:{...gas,id:'private',shared:false}});assert.ok(!b.sent.some(m=>m.timer?.id==='private'));assert.deepEqual(room().r.snapshot().timers,[]);
+ await send(r,a,{type:'timer.upsert',timer:gas});await send(r,a,{type:'timer.remove',timer:{id:'t1'}});assert.equal(b.last('timer.remove').timer.id,'t1');assert.deepEqual(r.snapshot().timers,[]);
+});
+test('wing room: plans and pings are delivered and kept (the last 50), pings may carry a system only when sent',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');
+ await send(r,a,{type:'ping',kind:'help',text:'tackled'});assert.deepEqual([b.last('ping').kind,b.last('ping').text,b.last('ping').system],['help','tackled',undefined]);
+ await send(r,a,{type:'ping',kind:'omw',system:30000142});assert.equal(b.last('ping').system,30000142);
+ await send(r,a,{type:'plan.share',plan:{kind:'haul',title:'Jita to Amarr',summary:'3 jumps',route:[30000142,30002187,5,'x']}});assert.deepEqual(b.last('plan.share').plan.route,[30000142,30002187]);
+ for(let i=0;i<60;i++)await send(r,a,{type:'ping',kind:'custom',text:`n${i}`}),a.rates=null,r.rates=new WeakMap();
+ const items=r.snapshot().items;assert.equal(items.length,MAX_ITEMS);assert.equal(items.at(-1).text,'n59');assert.equal(items[0].text,'n10');
+ await send(r,a,{type:'ping',kind:'nope'});assert.equal(a.last('error').code,'invalid_ping');
+ await send(r,a,{type:'plan.share',plan:{kind:'sell',title:''}});assert.equal(a.last('error').code,'invalid_plan');
+ await send(r,a,{type:'wat'});assert.equal(a.last('error').code,'unknown_type');
+ await send(r,a,'{nope');assert.equal(a.last('error').code,'bad_json');
+ await send(r,a,'x'.repeat(9000));assert.equal(a.last('error').code,'too_large');
+});
+test('wing room: presence reports the timer count; a closed socket leaves; flooding is limited',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');
+ await send(r,a,{type:'presence',timers:3});assert.deepEqual(b.last('presence').presence.find(p=>p.pilot===FIO),{pilot:FIO,name:'Fiofka',online:true,timers:3});
+ await r.webSocketClose(a);assert.deepEqual(b.last('presence').presence.map(p=>p.pilot),[DEC]);
+ let limited=false;for(let i=0;i<50;i++){await send(r,b,{type:'ping',kind:'help'});if(b.last('error')?.code==='rate_limited')limited=true;}assert.ok(limited);
+});
+test('wing room: timers expire a day after they end; a timer is validated',()=>{
+ const {r}=room(),now=Date.now();
+ const old={...gas,id:'old',startedAt:now-3*DAY,durationMs:3600000},fresh={...gas,id:'new',startedAt:now-2*3600000};
+ for(const t of [old,fresh,{...gas,id:'paused',startedAt:now-5*DAY,durationMs:1000,pausedAt:now-3600000}])r.apply({type:'timer.upsert',timer:t},FIO,'Fiofka',now);
+ assert.deepEqual(r.snapshot(now).timers.map(t=>t.id).sort(),['new','paused']);
+ assert.equal(timerExpiry(fresh),fresh.startedAt+fresh.durationMs+DAY);
+ assert.equal(r.snapshot(now+2*DAY).timers.length,0);
+ for(const bad of [null,{},{...gas,id:''},{...gas,durationMs:-1},{...gas,durationMs:8*DAY},{...gas,label:'x'.repeat(81)},{...gas,meta:{a:'x'.repeat(3000)}},{...gas,startedAt:'now'}])assert.equal(cleanTimer(bad,FIO),null);
+ assert.equal(cleanTimer(gas,FIO).owner,FIO);
+});
+test('wing room: no push without the FCM secrets (nothing is fetched); with them a wingmate who is away gets a data message',async()=>{
+ const calls=[];const fetchImpl=async(url,init)=>{calls.push({url:String(url),init});if(String(url).includes('oauth2'))return new Response(JSON.stringify({access_token:'at',expires_in:3600}));return new Response('{}',{status:calls.at(-1).init.body.includes('dead')?404:200});};
+ const app=setup();app.env.DB.raw.prepare('INSERT INTO push_tokens (token, character_id, updated_at) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)').run('t-dec-1',DEC,1,'t-dec-dead',DEC,2,'t-fio',FIO,3);
+ const none=room({DB:app.env.DB},{fetchImpl}),a=none.join(FIO,'Fiofka');await send(none.r,a,{type:'ping',kind:'help'});assert.equal(calls.length,0,'a no-op without secrets');
+ const pair=generateKeyPairSync('rsa',{modulusLength:2048}),account={client_email:'svc@x.iam',private_key:pair.privateKey.export({type:'pkcs8',format:'pem'}),token_uri:'https://oauth2.googleapis.com/token'};
+ const env={DB:app.env.DB,FCM_SERVICE_ACCOUNT:JSON.stringify(account),FCM_PROJECT_ID:'proj'};
+ const on=room(env,{fetchImpl}),f=on.join(FIO,'Fiofka');
+ await send(on.r,f,{type:'ping',kind:'help',text:'tackled',system:30000142});
+ const exchange=calls.find(c=>c.url.includes('oauth2'));assert.ok(exchange);const jwt=new URLSearchParams(String(exchange.init.body)).get('assertion'),[h,p,sig]=jwt.split('.');
+ assert.equal(JSON.parse(Buffer.from(h,'base64url')).alg,'RS256');assert.equal(JSON.parse(Buffer.from(p,'base64url')).iss,'svc@x.iam');
+ const {verify}=await import('node:crypto');assert.ok(verify('RSA-SHA256',Buffer.from(`${h}.${p}`),pair.publicKey,Buffer.from(sig,'base64url')),'a real RS256 signature');
+ const pushes=calls.filter(c=>c.url.includes('fcm.googleapis.com/v1/projects/proj/messages:send'));assert.deepEqual(pushes.map(c=>JSON.parse(c.init.body).message.token).sort(),['t-dec-1','t-dec-dead'],'only the wingmate\'s devices');
+ const msg=JSON.parse(pushes[0].init.body).message;assert.equal(msg.data.kind,'ping');assert.equal(msg.data.from,'Fiofka');assert.ok(!JSON.stringify(msg).includes('30000142'),'no location in a push');assert.equal(pushes[0].init.headers.Authorization,'Bearer at');
+ assert.deepEqual(app.env.DB.raw.prepare('SELECT token FROM push_tokens ORDER BY token').all().map(r=>r.token),['t-dec-1','t-fio'],'a token FCM refused is dropped');
+ // A connected wingmate is not pushed to; a timer start is.
+ calls.length=0;const d=on.join(DEC,'Decxus');await send(on.r,f,{type:'ping',kind:'help'});assert.equal(calls.length,0,'the app is open: no push');on.r.webSocketClose(d);d.closed=true;
+ await send(on.r,f,{type:'timer.upsert',timer:{...gas,startedAt:Date.now()-3000000,durationMs:3000500}});assert.equal(JSON.parse(calls.filter(c=>c.url.includes('messages:send')).at(-1).init.body).message.data.kind,'timer.start');
+ assert.ok(on.state.alarms.length>0,'an alarm is set for the timer end');
+ await new Promise(r=>setTimeout(r,1100));calls.length=0;await on.r.alarm();assert.equal(JSON.parse(calls.filter(c=>c.url.includes('messages:send')).at(-1).init.body).message.data.kind,'timer.end');
+ calls.length=0;await on.r.alarm();assert.equal(calls.length,0,'one end push per timer');
+ assert.ok((await fcmJwt(account)).split('.').length===3);
+});
+test('wing room: the REST paths of the room need the pilot header',async()=>{
+ const {r}=room();assert.equal((await r.fetch(new Request('https://wing-room/state'))).status,403);
+ const ok=await r.fetch(new Request('https://wing-room/state',{headers:{'X-Wing-Pilot':String(FIO)}}));assert.deepEqual(Object.keys(await ok.json()),['timers','items','presence']);
+ assert.equal((await r.fetch(new Request('https://wing-room/nope',{headers:{'X-Wing-Pilot':String(FIO)}}))).status,404);
+});
+// The Worker's side: the ticket, the socket hand-over, the REST fallback and the device token.
+function wingRoomApp(){
+ const app=setup(),state=fakeState(),r=new WingRoom(state,{DB:app.env.DB}),forwarded=[];
+ app.env.WING_ROOM={idFromName:n=>n,get:name=>({fetch:req=>{forwarded.push({name,url:req.url,pilot:req.headers.get('X-Wing-Pilot'),pilotName:req.headers.get('X-Wing-Name'),upgrade:req.headers.get('Upgrade')});return req.url.endsWith('/socket')?new Response('forwarded'):r.fetch(req);}})};
+ return {app,forwarded,r};
+}
+test('wing routes: ticket, socket hand-over with a bearer or a ticket, upgrade required, expired and forged tickets refused',async()=>{
+ const {app,forwarded}=wingRoomApp(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ assert.equal((await app.request('/api/wing/ticket',{method:'POST'})).status,401);
+ const {ticket,expires}=await(await app.request('/api/wing/ticket',{method:'POST',...auth})).json();assert.ok(expires>Date.now()&&expires<=Date.now()+60000);assert.ok(ticket.startsWith(`${id}.`));
+ assert.equal((await app.request('/api/wing/socket',auth)).status,426,'a plain GET is not a socket');
+ const up={Upgrade:'websocket'};
+ assert.equal((await app.request('/api/wing/socket',{headers:{...up,...auth.headers}})).status,200);
+ assert.deepEqual(forwarded.at(-1),{name:'wing',url:'https://wing-room/socket',pilot:String(id),pilotName:'Fiofka',upgrade:'websocket'});
+ assert.equal((await app.request(`/api/wing/socket?ticket=${ticket}`,{headers:up})).status,200);assert.equal(forwarded.at(-1).pilot,String(id),'the ticket names the pilot');
+ const [pilot,exp,mac]=ticket.split('.');
+ for(const bad of [`${pilot}.${exp}.${mac.slice(1)}x`,`${DEC}.${exp}.${mac}`,`${pilot}.${Date.now()-1}.${mac}`,'garbage'])assert.equal((await app.request(`/api/wing/socket?ticket=${bad}`,{headers:up})).status,401,bad);
+ const old=await(async()=>{const realNow=Date.now;Date.now=()=>realNow()-120000;try{return (await(await app.request('/api/wing/ticket',{method:'POST',...auth})).json()).ticket;}finally{Date.now=realNow;}})();
+ assert.equal((await app.request(`/api/wing/socket?ticket=${old}`,{headers:up})).status,401,'expired');
+ assert.equal((await app.request('/api/wing/socket',{headers:{...up,Authorization:`Bearer ${'a'.repeat(43)}`}})).status,401);
+ delete app.env.WING_ROOM;assert.equal((await app.request('/api/wing/socket',{headers:{...up,...auth.headers}})).status,503);
+});
+test('wing routes: the REST fallback reads and changes the room timers; and nothing about the room reaches a log',async()=>{
+ const {app,r}=wingRoomApp(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const lines=[];const sink=logger.sink;logger.sink=l=>lines.push(l);
+ try{
+  assert.deepEqual((await(await app.request('/api/wing/timers',auth)).json()).timers,[]);assert.equal((await app.request('/api/wing/timers')).status,401);
+  const post=body=>app.request('/api/wing/timers',{method:'POST',...auth,body:JSON.stringify(body)});
+  const set=await(await post({timer:{...gas,label:'Secret label'}})).json();assert.equal(set.timers[0].owner,id);assert.equal(set.timers[0].label,'Secret label');
+  assert.equal((await post({timer:{...gas,durationMs:-5}})).status,400);
+  assert.equal(r.snapshot().timers.length,1);
+  assert.deepEqual((await(await post({remove:'t1'})).json()).timers,[]);
+  assert.equal((await app.request('/api/wing/timers',{method:'POST',...auth,body:'x'.repeat(9000)})).status,413);
+ }finally{logger.sink=sink;}
+ const text=lines.join('\n');assert.ok(!text.includes('Secret label')&&!text.includes('t1'));assert.ok(text.includes('/api/wing/timers'));
+});
+test('push tokens: register, move between pilots, five per pilot, unregister, and removal with the pilot\'s data',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}},reg=(token,path='register')=>app.request(`/api/push/${path}`,{method:'POST',...auth,body:JSON.stringify({token})});
+ assert.equal((await app.request('/api/push/register',{method:'POST',body:'{}'})).status,401);
+ assert.equal((await reg('short')).status,400);assert.equal((await app.request('/api/push/register',{method:'POST',...auth,body:'nope'})).status,400);
+ for(let i=0;i<7;i++){assert.equal((await reg(`token-${i}-`.padEnd(30,'x'))).status,200);app.env.DB.raw.prepare('UPDATE push_tokens SET updated_at = updated_at + ? WHERE token LIKE ?').run(i,`token-${i}-%`);}
+ const rows=app.env.DB.raw.prepare('SELECT token FROM push_tokens ORDER BY updated_at').all();assert.equal(rows.length,5,'five newest per pilot');
+ const keep=rows.at(-1).token;assert.equal((await reg(keep,'unregister')).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM push_tokens').get().n,4);
+ app.env.DB.raw.prepare('UPDATE push_tokens SET character_id = ?').run(DEC);assert.equal((await reg(rows[0].token)).status,200);assert.equal(app.env.DB.raw.prepare('SELECT character_id AS c FROM push_tokens WHERE token = ?').get(rows[0].token).c,id,'a re-registered token moves to the new pilot');
+ assert.equal((await app.request('/api/disconnect',{method:'POST',...auth})).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM push_tokens WHERE character_id = ?').get(id).n,0);
+});
+test('the deploy config binds the wing room as a SQLite Durable Object and the Worker exports it',async()=>{
+ const deploy=await readFile(new URL('../scripts/deploy-backend.mjs',import.meta.url),'utf8');
+ assert.match(deploy,/durable_objects:\{bindings:\[\{name:'WING_ROOM',class_name:'WingRoom'\}\]\}/);assert.match(deploy,/migrations:\[\{tag:'v1',new_sqlite_classes:\['WingRoom'\]\}\]/);
+ assert.equal(typeof (await import('../worker/index.js')).WingRoom,'function');
 });
