@@ -4,13 +4,13 @@ import {history,lastHour} from './activity.js';
 import {pipelineSignature,PIPELINE_WINDOW} from './pipeline-auth.js';
 import {compactOrders,compactHistory,compactContracts,compactBlueprints,compactStandings,fitCollector,stackCollector,stacksCover,isStationId,stepKillmails,stepPlanets,diffEvents,trackOrders} from './pilotdata.js';
 import {sendAlerts} from './alerts.js';
+import {CORP_SECTIONS,roleNote,towerSize,starbaseHealth,structureHealth,withHealth} from './corp.js';
 
 const EVE='https://login.eveonline.com';
 // Unversioned ESI routes answer as they did on the compatibility date sent with each request
 // (developers.eveonline.com/docs/services/esi/overview). Checked against ESI's changelog (read again on
 // 2026-11-18, entries through 2026-09-03): after this date the breaking changes are new endpoints (access lists, mercenary
-// dens, skyhooks, sovereignty, military campaigns, SKINR), characters/{id} and corporations/{id} (which the Worker never
-// reads) and the route/ POST. None touches universe/names, characters/*/{assets, contracts, orders, orders/history,
+// dens, skyhooks, sovereignty, military campaigns, SKINR), characters/{id} (read for corporation_id only) and corporations/{id}/* (the Corp tab's reads) and the route/ POST. None touches universe/names, characters/*/{assets, contracts, orders, orders/history,
 // killmails/recent, planets, blueprints, standings, skills, skillqueue}, killmails/ or universe/system_{kills,jumps}; the
 // 2026-01-27 skills changes are non-breaking. Move it forward only after reading the changelog again.
 const ESI='https://esi.evetech.net';
@@ -135,7 +135,7 @@ async function fetchOk(url,options,fetchImpl,gauge){
   if(gauge)gauge.stop=true;
   throw new ServiceError(LIMITED,502,{retryAt:retryAt(r.headers.get('Retry-After'))||(esi?retryAt(r.headers.get('X-ESI-Error-Limit-Reset'))||Date.now()+60000:0)});
  }
- if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':'EVE service is temporarily unavailable.',502);
+ if(!r.ok)throw new ServiceError(r.status===401||r.status===403?'EVE authorization expired or permission was declined.':'EVE service is temporarily unavailable.',502,{upstream:r.status});
  return r;
 }
 async function remote(url,options,fetchImpl){return (await fetchOk(url,options,fetchImpl)).json();}
@@ -200,7 +200,7 @@ async function session(request,env){
 function parseSnapshot(row){try{return JSON.parse(row.snapshot);}catch{return {};}}
 function privatePayload(row,sessionRow){
  const {esi,events,names,cursor,pendingOrders,...snapshot}=parseSnapshot(row); // ESI's cache hints, alert events and the round-robin cursor are the Worker's bookkeeping
- return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...snapshot,lastError:row.last_error};
+ return {characterId:row.character_id,name:row.name,expires:sessionRow.expires_at,...snapshot,corporationId:row.corporation_id??null,lastError:row.last_error};
 }
 // Call only while holding the pilot's sync lock (lockUntil): refresh tokens rotate and must not race.
 async function freshCredentials(row,env,fetchImpl,lockUntil){
@@ -358,7 +358,7 @@ async function live(id,env,fetchImpl){
  for(const [k,v] of liveCache)if(now-v.at>=LIVE_TTL&&k!==id)liveCache.delete(k);
  try{return await task;}catch(error){if(liveCache.get(id)?.task===task)liveCache.delete(id);throw error;}
 }
-async function liveRead(id,env,fetchImpl){
+async function pilotCredentials(id,env,fetchImpl){
  const row=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
  if(!row)throw new ServiceError('This pilot is no longer connected.',401);
  let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${id}`);
@@ -369,6 +369,10 @@ async function liveRead(id,env,fetchImpl){
   try{credentials=await freshCredentials(locked,env,fetchImpl,lock);}
   finally{await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();}
  }
+ return credentials;
+}
+async function liveRead(id,env,fetchImpl){
+ const credentials=await pilotCredentials(id,env,fetchImpl);
  if(![OPERATIONS_SCOPES.location,OPERATIONS_SCOPES.ship].every(s=>credentials.scopes.includes(s)))throw new ServiceError('Permission not granted. Reconnect to allow reading location and ship.',403);
  const headers={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'},get=path=>remote(`${ESI}/characters/${id}/${path}/`,{headers},fetchImpl);
  const [where,ship,online]=await Promise.allSettled([get('location'),get('ship'),credentials.scopes.includes(OPERATIONS_SCOPES.online)?get('online'):Promise.resolve(null)]);
@@ -376,6 +380,176 @@ async function liveRead(id,env,fetchImpl){
  const w=where.value||{},sh=ship.value||{},on=online.value;
  return {system:w.solar_system_id??null,station:w.station_id??null,structure:w.structure_id??null,shipType:sh.ship_type_id??null,shipItem:sh.ship_item_id??null,shipName:sh.ship_name??null,
   online:on?{online:Boolean(on.online),lastLogin:on.last_login??null,lastLogout:on.last_logout??null}:null,at:new Date().toISOString()};
+}
+// The caller's own assets for the app's browser: read live from ESI (up to ASSET_PAGES pages of 1000: well inside one request's
+// 50 subrequests with the token refresh and the name lookup), kept compact and gzipped in asset_cache (migration 0012). The cache
+// serves for ASSET_TTL, or for as long as ESI's own Expires says the answer cannot change, whichever is later (ESI would hand
+// back the same list), so browsing never asks twice in ten minutes. Structure names need a scope the app does not ask for:
+// those locations stay unnamed. Nothing here is logged.
+export const ASSET_PAGES=20,ASSET_TTL=600000;
+const LOCATION_TYPES=['station','solar_system','item','other'];
+async function gzip(text){return new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());}
+async function gunzip(bytes){return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();}
+const toBase64=bytes=>{let out='';for(let i=0;i<bytes.length;i+=8192)out+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(out);};
+const fromBase64=text=>Uint8Array.from(atob(text),c=>c.charCodeAt(0));
+async function readAssets(id,env,fetchImpl){
+ const credentials=await pilotCredentials(id,env,fetchImpl);
+ if(!credentials.scopes.includes(OPERATIONS_SCOPES.assets))throw new ServiceError('Permission not granted. Reconnect to allow reading assets.',403);
+ let used=0;const counted=(url,options)=>{used++;return fetchImpl(url,options);},headers={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'},gauge={stop:false};
+ const url=`${ESI}/characters/${id}/assets/`,first=await fetchOk(url,{headers},counted,gauge);
+ const total=Number(first.headers.get('X-Pages'))||1,pages=Math.min(ASSET_PAGES,total),modified=first.headers.get('Last-Modified'),expires=hintOf(first).expires||0;
+ const rows=[],add=list=>{for(const a of list)rows.push([a.item_id,a.type_id,a.quantity,a.location_id,a.location_flag,a.is_singleton?1:0,Math.max(0,LOCATION_TYPES.indexOf(a.location_type)),a.is_blueprint_copy?1:0]);};
+ add(await first.json());
+ for(let page=2;page<=pages;page++){
+  if(gauge.stop)throw new ServiceError('EVE asked for fewer requests. Try again in a moment.',502);
+  const r=await fetchOk(`${url}?page=${page}`,{headers},counted,gauge);
+  if(modified&&r.headers.get('Last-Modified')&&r.headers.get('Last-Modified')!==modified)throw new ServiceError('EVE assets changed while they were read. Try again.',502);
+  add(await r.json());
+ }
+ // Station names, one lookup (the route takes 1000 ids). A failure leaves them unnamed.
+ const stations=[...new Set(rows.filter(r=>r[6]===0).map(r=>r[3]))].slice(0,1000),names={};
+ if(stations.length&&!gauge.stop)try{for(const n of await (await fetchOk(`${ESI}/universe/names/`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(stations)},counted,gauge)).json())names[n.id]=String(n.name).slice(0,100);}catch{/* Unnamed. */}
+ return {rows,names,truncated:pages<total,expires};
+}
+// Rows to the tree: roots are grouped by location; an item whose location is another item's id sits inside it.
+export function assetTree(rows,names,only=null){
+ const byId=new Map(),kids=new Map(),roots=new Map();
+ for(const r of rows)byId.set(r[0],r);
+ for(const r of rows){
+  if(r[6]===2&&byId.has(r[3])){if(!kids.has(r[3]))kids.set(r[3],[]);kids.get(r[3]).push(r);}
+  else{if(!roots.has(r[3]))roots.set(r[3],{id:r[3],kind:r[6]===0?'station':r[6]===1?'solar_system':r[3]>=1e12?'structure':'other',name:names[r[3]]||null,items:[]});roots.get(r[3]).items.push(r);}
+ }
+ const node=(r,depth)=>({item_id:r[0],type_id:r[1],quantity:r[2],flag:r[4],singleton:Boolean(r[5]),...(r[7]?{copy:true}:{}),...(depth<6&&kids.get(r[0])?{contents:kids.get(r[0]).map(k=>node(k,depth+1))}:{})});
+ return [...roots.values()].filter(l=>only===null||l.id===only).map(l=>({id:l.id,kind:l.kind,name:l.name,count:l.items.length,items:l.items.map(r=>node(r,0))}));
+}
+async function assets(id,location,env,fetchImpl){
+ const only=location==='all'?null:/^\d{1,15}$/.test(location||'')?Number(location):undefined;
+ if(only===undefined)throw new ServiceError('Send location=all or a location id.');
+ const now=Date.now();let row=await env.DB.prepare('SELECT * FROM asset_cache WHERE character_id = ?').bind(id).first(),cached=true;
+ let data=row&&row.expires_at>now?JSON.parse(await gunzip(fromBase64(row.data))):null;
+ if(!data){
+  cached=false;
+  const got=await readAssets(id,env,fetchImpl),fetched=Date.now();
+  data={rows:got.rows,names:got.names,truncated:got.truncated};
+  row={fetched_at:fetched};
+  // Never kept past an hour, whatever ESI says; never less than the ten minutes asked for.
+  await env.DB.prepare('INSERT INTO asset_cache (character_id, data, fetched_at, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(character_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at, expires_at = excluded.expires_at').bind(id,toBase64(await gzip(JSON.stringify(data))),fetched,Math.max(fetched+ASSET_TTL,Math.min(got.expires||0,fetched+3600000))).run();
+ }
+ const locations=assetTree(data.rows,data.names,only);
+ if(only!==null&&!locations.length)throw new ServiceError('No assets at that location.',404);
+ return {fetchedAt:new Date(row.fetched_at).toISOString(),cached,truncated:data.truncated,items:data.rows.length,locations};
+}
+// Corporation sync (migration 0012). A pilot's token reads the corporation's data; ESI answers 403 to a route whose in-game role
+// the pilot lacks, which is stored per section as "needs role X" (the last good copy of the section stays). One turn of the cron
+// does what fits in SYNC_LIMIT subrequests and carries on at the next one (snapshot.partial), like the pilot sync's cursor.
+// A corporation is rebuilt at most once every CORP_EVERY; a partial or failed one is picked up again after a few minutes.
+export const CORP_EVERY=3600000,CORP_RESUME=8*60000,CORP_RETRY=15*60000,CORP_CHECK=6*3600000,CORP_STARBASES=20,CORP_FRESH=12*60000;
+const CORP_ORDER=['starbases','structures','wallets','divisions','members','jobs','customs','assets'];
+const CORP_SCOPE={starbases:'starbases',structures:'structures',wallets:'corpWallets',divisions:'divisions',members:'corpMembers',jobs:'corpJobs',customs:'customs',assets:'corpAssets'};
+// The least room (subrequests) a section needs to start: the starbase detail calls (list, type names, 20 details) are the big one.
+const CORP_NEED={starbases:2+CORP_STARBASES,structures:1,wallets:1,divisions:1,members:2,jobs:1,customs:1,assets:1};
+async function corpPages(url,headers,counted,gauge,max,room){
+ const first=await fetchOk(url,{headers},counted,gauge),total=Number(first.headers.get('X-Pages'))||1,pages=Math.min(max,total);
+ let rows=await first.json();
+ for(let page=2;page<=pages;page++){
+  if(gauge.stop||room()<1)return {rows,truncated:true};
+  rows=rows.concat(await (await fetchOk(`${url}${url.includes('?')?'&':'?'}page=${page}`,{headers},counted,gauge)).json());
+ }
+ return {rows,truncated:pages<total};
+}
+const nameLookup=async(ids,headers,counted,gauge)=>Object.fromEntries((await (await fetchOk(`${ESI}/universe/names/`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(ids)},counted,gauge)).json()).map(n=>[n.id,String(n.name).slice(0,80)]));
+export async function syncCorp(corpId,env,fetchImpl=fetch,at=Date.now()){
+ const prev=await env.DB.prepare('SELECT * FROM corp_snapshots WHERE corporation_id = ?').bind(corpId).first();
+ const old=prev?parseSnapshot(prev):{},cycle=old.partial&&old.cycleStart?old.cycleStart:at;
+ const save=async(snapshot,source,error)=>{await env.DB.prepare('INSERT INTO corp_snapshots (corporation_id, snapshot, updated_at, source_pilot, error) VALUES (?, ?, ?, ?, ?) ON CONFLICT(corporation_id) DO UPDATE SET snapshot = excluded.snapshot, updated_at = excluded.updated_at, source_pilot = excluded.source_pilot, error = excluded.error').bind(corpId,JSON.stringify(snapshot),Date.now(),source,error).run();};
+ // Members who can read for the corporation: connected, and holding at least one corporation scope. They take turns hour by hour, so
+ // one pilot's missing role does not hide what the other can see (a section that fails keeps its last good copy).
+ const wanted=Object.values(CORP_SCOPE).map(k=>OPERATIONS_SCOPES[k]);
+ const pilots=[];
+ for(const p of (await env.DB.prepare('SELECT * FROM pilots WHERE corporation_id = ? AND grant_revoked_at IS NULL ORDER BY character_id').bind(corpId).all()).results.filter(p=>ALLOWED.has(p.character_id))){
+  try{if((await decrypt(p.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${p.character_id}`)).scopes.some(s=>wanted.includes(s)))pilots.push(p);}catch{/* Unreadable: skipped. */}
+ }
+ if(!pilots.length){await save({...old,fetchedAt:new Date(at).toISOString(),cycleStart:at,partial:false},prev?.source_pilot??null,'No connected pilot of this corporation has allowed corporation access. Reconnect to grant it.');return {corp:'failed'};}
+ const source=pilots[Math.floor(cycle/CORP_EVERY)%pilots.length],id=source.character_id,lock=Date.now()+90000;
+ const row=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(lock,id,Date.now()).first();
+ if(!row)return {corp:'busy'};
+ let used=0;const counted=(url,options)=>{used++;return fetchImpl(url,options);},room=()=>SYNC_LIMIT-used;
+ try{
+  const credentials=await freshCredentials(row,env,counted,lock);
+  const gauge={stop:false},headers={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'},base=`${ESI}/corporations/${corpId}/`,iso=new Date(at).toISOString();
+  const snapshot={...old,fetchedAt:iso,cycleStart:cycle,errors:{...(old.errors||{})},names:{...(old.names||{})}};
+  const pages=(path,max)=>corpPages(`${base}${path}`,headers,counted,gauge,max,room);
+  const sections={
+   async starbases(){
+    let list;
+    try{list=(await pages('starbases/',1)).rows;}catch(error){if(error.upstream===404)return {value:[],gone:true};throw error;}
+    const capped=list.slice(0,CORP_STARBASES),types=[...new Set(capped.map(t=>t.type_id))].filter(t=>!snapshot.names[t]);
+    if(types.length&&room()>=1)try{Object.assign(snapshot.names,await nameLookup(types,headers,counted,gauge));}catch{/* Unnamed towers count as large. */}
+    const value=[];
+    for(const sb of capped){
+     let details=null;
+     if(room()>=1&&!gauge.stop)try{details=await remote(`${base}starbases/${sb.starbase_id}/?system_id=${sb.system_id}`,{headers},counted);}catch(error){if(error.upstream===403)throw error;}
+     value.push(starbaseHealth(sb,details,towerSize(snapshot.names[sb.type_id]),at));
+    }
+    return {value,total:list.length,truncated:list.length>capped.length};
+   },
+   async structures(){const {rows,truncated}=await pages('structures/',3);return {value:rows.slice(0,100).map(structureHealth),truncated:truncated||rows.length>100};},
+   async wallets(){return {value:(await remote(`${base}wallets/`,{headers},counted)).map(w=>({division:w.division,balance:w.balance}))};},
+   async divisions(){const d=await remote(`${base}divisions/`,{headers},counted),pick=l=>(l||[]).map(x=>({division:x.division,name:String(x.name||'').slice(0,60)}));return {value:{wallet:pick(d.wallet),hangar:pick(d.hangar)}};},
+   async members(){
+    const ids=await remote(`${base}members/`,{headers},counted),shown=ids.slice(0,500);let found={};
+    if(shown.length&&room()>=1)try{found=await nameLookup(shown,headers,counted,gauge);}catch{/* Ids only. */}
+    return {value:{count:ids.length,members:shown.map(m=>[m,found[m]||null]),truncated:ids.length>shown.length}};
+   },
+   async jobs(){const {rows,truncated}=await pages('industry/jobs/?include_completed=false',2);return {value:rows.slice(0,200).map(j=>({job_id:j.job_id,installer_id:j.installer_id,activity_id:j.activity_id,blueprint_type_id:j.blueprint_type_id,product_type_id:j.product_type_id??null,status:j.status,runs:j.runs,start_date:j.start_date,end_date:j.end_date,location_id:j.location_id})),truncated};},
+   async customs(){const {rows,truncated}=await pages('customs_offices/',2);return {value:rows.slice(0,100).map(o=>({office_id:o.office_id,system_id:o.system_id,reinforce_exit_start:o.reinforce_exit_start,reinforce_exit_end:o.reinforce_exit_end,tax_rate_standing_good:o.standing_level_tax_rates?.good??null,tax_rate_neutral:o.standing_level_tax_rates?.neutral??null,tax_rate_bad:o.standing_level_tax_rates?.bad??null,alliance_tax_rate:o.alliance_tax_rate??null,corporation_tax_rate:o.corporation_tax_rate??null})),truncated};},
+   // Items in containers roll up to the place that holds them; the value of a type is the app's to add (it has the prices).
+   async assets(){
+    const {rows,truncated}=await pages('assets/',5),holder=new Map(rows.map(a=>[a.item_id,a])),places=new Map();let items=0;
+    for(const a of rows){
+     let at=a,hops=0;while(at.location_type==='item'&&holder.has(at.location_id)&&hops++<5)at=holder.get(at.location_id);
+     const place=places.get(at.location_id)||places.set(at.location_id,{id:at.location_id,items:0,types:new Map()}).get(at.location_id);
+     place.items++;items++;place.types.set(a.type_id,(place.types.get(a.type_id)||0)+a.quantity);
+    }
+    const top=[...places.values()].sort((a,b)=>b.items-a.items).slice(0,60).map(p=>({id:p.id,items:p.items,types:[...p.types].sort((x,y)=>y[1]-x[1]).slice(0,40)}));
+    return {value:{items,locations:places.size,places:top},truncated:truncated||places.size>60};
+   }
+  };
+  let done=true;
+  for(const key of CORP_ORDER){
+   if(snapshot[key]?.cycle===cycle)continue;
+   if(!credentials.scopes.includes(OPERATIONS_SCOPES[CORP_SCOPE[key]])){snapshot[key]={...old[key],cycle};snapshot.errors[key]='needs permission: reconnect to allow it';continue;}
+   if(gauge.stop||room()<CORP_NEED[key]){done=false;break;}
+   try{
+    const got=await sections[key]();
+    snapshot[key]={...got,fetched:iso,cycle};delete snapshot.errors[key];
+   }catch(error){
+    const status=error.upstream;
+    snapshot.errors[key]=status===403?roleNote(key):error.retryAt?'EVE is limiting requests; tried again next time':'EVE could not be read for this section';
+    snapshot[key]={...old[key],cycle};
+    if(error.retryAt)gauge.stop=true;
+   }
+  }
+  snapshot.partial=!done;
+  await save(snapshot,id,null);
+  return {corp:done?'ok':'partial'};
+ }catch(error){
+  await save({...old,fetchedAt:old.fetchedAt,cycleStart:old.cycleStart??cycle,partial:old.partial||false},prev?.source_pilot??id,error instanceof ServiceError?error.message:'Corporation sync failed.');
+  return {corp:'failed'};
+ }finally{
+  await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();
+ }
+}
+// The corporation that is due a turn, if any: one that has none yet, a partial one after CORP_RESUME, a failed one after
+// CORP_RETRY, a complete one an hour after its cycle began.
+async function dueCorp(env,now=Date.now()){
+ const corps=(await env.DB.prepare('SELECT DISTINCT corporation_id AS id FROM pilots WHERE corporation_id IS NOT NULL AND grant_revoked_at IS NULL AND character_id IN (?, ?) ORDER BY corporation_id').bind(...ALLOWED.keys()).all()).results;
+ const rows=new Map((await env.DB.prepare('SELECT corporation_id, updated_at, error, json_extract(snapshot, \'$.partial\') AS partial, json_extract(snapshot, \'$.cycleStart\') AS cycle FROM corp_snapshots').all()).results.map(r=>[r.corporation_id,r]));
+ for(const {id} of corps){
+  const r=rows.get(id);
+  if(!r||(r.error?now-r.updated_at>=CORP_RETRY:r.partial?now-r.updated_at>=CORP_RESUME:now-(r.cycle||0)>=CORP_EVERY))return id;
+ }
+ return null;
 }
 // A sync stops asking ESI after this many fetches (token and key calls included): the free plan allows 50 subrequests per
 // invocation, and the alert posts that follow a cron sync need a few of them.
@@ -499,6 +673,12 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
    if(missing.length&&room()>=1&&!gauge.stop)try{found=Object.fromEntries((await(await fetchOk(`${ESI}/universe/names/`,{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify(missing)},counted,gauge)).json()).map(r=>[r.id,String(r.name).slice(0,80)]));}catch{/* The alerts say "an item". */}
    snapshot.names=Object.fromEntries([...need].map(t=>[t,known[t]||found[t]]).filter(([,n])=>n));
   }
+  // The pilot's corporation, from ESI's public character route: at most every CORP_CHECK, only with a request to spare. A miss is asked again in 30 minutes.
+  let corpId=null,corpChecked=row.corp_checked_at||0;
+  if(now-corpChecked>=CORP_CHECK&&room()>=1&&!gauge.stop){
+   try{const c=await(await fetchOk(`${ESI}/characters/${id}/`,{headers:{Accept:'application/json'}},counted,gauge)).json();if(Number.isSafeInteger(c.corporation_id)){corpId=c.corporation_id;corpChecked=now;}else corpChecked=now-CORP_CHECK+1800000;}
+   catch{corpChecked=now-CORP_CHECK+1800000;}
+  }
   // A trail of systems the pilot was seen in (newest last, 7 days, at most 200): the Exploration tab skips them.
   const here=snapshot.operations.location?.value?.solar_system_id,trail=(prior.operations?.trail?.value||[]).filter(([,at])=>Date.now()-at<604800000);
   if(Number.isSafeInteger(here)&&trail.at(-1)?.[0]!==here)trail.push([here,Date.now()]);
@@ -508,7 +688,7 @@ export async function syncPilot(id,env,fetchImpl=fetch,{force=false}={}){
   // The pickup station may have been changed while this sync ran (it is written to the row, not through the sync lock): read it again.
   const chosen=(await env.DB.prepare("SELECT json_extract(snapshot, '$.sellStation') AS station FROM pilots WHERE character_id = ?").bind(id).first())?.station;
   if(isStationId(chosen))snapshot.sellStation=chosen;
-  await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,gauge.hold||0,id,now+90000).run();
+  await env.DB.prepare('UPDATE pilots SET snapshot = ?, updated_at = ?, sync_lock_until = 0, last_error = ?, esi_after = ?, corporation_id = COALESCE(?, corporation_id), corp_checked_at = ? WHERE character_id = ? AND sync_lock_until = ?').bind(JSON.stringify(snapshot),Date.now(),errors.length?'Some EVE data could not be refreshed.':null,gauge.hold||0,corpId,corpChecked,id,now+90000).run();
  }catch(error){
   await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0, last_error = ?, esi_after = ? WHERE character_id = ? AND sync_lock_until = ?').bind(error instanceof ServiceError?error.message:'Synchronization failed. Reconnect if the problem persists.',error.hold||0,id,now+90000).run();
  }
@@ -569,6 +749,7 @@ async function forget(request,env,fetchImpl){
   env.DB.prepare(`DELETE FROM journal WHERE ${mine} AND ${top}`).bind(...args),
   env.DB.prepare(`UPDATE journal SET data = NULL, updated_at = ? WHERE ${mine}`).bind(Date.now(),...args),
   env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(me),
+  env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(me),
   env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(me)];
  // Goals become tombstones with fresh revs, so the wingmate's device learns they are gone (40 at a time: D1 caps the statements in a batch).
  let goalsLeft=false;
@@ -797,6 +978,22 @@ async function route(request,env,ctx,fetchImpl){
   const s=await session(request,env);
   return response(await live(s.character_id,env,fetchImpl));
  }
+ if(url.pathname==='/api/corp'&&request.method==='GET'){
+  await limit(env,request,'RATE_JOURNAL',`k:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  // The corporation is the caller's own, from their pilot row: a pilot cannot ask for another one.
+  const me=await env.DB.prepare('SELECT corporation_id FROM pilots WHERE character_id = ?').bind(s.character_id).first();
+  if(!me)throw new ServiceError('This pilot is no longer connected.',401);
+  const snap=me.corporation_id?await env.DB.prepare('SELECT c.*, p.name AS source_name FROM corp_snapshots c LEFT JOIN pilots p ON p.character_id = c.source_pilot WHERE c.corporation_id = ?').bind(me.corporation_id).first():null;
+  if(!snap)throw new ServiceError('No corporation data yet. It is read about once an hour with a member who allowed corporation access.',404);
+  const {names:_names,...data}=parseSnapshot(snap),now=Date.now();
+  return response({corporationId:snap.corporation_id,updatedAt:snap.updated_at,age:Math.max(0,Math.round((now-snap.updated_at)/1000)),partial:Boolean(data.partial),source:snap.source_name||null,error:snap.error||null,errors:data.errors||{},...withHealth(Object.fromEntries(Object.entries(data).filter(([k])=>CORP_ORDER.includes(k))),now)});
+ }
+ if(url.pathname==='/api/assets'&&request.method==='GET'){
+  await limit(env,request,'RATE_JOURNAL',`a:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  return response(await assets(s.character_id,url.searchParams.get('location')||'all',env,fetchImpl));
+ }
  if(url.pathname==='/api/waypoints'&&request.method==='POST'){
   const s=await session(request,env);
   let body;try{body=JSON.parse(await readText(request,4096,'Send fewer waypoints.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Waypoints must be JSON.');}
@@ -823,7 +1020,7 @@ async function route(request,env,ctx,fetchImpl){
   if(!row)throw new ServiceError('This pilot is no longer connected.',401);
   if(url.pathname==='/api/disconnect'){
    const revoked=await revokeGrant(row.character_id,env,fetchImpl,'Disconnect');
-   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
+   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM asset_cache WHERE character_id = ?').bind(row.character_id),env.DB.prepare('DELETE FROM pilots WHERE character_id = ?').bind(row.character_id)]);
    return response({disconnected:true,revoked});
   }
   if(url.pathname==='/api/sync'){row=await syncPilot(row.character_id,env,fetchImpl);if(!row)throw new ServiceError('This pilot is no longer connected.',401);}
@@ -832,7 +1029,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/live','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/live','/api/corp','/api/assets','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);
@@ -919,16 +1116,20 @@ export async function scheduledSync(env,fetchImpl=fetch,at=Date.now()){
 async function syncStep(env,fetchImpl,at){
  const sample=await env.DB.prepare("SELECT expires_at, turns FROM market_docs WHERE name = 'activity'").first();
  if(!sample||Date.now()>=sample.expires_at){const r=await sampleActivity(env,fetchImpl);return {job:'sample',kills:r.failed?'failed':'ok'};}
- const ids=(await env.DB.prepare('SELECT character_id FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.map(row=>row.character_id).filter(id=>ALLOWED.has(id));
+ const ids=(await env.DB.prepare('SELECT character_id, updated_at FROM pilots WHERE grant_revoked_at IS NULL ORDER BY character_id').all()).results.filter(row=>ALLOWED.has(row.character_id));
  if(!ids.length)return {job:'sync',pilot:'none'};
- const row=await syncPilot(ids[(Math.floor(at/SYNC_EVERY)+sample.turns)%ids.length],env,fetchImpl);
+ // A corporation that is due takes the run, but only while every pilot has synced within CORP_FRESH: pilots' own data comes first.
+ if(ids.every(p=>Date.now()-p.updated_at<CORP_FRESH)){const corp=await dueCorp(env);if(corp)return {job:'corp',...await syncCorp(corp,env,fetchImpl,Date.now())};}
+ const row=await syncPilot(ids[(Math.floor(at/SYNC_EVERY)+sample.turns)%ids.length].character_id,env,fetchImpl);
  return {job:'sync',pilot:row&&!row.last_error?'ok':'failed'};
 }
 // Once a day (DAILY_CRON in scripts/deploy-backend.mjs): expired sessions and login states are already refused where they
 // are read, so removing them is housekeeping that does not need to run every 5 minutes.
 export const DAILY_CRON='17 3 * * *';
 export async function cleanup(env,now=Date.now()){
- await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM mobile_codes WHERE expires_at <= ?').bind(now),
+ await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM mobile_codes WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM asset_cache WHERE expires_at <= ?').bind(now),
+  // A corporation none of the pilots belongs to any more (they left it, or disconnected) has no reader.
+  env.DB.prepare('DELETE FROM corp_snapshots WHERE updated_at < ? AND corporation_id NOT IN (SELECT corporation_id FROM pilots WHERE corporation_id IS NOT NULL)').bind(now-7*86400000),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
   env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(now-180*86400000),

@@ -4,11 +4,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign,createHmac,createHash} from 'node:crypto';
 import {signPipelineRequest} from '../worker/pipeline-auth.js';
-import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetLive,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
+import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetLive,syncCorp,CORP_EVERY,CORP_RESUME,CORP_RETRY,assetTree,ASSET_TTL,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql','0012_corp_assets.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -44,6 +44,8 @@ function setup(options={}){
   if(/^\/killmails\/\d+\/\w+\/$/.test(path)){const kid=Number(path.split('/')[2]);return json(options.killmail?.(kid)||{killmail_id:kid,killmail_time:new Date(Date.now()-kid*60000).toISOString(),solar_system_id:30000142,victim:{ship_type_id:605,character_id:kid%2?id:99},attackers:[{final_blow:true,corporation_id:1000044},{corporation_id:5}]});}
   if(new URL(url).hostname==='discord.com'){if(options.webhookStatus>=400)return new Response('{}',{status:options.webhookStatus});(options.posts||=[]).push(JSON.parse(init.body));return new Response(null,{status:204});}
   if(path==='/universe/names/')return json(JSON.parse(init.body).map(i=>({id:i,name:options.typeNames?.[i]||`Type ${i}`,category:'inventory_type'})));
+  // ESI's public character route (the sync reads the corporation id from it); options.corp is the id, none by default.
+  if(/^\/characters\/\d+\/$/.test(path))return json({name:'Pilot',...(options.corp?{corporation_id:options.corp}:{})});
   assert.match(init.headers.Authorization,/^Bearer /);
   const res=await character(url,path,init);
   // options.cache = {ttl(path) -> ms until Expires, unchanged: answer 304 to a matching ETag}; options.limitPath answers
@@ -58,6 +60,18 @@ function setup(options={}){
  };
  const character=async(url,path)=>{
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+  // Corporation routes: options.corpData = {starbases:[...], fuels:{id:[...]}, structures, wallets, divisions, members, jobs, customs, assets, pages};
+  // options.deny lists sections ESI answers 403 (no in-game role); options.starbases404 answers the starbase list 404.
+  const cm=path.match(/^\/corporations\/(\d+)\/(.*)$/);
+  if(cm){
+   const d=options.corpData||{},key={'starbases/':'starbases','structures/':'structures','wallets/':'wallets','divisions/':'divisions','members/':'members','industry/jobs/':'jobs','customs_offices/':'customs','assets/':'assets'}[cm[2]]||(cm[2].startsWith('starbases/')?'starbases':null);
+   if(!key)throw new Error(`Unexpected corporation request ${path}`);
+   if(options.deny?.includes(key))return json({error:'Character does not have required role(s)'},403);
+   if(key==='starbases'&&cm[2]!=='starbases/'){const sid=Number(cm[2].split('/')[1]);return json({state:d.starbases.find(t=>t.starbase_id===sid)?.state||'online',fuels:d.fuels?.[sid]||[]});}
+   if(key==='starbases'&&options.starbases404)return json({error:'gone'},404);
+   const page=Number(new URL(url).searchParams.get('page')||1),paged=d.pages?.[key]>1;
+   return new Response(JSON.stringify(paged?d[key]?.[page-1]??[]:d[key]??[]),{headers:{'Content-Type':'application/json','X-Pages':String(d.pages?.[key]||1)}});
+  }
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
@@ -1333,4 +1347,141 @@ test('live: rate limited per session (30 a minute binding), and no location reac
  }finally{logger.sink=sink;}
  const text=lines.join('\n');for(const secret of ['30000142','Private ship name',String(id),'60003760'])assert.ok(!text.includes(secret),`${secret} stays out of logs`);
  assert.ok(text.includes('/api/live'));
+});
+
+// Corporation data (migration 0012): the pilot's corporation id, the hourly corp sync, role errors, budget, /api/corp and alerts.
+const CORP=98000001,H1=3600000;
+const corpFixture=(extra={})=>({corp:CORP,typeNames:{16213:'Caldari Control Tower',20063:'Gallente Control Tower Medium',20066:'Minmatar Control Tower Small'},corpData:{
+ starbases:[{starbase_id:501,type_id:20063,system_id:30000142,moon_id:40000001,state:'online',onlined_since:'2026-01-01T00:00:00Z'},{starbase_id:502,type_id:16213,system_id:30000142,state:'reinforced',reinforced_until:'2026-11-22T00:00:00Z'}],
+ fuels:{501:[{type_id:4051,quantity:200},{type_id:16275,quantity:2000}],502:[{type_id:4246,quantity:4000},{type_id:16275,quantity:800}]},
+ structures:[{structure_id:9001,type_id:35832,system_id:30000142,name:'Jita - Keepstar one',state:'shield_vulnerable',fuel_expires:new Date(Date.now()+2*86400000).toISOString(),services:[{name:'Market',state:'online'}]},{structure_id:9002,type_id:35826,system_id:30000142,name:'Fortress',state:'armor_reinforce',state_timer_end:'2026-11-22T10:00:00Z',fuel_expires:new Date(Date.now()+20*86400000).toISOString()}],
+ wallets:[{division:1,balance:5e9},{division:2,balance:100}],divisions:{wallet:[{division:1,name:'Master wallet'}],hangar:[{division:1,name:'Hangar 1'}]},
+ members:[id,2124815118,555],jobs:[{job_id:1,installer_id:id,activity_id:1,blueprint_type_id:1,product_type_id:2,status:'active',runs:1,start_date:'2026-11-20T00:00:00Z',end_date:'2026-11-23T00:00:00Z',location_id:60003760}],
+ customs:[{office_id:7001,system_id:30000142,reinforce_exit_start:3,reinforce_exit_end:4,standing_level_tax_rates:{good:0.05}}],
+ assets:[{item_id:1,type_id:27,quantity:1,location_id:60003760,location_type:'station',location_flag:'OfficeFolder'},{item_id:2,type_id:34,quantity:900,location_id:1,location_type:'item',location_flag:'CorpSAG1'},{item_id:3,type_id:35,quantity:100,location_id:60003760,location_type:'station',location_flag:'Hangar'}]},...extra});
+async function corpApp(extra={}){const app=setup(corpFixture(extra)),c=await connect(app);return {app,bearer:c.bearer,auth:{headers:{Authorization:`Bearer ${c.bearer}`}}};}
+const corpSnap=app=>JSON.parse(app.env.DB.raw.prepare('SELECT snapshot FROM corp_snapshots').get().snapshot);
+const unlock=app=>app.env.DB.raw.prepare('UPDATE pilots SET sync_lock_until = 0, updated_at = ?').run(Date.now());
+test('corp: the pilot corporation id is read from the public character route, at most every 6 hours, and exposed to its owner',async()=>{
+ const app=setup({corp:CORP}),{bearer}=await connect(app),pilotCalls=()=>app.calls.filter(c=>/\/characters\/\d+\/$/.test(c.url));
+ assert.equal(app.env.DB.raw.prepare('SELECT corporation_id AS c FROM pilots').get().c,CORP);assert.equal(pilotCalls().length,1);assert.ok(!pilotCalls()[0].init.headers.Authorization,'a public route: no token sent');
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(payload.corporationId,CORP);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(pilotCalls().length,1,'not asked again within 6 hours');
+ app.env.DB.raw.prepare('UPDATE pilots SET corp_checked_at = ?, sync_lock_until = 0').run(Date.now()-7*H1);await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(pilotCalls().length,2);
+ const none=setup();await connect(none);assert.equal(none.env.DB.raw.prepare('SELECT corporation_id AS c FROM pilots').get().c,null,'no id from ESI: none stored');
+ assert.ok(none.env.DB.raw.prepare('SELECT corp_checked_at AS t FROM pilots').get().t<Date.now()-5*H1,'a miss is retried in about 30 minutes');
+});
+test('corp sync: every section, derived health from the tower type, names resolved',async()=>{
+ const {app}=await corpApp(),calls0=app.calls.length;
+ assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ const snap=corpSnap(app),row=app.env.DB.raw.prepare('SELECT * FROM corp_snapshots').get();
+ assert.equal(row.source_pilot,id);assert.equal(row.error,null);assert.equal(snap.partial,false);assert.deepEqual(snap.errors,{});
+ const [medium,large]=snap.starbases.value;
+ assert.equal(medium.size,'medium');assert.equal(medium.fuelBlocks,200);assert.equal(medium.fuelHours,10,'200 blocks at 20 an hour');assert.equal(medium.strontiumHours,10,'2000 clathrates at 200 an hour');assert.ok(Math.abs(medium.fuelEmptyAt-(Date.now()+10*H1))<5000);
+ assert.equal(large.size,'large');assert.equal(large.fuelHours,100);assert.equal(large.strontiumHours,2);assert.equal(large.fuelEmptyAt,null,'a reinforced tower is not burning fuel');assert.equal(large.state,'reinforced');
+ assert.equal(snap.structures.value[0].services[0].name,'Market');
+ assert.deepEqual(snap.wallets.value,[{division:1,balance:5e9},{division:2,balance:100}]);assert.equal(snap.divisions.value.wallet[0].name,'Master wallet');
+ assert.equal(snap.members.value.count,3);assert.equal(snap.members.value.members[0][1],`Type ${id}`);
+ assert.equal(snap.jobs.value[0].job_id,1);assert.equal(snap.customs.value[0].office_id,7001);
+ assert.deepEqual(snap.assets.value.places.find(p=>p.id===60003760),{id:60003760,items:3,types:[[34,900],[35,100],[27,1]]},'the container contents roll up to the station');
+ const detail=app.calls.slice(calls0).filter(c=>/starbases\/\d+\/\?system_id=30000142$/.test(c.url));assert.equal(detail.length,2,'one detail call per tower, with its system');
+});
+test('corp sync: a missing in-game role is a per-section note; the other sections and the last good copy stay',async()=>{
+ const options=corpFixture({deny:['wallets','structures']}),app=setup(options);await connect(app);
+ assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ let snap=corpSnap(app);assert.equal(snap.errors.wallets,'needs role Accountant');assert.equal(snap.errors.structures,'needs role Station Manager');assert.equal(snap.starbases.value.length,2);assert.equal(snap.wallets.value,undefined);
+ assert.equal(app.env.DB.raw.prepare('SELECT error FROM corp_snapshots').get().error,null,'the run itself did not fail');
+ // The role arrives: the sections fill in. It leaves again: the good copy stays, with the note.
+ delete options.deny;unlock(app);await syncCorp(CORP,app.env,app.fetchImpl,Date.now()+CORP_EVERY);
+ snap=corpSnap(app);assert.deepEqual(snap.errors,{});assert.equal(snap.wallets.value.length,2);
+ options.deny=['wallets'];unlock(app);await syncCorp(CORP,app.env,app.fetchImpl,Date.now()+2*CORP_EVERY);
+ snap=corpSnap(app);assert.equal(snap.errors.wallets,'needs role Accountant');assert.equal(snap.wallets.value.length,2,'the last good copy is kept');
+ // Without the scope at all: a reconnect note and no ESI call for it.
+ const noScope=setup({...corpFixture(),scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-wallet.read_corporation_wallets.v1')});await connect(noScope);const before=noScope.calls.length;
+ await syncCorp(CORP,noScope.env,noScope.fetchImpl);assert.match(corpSnap(noScope).errors.wallets,/needs permission/);assert.ok(!noScope.calls.slice(before).some(c=>c.url.includes('/wallets/')));
+ // No pilot with any corporation scope: one stored error, no ESI.
+ const bare=setup({corp:CORP,scopes:SCOPES});await connect(bare);const n=bare.calls.length;assert.deepEqual(await syncCorp(CORP,bare.env,bare.fetchImpl),{corp:'failed'});
+ assert.match(bare.env.DB.raw.prepare('SELECT error FROM corp_snapshots').get().error,/allowed corporation access/);assert.equal(bare.calls.length,n);
+});
+test('corp sync: a removed starbase endpoint (404) is an empty list, not a failure',async()=>{
+ const {app}=await corpApp({starbases404:true});assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ const snap=corpSnap(app);assert.deepEqual(snap.starbases.value,[]);assert.equal(snap.starbases.gone,true);assert.equal(snap.errors.starbases,undefined);assert.equal(snap.structures.value.length,2);
+});
+test('corp sync: the subrequest budget holds in the worst case (30 towers, every page, a token refresh)',async()=>{
+ const towers=Array.from({length:30},(_,i)=>({starbase_id:600+i,type_id:20063,system_id:30000142,state:'online'}));
+ const jobs=Array.from({length:10},(_,i)=>({job_id:i,installer_id:id,activity_id:1,blueprint_type_id:1,status:'active',runs:1,start_date:'x',end_date:'y',location_id:1}));
+ const {app}=await corpApp({corpData:{...corpFixture().corpData,starbases:towers,fuels:{},pages:{structures:3,jobs:2,customs:2,assets:9},structures:[[],[],[]],jobs:[jobs,jobs],customs:[[],[]],assets:Array.from({length:9},(_,p)=>Array.from({length:1000},(_,i)=>({item_id:p*1000+i+10,type_id:34,quantity:1,location_id:60003760,location_type:'station',location_flag:'Hangar'})))}});
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length,r=await syncCorp(CORP,app.env,app.fetchImpl);
+ assert.ok(app.calls.length-before<=SYNC_LIMIT,`${app.calls.length-before} requests`);assert.ok(app.calls.length-before>=38,'the worst case really was exercised');assert.equal(r.corp,'ok');
+ const snap=corpSnap(app);assert.equal(snap.starbases.value.length,20,'capped at 20 towers');assert.equal(snap.starbases.truncated,true);assert.equal(snap.starbases.total,30);assert.equal(snap.assets.truncated,true);
+ assert.equal(app.calls.slice(before).filter(c=>c.url.includes('/assets/')).length,5,'five asset pages at most');
+});
+test('corp sync: a run that ESI cuts short is partial, due again after a few minutes, and finishes the same cycle',async()=>{
+ const options=corpFixture(),app=setup(options);await connect(app);sampled(app);options.remaining=ESI_FLOOR-1;
+ assert.equal((await syncCorp(CORP,app.env,app.fetchImpl)).corp,'partial');
+ const first=corpSnap(app);assert.equal(first.partial,true);assert.ok(first.starbases.value,'what was reached is kept');assert.equal(first.wallets,undefined,'the rest waits');
+ // Too soon: the pilots' own syncs go on. After CORP_RESUME the corporation takes a run and carries on.
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync');
+ delete options.remaining;app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-CORP_RESUME-1000);unlock(app);
+ assert.deepEqual(await scheduledSync(app.env,app.fetchImpl,Date.now()),{job:'corp',corp:'ok'});
+ const done=corpSnap(app);assert.equal(done.partial,false);assert.equal(done.cycleStart,first.cycleStart,'the same cycle');assert.equal(done.wallets.value.length,2);
+});
+test('corp turn on the cron: at most hourly per corporation, and only while the pilots are fresh',async()=>{
+ const {app}=await corpApp();sampled(app);
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = ?').run(Date.now()-3600000);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync','a stale pilot is synced before the corporation');
+ unlock(app);assert.deepEqual(await scheduledSync(app.env,app.fetchImpl,Date.now()),{job:'corp',corp:'ok'});
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync','built less than an hour ago');
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.cycleStart', ?)").run(Date.now()-CORP_EVERY-1000);
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'corp','an hour later it is due again');
+ // A failed run is tried again after CORP_RETRY, not every five minutes.
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET error = 'x', updated_at = ?").run(Date.now()-60000);unlock(app);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync');
+ app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-CORP_RETRY-1000);unlock(app);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'corp');
+});
+test('GET /api/corp: the snapshot of the caller\'s own corporation with age and errors; 404 without one; other corporations stay out',async()=>{
+ const {app,auth}=await corpApp({deny:['members']});
+ assert.equal((await app.request('/api/corp',auth)).status,404,'nothing built yet');assert.equal((await app.request('/api/corp')).status,401);
+ await syncCorp(CORP,app.env,app.fetchImpl);
+ const r=await app.request('/api/corp',auth);assert.equal(r.status,200);assert.equal(r.headers.get('Cache-Control'),'no-store');const body=await r.json();
+ assert.equal(body.corporationId,CORP);assert.ok(body.age<5);assert.equal(body.partial,false);assert.equal(body.source,'Fiofka');assert.equal(body.errors.members,'needs role Director');
+ assert.equal(body.starbases.value[0].fuelHoursLeft,10,'health is worked out for now');assert.ok(body.structures.value[0].fuelDaysLeft<=2&&body.structures.value[0].fuelDaysLeft>1.9);
+ assert.ok(!('names' in body)&&!('cycleStart' in body),'bookkeeping stays inside');
+ // The corporation comes from the caller's pilot row: another corporation's snapshot is never reachable.
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = 98000002').run();assert.equal((await app.request(`/api/corp?corporation_id=${CORP}`,auth)).status,404);
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = NULL').run();assert.equal((await app.request('/api/corp',auth)).status,404);
+ app.env.RATE_JOURNAL=limiter(0);assert.equal((await app.request('/api/corp',auth)).status,429);
+});
+test('corp alerts: fuel, reinforcement, de-duplicated, no places, only with the source pilot\'s alert consent',async()=>{
+ const {app}=await corpApp({corpData:{...corpFixture().corpData,fuels:{501:[{type_id:4051,quantity:100},{type_id:16275,quantity:2000}],502:[{type_id:4246,quantity:4000}]}}});
+ app.env.DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1/abc';
+ app.env.DB.raw.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (1, ?, ?)').run(JSON.stringify({systems:{30000142:['Jita',0.9,10000002,[],0]}}),Date.now());
+ await syncCorp(CORP,app.env,app.fetchImpl);
+ const posts=[],send=(url,init)=>String(url).includes('discord.com')?(posts.push(JSON.parse(init.body).content),Promise.resolve(new Response(null,{status:204}))):app.fetchImpl(url,init);
+ const {sendAlerts}=await import('../worker/alerts.js');
+ await sendAlerts(app.env,send);assert.equal(posts.length,0,'the source pilot did not tick the alerts box');
+ app.env.DB.raw.prepare('UPDATE pilots SET share_alerts = 1').run();
+ await sendAlerts(app.env,send);await sendAlerts(app.env,send);
+ assert.ok(posts.some(t=>/^A tower is low on fuel: about 5 h left$/.test(t)),posts.join('|'));
+ assert.ok(posts.some(t=>/^A tower is reinforced/.test(t)));
+ assert.ok(posts.some(t=>/^A structure is low on fuel: about 2 d left$/.test(t)),'a name with a system in it is not used');
+ assert.ok(posts.some(t=>/^Structure Fortress is reinforced \(armor\)/.test(t)),'its own name, when it carries no place');
+ for(const t of posts.filter(t=>/[Tt]ower|[Ss]tructure/.test(t)))for(const place of ['Jita','30000142','Keepstar','98000001','Fiofka','2124810474'])assert.ok(!t.includes(place),`${place} not in ${t}`);
+ const n=posts.length;await sendAlerts(app.env,send);await sendAlerts(app.env,send);assert.equal(posts.length,n,'each event once');
+ // A refuel moves the empty time out; the next dry spell alerts again.
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.starbases.value[0].fuelEmptyAt', ?)").run(Date.now()+10*86400000);
+ await sendAlerts(app.env,send);assert.equal(posts.length,n);
+ const later=Date.now()+10*86400000;
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.starbases.value[0].fuelEmptyAt', ?)").run(later+3*3600000);
+ await sendAlerts(app.env,send,later);assert.equal(posts.length,n+1);assert.match(posts.at(-1),/about 3 h left/);
+});
+test('corp: the daily cleanup drops snapshots of corporations nobody belongs to; disconnect drops the asset cache',async()=>{
+ const {app,auth}=await corpApp();await syncCorp(CORP,app.env,app.fetchImpl);
+ app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-8*86400000);await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM corp_snapshots').get().n,1,'a member still belongs to it');
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = 5').run();await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM corp_snapshots').get().n,0);
+ app.env.DB.raw.prepare('INSERT INTO asset_cache (character_id, data, fetched_at, expires_at) VALUES (?, ?, ?, ?)').run(id,'x',Date.now(),Date.now()+1000);
+ assert.equal((await app.request('/api/disconnect',{method:'POST',...auth})).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,0);
 });
