@@ -64,7 +64,9 @@ sealed interface WingMessage {
     data class TimerRemove(override val id: String, override val from: Long, override val at: Long, val timerId: String) : WingMessage
     data class PlanShare(override val id: String, override val from: Long, override val at: Long, val plan: SharedPlan) : WingMessage
     data class Ping(override val id: String, override val from: Long, override val at: Long, val ping: WingPing) : WingMessage
-    data class PresenceUpdate(override val id: String, override val from: Long, override val at: Long, val online: Boolean, val timers: Int) : WingMessage
+    /** Outgoing: this app's own presence. Incoming: the room broadcasts everyone's presence as [list] (worker/wingroom.js
+     *  broadcastPresence, sent with from = 0), which replaces what the app knew. */
+    data class PresenceUpdate(override val id: String, override val from: Long, override val at: Long, val online: Boolean, val timers: Int, val list: List<Presence>? = null) : WingMessage
     /** The room's snapshot, sent first on every connection: current timers and the last shared items (pings, plans). */
     data class State(override val id: String, override val from: Long, override val at: Long, val timers: List<WingTimer>, val items: List<WingMessage>, val presence: List<Presence>) : WingMessage
     data class Error(override val id: String, override val from: Long, override val at: Long, val message: String) : WingMessage
@@ -107,12 +109,13 @@ object WingCodec {
             "timer.remove" -> WingMessage.TimerRemove(id, from, at, (o["timer"] as? JsonObject)?.str("id") ?: o.str("timerId") ?: return null)
             "plan.share" -> WingMessage.PlanShare(id, from, at, o.obj("plan", SharedPlan.serializer()))
             "ping" -> WingMessage.Ping(id, from, at, json.decodeFromJsonElement(WingPing.serializer(), o))
-            "presence" -> WingMessage.PresenceUpdate(id, from, at, (o["online"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: true, o.long("timers")?.toInt() ?: 0)
+            "presence" -> WingMessage.PresenceUpdate(id, from, at, (o["online"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: true, o.long("timers")?.toInt() ?: 0,
+                (o["presence"] as? JsonArray)?.mapNotNull { runCatching { json.decodeFromJsonElement(Presence.serializer(), it) }.getOrNull() })
             "state" -> WingMessage.State(id, from, at,
                 (o["timers"] as? JsonArray)?.mapNotNull { runCatching { json.decodeFromJsonElement(WingTimer.serializer(), it) }.getOrNull() } ?: emptyList(),
                 (o["items"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { item -> runCatching { decode(item) }.getOrNull() } } ?: emptyList(),
                 (o["presence"] as? JsonArray)?.mapNotNull { runCatching { json.decodeFromJsonElement(Presence.serializer(), it) }.getOrNull() } ?: emptyList())
-            "error" -> WingMessage.Error(id, from, at, o.str("message") ?: o.str("error") ?: "The wing room refused a message.")
+            "error" -> WingMessage.Error(id, from, at, o.str("message") ?: o.str("error") ?: o.str("code") ?: "The wing room refused a message.")
             else -> null
         }
     }

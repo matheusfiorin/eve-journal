@@ -212,7 +212,7 @@ class WingChannel(
             is WingMessage.TimerRemove -> _timers.update { it - m.timerId }
             is WingMessage.Ping -> _pings.update { (listOf(WingEvent(m.pilot, m.at, m.ping, m.id)) + it.filter { e -> e.id != m.id }).take(KEEP) }
             is WingMessage.PlanShare -> _plans.update { (listOf(WingEvent(m.pilot, m.at, m.plan, m.id)) + it.filter { e -> e.id != m.id }).take(KEEP) }
-            is WingMessage.PresenceUpdate -> _presence.update { it + (m.from to Presence(m.from, m.online, m.timers, m.at)) }
+            is WingMessage.PresenceUpdate -> if (m.list != null) _presence.value = m.list.associateBy { it.pilot } else _presence.update { it + (m.from to Presence(m.from, m.online, m.timers, m.at)) }
             is WingMessage.Error -> {}
         }
     }

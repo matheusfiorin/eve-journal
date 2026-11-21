@@ -147,10 +147,17 @@ data class LiveStatus(
     val station: Long? = null,
     val structure: Long? = null,
     val shipType: Long? = null,
+    val shipItem: Long? = null,
     val shipName: String? = null,
-    val online: Boolean? = null,
-    val at: Long? = null,
+    /** Null when the pilot hasn't granted esi-location.read_online.v1. */
+    val online: LiveOnline? = null,
+    /** ISO-8601 time the Worker read ESI (worker/index.js liveRead). */
+    val at: String? = null,
 )
+
+/** ESI /online/ as GET /api/live passes it on; login and logout are ISO-8601 strings. */
+@Serializable
+data class LiveOnline(val online: Boolean = false, val lastLogin: String? = null, val lastLogout: String? = null)
 
 /** POST /api/mobile/redeem's answer: the new session for [pilot], valid until [expires] (epoch ms). */
 @Serializable
