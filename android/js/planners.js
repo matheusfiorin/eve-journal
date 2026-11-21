@@ -14,15 +14,23 @@ import * as hauling from '../../hauling.js';
 import * as sell from '../../sell.js';
 import * as fit from '../../fit.js';
 import * as jobs from '../../jobs.js';
+import * as planExplore from './plan/explore.js';
 
 // The gate map is about 1 MB: it is loaded once with universe.load and kept, with its graph.
-let universe = null, g = null;
+let universe = null, g = null, meta = null;
 const need = () => { if (!g) throw new Error('Load the universe first (universe.load).'); return g; };
 const systemOut = s => s && {id:s.id, name:s.name, sec:s.sec, region:s.region};
+// Region 0's merged data (MarketData.metaData: traffic, risk, activity, skill ids, ores…): loaded with market.meta, kept.
+const needMeta = () => { if (!meta) throw new Error('Load the market meta first (market.meta).'); return meta; };
+// What the Plan screens' adapters (android/js/plan/*.js) get: the engine-held map and meta.
+const ctx = {graph:need, meta:needMeta};
 
 const api = {
   'universe.load': ({universe:u}) => { universe = u; g = route.graph(u); return {systems:g.systems.size, version:u?.version ?? null}; },
   'universe.loaded': () => ({loaded:Boolean(g), systems:g ? g.systems.size : 0}),
+  // Region 0's data for the Plan screens; `stamp` lets the app skip a reload when nothing changed.
+  'market.meta': ({meta:m, stamp = null}) => { meta = m || {}; meta.__stamp = stamp; return {stamp}; },
+  'market.metaStamp': () => meta ? meta.__stamp ?? null : null,
   // A jump list from one system to another; safe avoids low/null-sec where it can (route.paths' default).
   'route.path': ({from, to, safe = true}) => route.paths(need(), from, {safe}).path(to),
   // One leg with its systems and the count of risky (non high-sec) systems, as the web's route lists show it.
@@ -36,6 +44,7 @@ const api = {
   'fit.eft': ({ship, title, items, names = {}, charges = []}) => { const c = new Set(charges); return fit.eft({ship, title, items, nameOf:id => names[id] ?? `#${id}`, catOf:id => c.has(id) ? 'Charge' : null}); },
   // Every pilot's industry jobs in one list (ready first), with slot use: pilots are [{name, jobs, skills}], skills as ESI sends them.
   'jobs.wing': ({pilots = [], now = Date.now()}) => jobs.wingJobs(pilots.map(p => ({name:p.name, jobs:p.jobs || [], levels:p.skills?.skills ? industry.skillLevels(p.skills, industry.SLOT_SKILLS) : null})), now),
+  ...planExplore.api(ctx),
 };
 
 // Every planner module stays reachable for the Plan agent's adapters, and keeps esbuild from dropping it.

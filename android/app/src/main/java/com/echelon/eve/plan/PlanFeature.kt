@@ -16,7 +16,7 @@ object PlanFeature : Feature {
     override fun install(registry: FeatureRegistry) {
         fun stub(key: String, title: String, summary: String, order: Int, icon: androidx.compose.ui.graphics.vector.ImageVector = EchelonIcons.Plan) =
             registry.register(destination, SubScreen(key, title, summary, icon, order) { Placeholder(title, summary) })
-        stub("explore", "Explore", "Where to scan for relic and data sites", 10, EchelonIcons.Search)
+        registry.register(destination, SubScreen("explore", "Explore", "Where to scan for relic and data sites", EchelonIcons.Search, 10) { com.echelon.eve.plan.explore.ExploreRoute(it) })
         stub("industry", "Build", "Which blueprint to buy and build", 20)
         stub("mining", "Mine", "What to mine and where", 30)
         stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
