@@ -20,6 +20,10 @@ import com.echelon.eve.core.data.SyncCoordinator
 import com.echelon.eve.core.data.WingRepository
 import com.echelon.eve.core.js.PlannerBridge
 import com.echelon.eve.core.model.Pilot
+import com.echelon.eve.core.push.PushRegistrar
+import com.echelon.eve.core.wing.WingChannel
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,5 +68,20 @@ class AppContainer(context: Context, val apiBase: String = BuildConfig.API_BASE)
 
     val imageLoader: ImageLoader = ImageLoader.Builder(app).components { add(OkHttpNetworkFetcherFactory(callFactory = { http })) }.crossfade(true).build()
 
-    init { ProcessLifecycleOwner.get().lifecycle.addObserver(sync) }
+    /**
+     * The live wing room (timers, pings, presence, shared plans), connected as the flying pilot while the app is in
+     * the foreground or a timer service holds it (WingChannel.onTimerServiceStarted/Stopped).
+     */
+    val wingChannel = WingChannel(http, api.base, scope, identity = { selectedPilot.value?.let { p -> sessions.token(p.id)?.let { p to it } } },
+        onUnauthorized = { token -> scope.launch { sessions.dropToken(token) } })
+
+    /** Optional FCM: registers this phone's token for every connected pilot; a no-op without google-services.json. */
+    val push = PushRegistrar(app, api, scope) { Pilot.entries.mapNotNull { sessions.token(it.id) } }
+
+    init {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(sync)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(wingChannel)
+        // A new flying pilot or a new session reconnects the room as them and re-registers for pushes.
+        scope.launch { combine(selectedPilot, sessions.sessions) { p, s -> p to s[p?.id]?.token }.distinctUntilChanged().collect { wingChannel.identityChanged(); push.refresh() } }
+    }
 }

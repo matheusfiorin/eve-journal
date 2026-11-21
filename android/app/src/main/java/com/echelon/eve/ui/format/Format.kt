@@ -80,4 +80,15 @@ fun parseIsk(text: String): Long? {
     return (m.groupValues[1].toDouble() * mult).roundToLong()
 }
 
+/** "just now", "3 min ago", "2h ago", "4d ago": how long since [atMillis]. */
+fun ago(atMillis: Long, now: Long = System.currentTimeMillis()): String {
+    val s = (now - atMillis) / 1000
+    return when {
+        s < 45 -> "just now"
+        s < 3600 -> "${max(1L, jsRound(s / 60.0))} min ago"
+        s < 86400 -> "${s / 3600}h ago"
+        else -> "${s / 86400}d ago"
+    }
+}
+
 fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n == 1) one else many}"

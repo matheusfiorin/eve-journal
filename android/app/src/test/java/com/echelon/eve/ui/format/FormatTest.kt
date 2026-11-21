@@ -40,6 +40,10 @@ class FormatTest {
         assertEquals("1:02:09", clock(3729_000))
         assertEquals("2d 03:10:00", clock((2 * 86400 + 3 * 3600 + 600) * 1000L))
         assertEquals("0:00", clock(-5))
+        assertEquals("just now", ago(1_000, now = 30_000))
+        assertEquals("3 min ago", ago(0, now = 180_000))
+        assertEquals("2h ago", ago(0, now = 2 * 3_600_000 + 5))
+        assertEquals("4d ago", ago(0, now = 4 * 86_400_000L))
     }
 
     @Test fun parseIskShorthand() {

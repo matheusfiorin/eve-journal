@@ -37,6 +37,7 @@ import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
 import com.echelon.eve.ui.components.Tone
+import com.echelon.eve.ui.components.WingChip
 import com.echelon.eve.ui.format.Kind
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
@@ -74,6 +75,7 @@ fun DesignCatalog(modifier: Modifier = Modifier, now: Long = 1_800_000_000_000L,
             SecurityBadge(0.946, outlined = true)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) { PilotBadge("Fiofka", PilotColors.Fiofka); PilotBadge("Decxus", PilotColors.Decxus) }
+        WingChip("Decxus", PilotColors.Decxus, "started ‘Gas site’", now - 180_000, now)
         SectionHeader("Rows")
         EchelonCard(padding = false) {
             ListRow("Jita", supporting = "The Forge · 3 jumps", meta = "Updated 4 min ago", leading = { SecurityBadge(0.946) }, onClick = {})

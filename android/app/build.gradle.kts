@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.paparazzi)
 }
 
+// Firebase Cloud Messaging is optional: drop a google-services.json from the Firebase console into app/ to turn on
+// background pushes from the wing room. Without it the plugin is not applied, FirebaseApp never initialises and the
+// push code does nothing, so the build and the app work the same.
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
 // Release signing comes from CI secrets (see .github/workflows/android.yml); without them only debug builds are signed.
 val keystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let(::file)?.takeIf { it.exists() }
 
@@ -96,6 +101,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.quickjs.android)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+    implementation(libs.kotlinx.coroutines.play.services)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
