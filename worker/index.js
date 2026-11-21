@@ -75,6 +75,14 @@ async function limit(env,request,name,key){
  let ok=true;try{ok=(await binding.limit({key:key||request.headers.get('CF-Connecting-IP')||'unknown'})).success!==false;}catch{/* Fail open. */}
  if(!ok)throw new ServiceError('Too many requests. Try again in a minute.',429,{retryAfter:60});
 }
+const BAD_CODE='That sign-in code did not work. Start again.';
+// The consent page and POST carry the Android client's PKCE challenge (43 base64url characters, a SHA-256 digest); null for the browser.
+function mobileStart(params){
+ const client=params.get('client');
+ if(client===null||client==='')return null;
+ if(client!=='android'||!/^[\w-]{43}$/.test(params.get('challenge')||''))throw new ServiceError('The app sign-in request is invalid.');
+ return params.get('challenge');
+}
 const random=()=>base64url(crypto.getRandomValues(new Uint8Array(32)));
 const hash=async value=>base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
 const authCookie=(name,value,seconds)=>`${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
@@ -589,8 +597,8 @@ async function route(request,env,ctx,fetchImpl){
  }
  if(url.pathname==='/auth/start'&&request.method==='GET'){
   const id=Number(url.searchParams.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('This character is not in the configured two-pilot dashboard.',403);
-  const csrf=random();
-  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data. What it keeps, and who sees it:</p><ul><li><b>Public:</b> your skill-point total and training queue will be visible on the public two-pilot dashboard, to anyone who opens it. The dashboard works that way, so connecting requires you to agree to it.</li><li><b>Only you, and your wingmate if you tick the second box:</b> wallet, ship, location, assets, industry jobs and mining ledger. The third box adds your ship's fit, blueprints and planetary colonies.</li><li><b>Only you, never your wingmate:</b> your market orders and their history, contracts, standings and ship losses. They are read to show them to you and to work out alerts.</li><li><b>Journal sync:</b> your Logbook entries, goals and settings are stored encrypted on the backend so they sync between your devices. Goals are shared with your wingmate; entries and settings are only yours.</li><li><b>Market scans:</b> once an hour the market pipeline reads the market of the region you are in, so the dashboard can price trades near you. That region is shown only to signed-in pilots, never publicly.</li><li>Refresh tokens are encrypted on the backend. You can disconnect, or use Delete my data on the dashboard to remove everything stored about you.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}"><label><input type="checkbox" name="share" value="yes" required> I agree that my skill total and training queue are shown publicly on this dashboard. (Required.)</label><label><input type="checkbox" name="wing" value="yes"> Also share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public. (Optional.)</label><label><input type="checkbox" name="wing3" value="yes"> Also share my ship's fit, blueprints (with where they are) and planetary colonies (with their solar systems) with my wingmate. Needs the box above. (Optional.)</label><label><input type="checkbox" name="alerts" value="yes"> Post my alerts (skill queue, jobs ready, orders, contracts, losses, planet extractors) to the wing's Discord channel. No places are named. (Optional.)</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
+  const csrf=random(),mobile=mobileStart(url.searchParams);
+  return html(`<h1>Connect ${ALLOWED.get(id)}</h1><p>EVE Pilot Console will periodically read your EVE data. What it keeps, and who sees it:</p><ul><li><b>Public:</b> your skill-point total and training queue will be visible on the public two-pilot dashboard, to anyone who opens it. The dashboard works that way, so connecting requires you to agree to it.</li><li><b>Only you, and your wingmate if you tick the second box:</b> wallet, ship, location, assets, industry jobs and mining ledger. The third box adds your ship's fit, blueprints and planetary colonies.</li><li><b>Only you, never your wingmate:</b> your market orders and their history, contracts, standings and ship losses. They are read to show them to you and to work out alerts.</li><li><b>Journal sync:</b> your Logbook entries, goals and settings are stored encrypted on the backend so they sync between your devices. Goals are shared with your wingmate; entries and settings are only yours.</li><li><b>Market scans:</b> once an hour the market pipeline reads the market of the region you are in, so the dashboard can price trades near you. That region is shown only to signed-in pilots, never publicly.</li><li>Refresh tokens are encrypted on the backend. You can disconnect, or use Delete my data on the dashboard to remove everything stored about you.</li></ul><form method="post" action="/auth/start"><input type="hidden" name="pilot" value="${id}"><input type="hidden" name="csrf" value="${csrf}">${mobile?`<input type="hidden" name="client" value="android"><input type="hidden" name="challenge" value="${mobile}">`:''}<label><input type="checkbox" name="share" value="yes" required> I agree that my skill total and training queue are shown publicly on this dashboard. (Required.)</label><label><input type="checkbox" name="wing" value="yes"> Also share my skills, wallet balance, asset summary, ship, location (with recently visited systems), industry jobs and mining ledger with my wingmate, the other pilot on this dashboard. Never public. (Optional.)</label><label><input type="checkbox" name="wing3" value="yes"> Also share my ship's fit, blueprints (with where they are) and planetary colonies (with their solar systems) with my wingmate. Needs the box above. (Optional.)</label><label><input type="checkbox" name="alerts" value="yes"> Post my alerts (skill queue, jobs ready, orders, contracts, losses, planet extractors) to the wing's Discord channel. No places are named. (Optional.)</label><button>Continue to EVE login</button></form><p><a href="${front.href}">Return to dashboard</a></p>`,200,{'Set-Cookie':authCookie('__Host-eve_csrf',csrf,600)});
  }
  if(url.pathname==='/auth/start'&&request.method==='POST'){
   if(!isSameOrigin(request,url))throw new ServiceError('Invalid connection origin.',403);
@@ -598,8 +606,8 @@ async function route(request,env,ctx,fetchImpl){
   const fields=new URLSearchParams(await readText(request,4096,'That request is too large.'));
   if(!fields.get('csrf')||fields.get('csrf')!==cookie(request,'__Host-eve_csrf')||fields.get('share')!=='yes')throw new ServiceError('Confirm sharing consent before connecting.',403);
   const id=Number(fields.get('pilot'));if(!ALLOWED.has(id))throw new ServiceError('Unknown pilot.',403);
-  const state=random(),verifier=random(),stateHash=await hash(state);
-  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(stateHash,await encrypt({id,verifier,share:true,wing:fields.get('wing')==='yes'?(fields.get('wing3')==='yes'?3:2):0,alerts:fields.get('alerts')==='yes'},env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`),Date.now()+300000).run();
+  const mobile=mobileStart(fields),state=random(),verifier=random(),stateHash=await hash(state);
+  await env.DB.prepare('INSERT INTO oauth_states (state_hash, payload, expires_at) VALUES (?, ?, ?)').bind(stateHash,await encrypt({id,verifier,share:true,...(mobile?{mobile}:{}),wing:fields.get('wing')==='yes'?(fields.get('wing3')==='yes'?3:2):0,alerts:fields.get('alerts')==='yes'},env.TOKEN_ENCRYPTION_KEY,`state:${stateHash}`),Date.now()+300000).run();
   const login=new URL(`${EVE}/v2/oauth/authorize/`);
   login.search=new URLSearchParams({response_type:'code',client_id:env.EVE_CLIENT_ID,redirect_uri:`${url.origin}/auth/callback`,scope:REQUESTED_SCOPES.join(' '),state,code_challenge:await challenge(verifier),code_challenge_method:'S256'});
   return new Response(null,{status:303,headers:{Location:login.href,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state',state,600),'Referrer-Policy':'no-referrer'}});
@@ -621,8 +629,26 @@ async function route(request,env,ctx,fetchImpl){
   const bearer=random(),expires=Date.now()+SESSION_MS;
   await env.DB.prepare('INSERT INTO sessions (token_hash, character_id, expires_at) VALUES (?, ?, ?)').bind(await hash(bearer),payload.id,expires).run();
   await syncPilot(payload.id,env,fetchImpl,{force:true});
+  // The Android app gets a one-time code instead of the session: a custom-scheme URL can be claimed by any installed app, so
+  // the session itself never travels in one. /api/mobile/redeem hands it over to whoever holds the PKCE verifier.
+  if(payload.mobile){
+   const code=random(),codeHash=await hash(code);
+   await env.DB.prepare('INSERT INTO mobile_codes (code_hash, challenge, character_id, session_token_encrypted, expires_at) VALUES (?, ?, ?, ?, ?)').bind(codeHash,payload.mobile,payload.id,await encrypt({session:bearer,expires},env.TOKEN_ENCRYPTION_KEY,`mobile:${codeHash}`),Date.now()+300000).run();
+   return new Response(null,{status:303,headers:{Location:`echelon://auth/callback?${new URLSearchParams({code,pilot:String(payload.id)})}`,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state','',0),'Referrer-Policy':'no-referrer'}});
+  }
   const dest=new URL(front);dest.hash=new URLSearchParams({backend_session:bearer,pilot:String(payload.id),expires:String(expires)}).toString();
   return new Response(null,{status:303,headers:{Location:dest.href,'Cache-Control':'no-store','Set-Cookie':authCookie('__Host-eve_state','',0),'Referrer-Policy':'no-referrer'}});
+ }
+ if(url.pathname==='/api/mobile/redeem'&&request.method==='POST'){
+  await limit(env,request,'RATE_AUTH');
+  let body;try{body=JSON.parse(await readText(request,1024,'That request is too large.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError(BAD_CODE);}
+  if(!/^[\w-]{43}$/.test(body?.code)||!/^[\w-]{43,128}$/.test(body?.verifier))throw new ServiceError(BAD_CODE);
+  const codeHash=await hash(body.code);
+  // Deleted first, so a code is spent even by a wrong verifier: a guess cannot be retried.
+  const row=await env.DB.prepare('DELETE FROM mobile_codes WHERE code_hash = ? AND expires_at > ? RETURNING *').bind(codeHash,Date.now()).first();
+  if(!row||await hash(await challenge(body.verifier))!==await hash(row.challenge))throw new ServiceError(BAD_CODE);
+  let kept;try{kept=await decrypt(row.session_token_encrypted,env.TOKEN_ENCRYPTION_KEY,`mobile:${codeHash}`);}catch{throw new ServiceError(BAD_CODE);}
+  return response({session:kept.session,pilot:row.character_id,expires:kept.expires});
  }
  if(url.pathname==='/api/public/pilots'&&request.method==='GET'){
   const rows=await env.DB.prepare('SELECT character_id, name, snapshot, updated_at, last_error FROM pilots WHERE share_training = 1').all();
@@ -767,7 +793,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);
@@ -863,7 +889,7 @@ async function syncStep(env,fetchImpl,at){
 // are read, so removing them is housekeeping that does not need to run every 5 minutes.
 export const DAILY_CRON='17 3 * * *';
 export async function cleanup(env,now=Date.now()){
- await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),
+ await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now),env.DB.prepare('DELETE FROM mobile_codes WHERE expires_at <= ?').bind(now),
   // Tombstones only need to outlive the last sync of every device; half a year is plenty. The newest row always stays:
   // revs are MAX(rev)+1, and a lower MAX would hand out revs that devices have already read past.
   env.DB.prepare('DELETE FROM journal WHERE data IS NULL AND updated_at < ? AND rev < (SELECT MAX(rev) FROM journal)').bind(now-180*86400000),

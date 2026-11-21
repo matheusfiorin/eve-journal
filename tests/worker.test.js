@@ -8,7 +8,7 @@ import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,d
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -87,10 +87,10 @@ function setup(options={}){
 }
 // The hourly kills sample is not due, so a cron run goes to a pilot sync (see the sampling tests for the other case).
 const sampled=(app,turns=0)=>app.env.DB.raw.prepare("INSERT INTO market_docs (name, data, updated_at, expires_at, turns) VALUES ('activity', '{}', ?, ?, ?) ON CONFLICT(name) DO UPDATE SET expires_at = excluded.expires_at, turns = excluded.turns").run(Date.now(),Date.now()+3600000,turns);
-async function consent(app,{wing=true,wing3=false,alerts=false,character=id}={}){
- const page=await app.request(`/auth/start?pilot=${character}`);assert.equal(page.status,200);
+async function consent(app,{wing=true,wing3=false,alerts=false,character=id,mobile=null}={}){
+ const page=await app.request(`/auth/start?pilot=${character}${mobile?`&client=android&challenge=${mobile}`:''}`);assert.equal(page.status,200);
  const body=await page.text(),csrf=body.match(/name="csrf" value="([^"]+)"/)[1];
- const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{}),...(wing3?{wing3:'yes'}:{}),...(alerts?{alerts:'yes'}:{})})});
+ const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{}),...(wing3?{wing3:'yes'}:{}),...(alerts?{alerts:'yes'}:{}),...(mobile?{client:body.match(/name="client" value="([^"]+)"/)[1],challenge:body.match(/name="challenge" value="([^"]+)"/)[1]}:{})})});
  assert.equal(start.status,303);const login=new URL(start.headers.get('Location'));
  return {state:login.searchParams.get('state'),cookie:start.headers.get('Set-Cookie').split(';')[0],login};
 }
@@ -1213,4 +1213,68 @@ test('the wing summary carries hangar stacks only at consent level 3',async()=>{
  app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,2)").run(JSON.stringify({sellStation:OTHER,operations:{ship:{value:{ship_type_id:1}},stacks:{value:{[OTHER]:[[34,1]]}}}}));
  const other=(await wing()).find(x=>x.name==='Decxus');assert.ok(other.ship);assert.equal(other.stacks,undefined);assert.ok(!JSON.stringify(other).includes('sellStation'));
  app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3 WHERE character_id = 2124815118').run();assert.deepEqual((await wing()).find(x=>x.name==='Decxus').stacks,{[OTHER]:[[34,1]]});
+});
+
+// Android sign-in (migration 0011): PKCE between the app and the Worker, a one-time code in the custom-scheme URL.
+const sha=v=>createHash('sha256').update(v).digest('base64url');
+const VERIFIER='v'.repeat(43),CHALLENGE=sha(VERIFIER);
+async function mobileConnect(app,challenge=CHALLENGE){
+ const pending=await consent(app,{mobile:challenge});
+ const callback=await app.request(`/auth/callback?code=test-code&state=${pending.state}`,{headers:{Cookie:pending.cookie}});
+ return {callback,location:callback.headers.get('Location')};
+}
+const redeem=(app,body,init={})=>app.request('/api/mobile/redeem',{method:'POST',body:typeof body==='string'?body:JSON.stringify(body),...init});
+test('android sign-in: consent page, one-time code, redeem with the verifier, session works',async()=>{
+ const app=setup(),{callback,location}=await mobileConnect(app);
+ assert.equal(callback.status,303);assert.match(location,/^echelon:\/\/auth\/callback\?code=[\w-]{43}&pilot=2124810474$/);
+ assert.ok(!location.includes('backend_session'),'the session is not in the URL');
+ const code=new URL(location).searchParams.get('code'),row=app.env.DB.raw.prepare('SELECT * FROM mobile_codes').get();
+ assert.notEqual(row.code_hash,code);assert.equal(row.challenge,CHALLENGE);assert.ok(!row.session_token_encrypted.includes('ey'),'stored encrypted');
+ assert.ok(row.expires_at>Date.now()&&row.expires_at<=Date.now()+300000);
+ const ok=await redeem(app,{code,verifier:VERIFIER});assert.equal(ok.status,200);const body=await ok.json();
+ assert.equal(body.pilot,id);assert.match(body.session,/^[\w-]{43}$/);assert.ok(body.expires>Date.now());
+ assert.equal(ok.headers.get('Cache-Control'),'no-store');
+ assert.equal((await app.request('/api/session',{headers:{Authorization:`Bearer ${body.session}`}})).status,200);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0,'single use: the row is gone');
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'reuse is refused');
+});
+test('android sign-in: a wrong verifier is refused and spends the code',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ const bad=await redeem(app,{code,verifier:'w'.repeat(43)});assert.equal(bad.status,400);assert.ok(!(await bad.text()).includes('verifier'),'generic error');
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'the right verifier no longer helps');
+});
+test('android sign-in: expired and malformed redeems are refused; the daily cleanup purges old codes',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ for(const body of ['nope',{},{code:'short',verifier:VERIFIER},{code,verifier:'x'},{code:'a'.repeat(43)}])assert.equal((await redeem(app,body)).status,400);
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET expires_at = ?').run(Date.now()-1);
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'expired');
+ const second=await mobileConnect(app);assert.equal(second.callback.status,303);
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET expires_at = ?').run(Date.now()-1);
+ await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0);
+ assert.equal((await redeem(app,'x'.repeat(2000))).status,413,'the body is capped');
+ assert.equal((await app.request('/api/mobile/redeem')).status,404,'POST only');
+});
+test('android sign-in: redeem is rate limited with RATE_AUTH and a code cannot be used for another pilot or row',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ app.env.RATE_AUTH=limiter(0);assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,429);
+ app.env.RATE_AUTH=undefined;
+ // The encrypted session is bound to its own row: copied under another hash it does not decrypt.
+ const row=app.env.DB.raw.prepare('SELECT * FROM mobile_codes').get(),other=sha('another-code');
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET code_hash = ? WHERE code_hash = ?').run(other,row.code_hash);
+ assert.equal((await redeem(app,{code:'another-code'.padEnd(43,'a'),verifier:VERIFIER})).status,400);
+});
+test('android sign-in: the start request is validated, the browser flow is untouched, and the consent page keeps its CSP',async()=>{
+ const app=setup();
+ for(const q of ['client=android','client=android&challenge=short','client=ios&challenge='+CHALLENGE,'client=android&challenge='+'+'.repeat(43)])assert.equal((await app.request(`/auth/start?pilot=${id}&${q}`)).status,400);
+ const page=await app.request(`/auth/start?pilot=${id}&client=android&challenge=${CHALLENGE}`),csp=page.headers.get('Content-Security-Policy');
+ assert.equal(page.status,200);assert.match(await page.clone().text(),new RegExp(`<form method="post" action="/auth/start">.*name="challenge" value="${CHALLENGE}"`));
+ assert.match(csp,/form-action 'self' https:\/\/login\.eveonline\.com(;|$)/);assert.match(csp,/frame-ancestors 'none'/);assert.match(csp,/default-src 'none'/);assert.match(csp,/base-uri 'none'/);
+ assert.ok(!/echelon:/.test(csp),'the custom scheme is a redirect target, never a form target');
+ // The POST without the app's fields is the browser flow, and its callback still ends in the fragment redirect.
+ const plain=await connect(app);assert.equal(plain.callback.status,303);assert.match(plain.callback.headers.get('Location'),/^https:\/\/matheusfiorin\.github\.io\/eve-journal\/#backend_session=/);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0);
+ const browserPage=await(await app.request(`/auth/start?pilot=${id}`)).text();assert.ok(!browserPage.includes('name="challenge"'));
+ // A POST that claims android without a valid challenge is refused.
+ const p=await app.request(`/auth/start?pilot=${id}`),csrf=(await p.text()).match(/name="csrf" value="([^"]+)"/)[1];
+ const forged=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:p.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(id),csrf,share:'yes',client:'android',challenge:'x'})});assert.equal(forged.status,400);
 });
