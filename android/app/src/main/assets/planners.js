@@ -256,13 +256,13 @@
   }
   function oreValue(ore, book2, { salesTax = 0.075, level = () => 0 } = {}) {
     const bid = (type) => book2.items.get(type)?.buys[0];
-    const net = (order2) => order2 ? order2.price * (1 - salesTax) : 0;
+    const net = (order3) => order3 ? order3.price * (1 - salesTax) : 0;
     const raw = net(bid(ore.ore)), compressed = net(bid(ore.comp));
     const share = refineYield(ore.n, level);
     const refined = ore.m.reduce((t, [mineral, qty]) => t + Math.floor(qty * share) * net(bid(mineral)), 0) / ore.portion;
     const options = [["raw", raw, bid(ore.ore)], ["compressed", compressed, bid(ore.comp)], ["reprocessed", refined, null]];
-    const [how, perUnit, order] = options.reduce((a, b) => b[1] > a[1] ? b : a);
-    return { n: ore.n, how, perUnit, perM3: perUnit / ore.vol, at: order?.loc, raw, compressed, refined };
+    const [how, perUnit, order2] = options.reduce((a, b) => b[1] > a[1] ? b : a);
+    return { n: ore.n, how, perUnit, perM3: perUnit / ore.vol, at: order2?.loc, raw, compressed, refined };
   }
   var DOCK_SECONDS = 240;
   function sites(g2, from, { values, rate, hold, activity = {}, maxJumps = 10, lowsec = false, session = 7200, limit = 8 }) {
@@ -749,10 +749,10 @@
     const n = cost.length;
     if (n <= 2) return [...Array(n).keys()];
     const last = end === "fixed" ? n - 1 : null, middle = [...Array(n).keys()].slice(1).filter((i) => i !== last);
-    const total = (order2) => {
+    const total = (order3) => {
       let t = 0;
-      for (let i = 1; i < order2.length; i++) t += cost[order2[i - 1]][order2[i]];
-      return t + (end === "return" ? cost[order2[order2.length - 1]][0] : 0);
+      for (let i = 1; i < order3.length; i++) t += cost[order3[i - 1]][order3[i]];
+      return t + (end === "return" ? cost[order3[order3.length - 1]][0] : 0);
     };
     const wrap = (mid2) => [0, ...mid2, ...last === null ? [] : [last]];
     if (middle.length <= EXACT_STOPS) {
@@ -789,18 +789,18 @@
       left.delete(next);
       at = next;
     }
-    let order = wrap(mid), improved = true;
+    let order2 = wrap(mid), improved = true;
     while (improved) {
       improved = false;
-      for (let i = 1; i < order.length - 2; i++) for (let j = i + 1; j < order.length - (last === null ? 0 : 1); j++) {
-        const candidate = [...order.slice(0, i), ...order.slice(i, j + 1).reverse(), ...order.slice(j + 1)];
-        if (total(candidate) < total(order) - 1e-9) {
-          order = candidate;
+      for (let i = 1; i < order2.length - 2; i++) for (let j = i + 1; j < order2.length - (last === null ? 0 : 1); j++) {
+        const candidate = [...order2.slice(0, i), ...order2.slice(i, j + 1).reverse(), ...order2.slice(j + 1)];
+        if (total(candidate) < total(order2) - 1e-9) {
+          order2 = candidate;
           improved = true;
         }
       }
     }
-    return order;
+    return order2;
   }
   function plan(g2, waypoints, ctx, { mode = "balanced", lowsec = false, avoid = /* @__PURE__ */ new Set(), optimize = false, end = "fixed" } = {}) {
     const allow = new Set(waypoints), weight = weigher(g2, ctx, { mode, lowsec, avoid, allow }), searches = /* @__PURE__ */ new Map();
@@ -808,12 +808,12 @@
       if (!searches.has(from)) searches.set(from, paths(g2, from, { weight }));
       return searches.get(from);
     };
-    let order = waypoints.map((_, i) => i);
+    let order2 = waypoints.map((_, i) => i);
     if (optimize && waypoints.length > 2) {
       const cost = waypoints.map((a) => waypoints.map((b) => a === b ? 0 : search(a).cost(b) ?? 1e9));
-      order = bestOrder(cost, { end });
+      order2 = bestOrder(cost, { end });
     }
-    const stops = order.map((i) => waypoints[i]);
+    const stops = order2.map((i) => waypoints[i]);
     if (end === "return") stops.push(waypoints[0]);
     const route = [stops[0]], legs = [];
     for (let i = 1; i < stops.length; i++) {
@@ -1398,6 +1398,86 @@
   }
   var planSellMessage = (g2, msg) => planSell(fromSellMessage(msg, g2));
 
+  // fit.js
+  var fit_exports = {};
+  __export(fit_exports, {
+    SLOTS: () => SLOTS,
+    eft: () => eft,
+    fitCounts: () => fitCounts,
+    fitGroups: () => fitGroups,
+    groupOf: () => groupOf
+  });
+  var SLOT = [[/^HiSlot(\d+)$/, "high"], [/^MedSlot(\d+)$/, "mid"], [/^LoSlot(\d+)$/, "low"], [/^RigSlot(\d+)$/, "rig"], [/^SubSystemSlot(\d+)$/, "sub"]];
+  var SLOTS = [["high", "High slots"], ["mid", "Mid slots"], ["low", "Low slots"], ["rig", "Rigs"], ["sub", "Subsystems"], ["drones", "Drone bay"], ["fighters", "Fighters"], ["special", "Special holds"], ["cargo", "Cargo"]];
+  var FITTED = ["high", "mid", "low", "rig", "sub"];
+  function groupOf(flag) {
+    for (const [pattern, group] of SLOT) if (pattern.test(flag)) return group;
+    if (flag === "DroneBay") return "drones";
+    if (/^Fighter(Bay|Tube\d*)$/.test(flag)) return "fighters";
+    if (flag === "Cargo") return "cargo";
+    if (/^Specialized\w*(Hold|Bay)$|^(FleetHangar|ShipHangar|QuafeBay|FrigateEscapeBay|MobileDepotHold)$/.test(flag)) return "special";
+    return null;
+  }
+  var order = (flag) => Number(/(\d+)$/.exec(flag)?.[1] ?? 0);
+  function fitGroups(items, catOf = () => null) {
+    const out = Object.fromEntries(SLOTS.map(([g2]) => [g2, []]));
+    const rows = (items || []).filter((r) => Array.isArray(r) && typeof r[1] === "string" && groupOf(r[1]) !== null).map(([type, flag, qty]) => ({ type, flag, qty: qty || 1, group: groupOf(flag) })).sort((a, b) => order(a.flag) - order(b.flag));
+    for (const r of rows) {
+      const slot = FITTED.includes(r.group);
+      if (slot && catOf(r.type) === "Charge") {
+        const module = out[r.group].find((m) => m.flag === r.flag && !m.charge);
+        if (module) {
+          module.charge = r.type;
+          continue;
+        }
+      }
+      const same = !slot && out[r.group].find((m) => m.type === r.type);
+      if (same) same.qty += r.qty;
+      else out[r.group].push(r);
+    }
+    return out;
+  }
+  function eft({ ship, title, items, nameOf, catOf }) {
+    const g2 = fitGroups(items, catOf), n = (id) => nameOf(id);
+    const slots2 = (key) => g2[key].map((m) => m.charge ? `${n(m.type)}, ${n(m.charge)}` : n(m.type));
+    const stacks = (key) => g2[key].map((m) => `${n(m.type)} x${m.qty}`);
+    const blocks = [slots2("low"), slots2("mid"), slots2("high"), slots2("rig"), slots2("sub"), stacks("drones"), stacks("fighters"), stacks("cargo")].filter((b) => b.length);
+    return `[${n(ship)}, ${title || n(ship)}]
+${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
+  }
+  function fitCounts(items, catOf) {
+    const g2 = fitGroups(items, catOf);
+    return Object.fromEntries(SLOTS.map(([key]) => [key, FITTED.includes(key) ? g2[key].length : g2[key].reduce((t, m) => t + m.qty, 0)]));
+  }
+
+  // jobs.js
+  var jobs_exports = {};
+  __export(jobs_exports, {
+    ACTIVITIES: () => ACTIVITIES,
+    jobState: () => jobState,
+    slotKind: () => slotKind,
+    wingJobs: () => wingJobs
+  });
+  var ACTIVITIES = { 1: "Manufacturing", 3: "TE research", 4: "ME research", 5: "Copying", 7: "Reverse engineering", 8: "Invention", 9: "Reactions", 11: "Reactions" };
+  var SCIENCE = /* @__PURE__ */ new Set([3, 4, 5, 7, 8]);
+  var slotKind = (activity) => SCIENCE.has(activity) ? "science" : "build";
+  function jobState(job, now = Date.now()) {
+    const start = Date.parse(job.start_date), end = Date.parse(job.end_date);
+    const progress = Number.isFinite(start) && end > start ? Math.max(0, Math.min(1, (now - start) / (end - start))) : job.status === "ready" ? 1 : 0;
+    const ready = job.status === "ready" || job.status === "active" && end <= now;
+    return { progress, remaining: Math.max(0, end - now), ready, paused: job.status === "paused", active: job.status === "active" && !ready };
+  }
+  function wingJobs(pilots, now = Date.now()) {
+    const list = pilots.flatMap((p) => (p.jobs || []).filter((j) => ["active", "ready", "paused"].includes(j.status)).map((job) => ({ pilot: p.name, job, activity: ACTIVITIES[job.activity_id] || "Industry", kind: slotKind(job.activity_id), ...jobState(job, now) })));
+    list.sort((a, b) => b.ready - a.ready || a.paused - b.paused || a.remaining - b.remaining);
+    const running = list.filter((x) => x.active);
+    const usage = pilots.map((p) => {
+      const mine = list.filter((x) => x.pilot === p.name && !x.ready), total = p.levels ? slots(p.levels) : null;
+      return { pilot: p.name, build: mine.filter((x) => x.kind === "build").length, science: mine.filter((x) => x.kind === "science").length, total };
+    });
+    return { list, ready: list.filter((x) => x.ready).length, running: running.length, next: running[0] || null, usage };
+  }
+
   // android/js/planners.js
   var universe = null;
   var g = null;
@@ -1428,9 +1508,21 @@
       });
       return out;
     },
-    "route.secShown": ({ sec }) => secShown(sec)
+    "route.secShown": ({ sec }) => secShown(sec),
+    // The Fly feature. A fit's rows are [type_id, location_flag, quantity]; `charges` lists the type ids whose category is
+    // Charge (the app looks them up), and `names` maps type id to name for the EFT text.
+    "fit.groups": ({ items, charges = [] }) => {
+      const c = new Set(charges), catOf = (id) => c.has(id) ? "Charge" : null;
+      return { groups: fitGroups(items, catOf), counts: fitCounts(items, catOf), slots: SLOTS };
+    },
+    "fit.eft": ({ ship, title, items, names = {}, charges = [] }) => {
+      const c = new Set(charges);
+      return eft({ ship, title, items, nameOf: (id) => names[id] ?? `#${id}`, catOf: (id) => c.has(id) ? "Charge" : null });
+    },
+    // Every pilot's industry jobs in one list (ready first), with slot use: pilots are [{name, jobs, skills}], skills as ESI sends them.
+    "jobs.wing": ({ pilots = [], now = Date.now() }) => wingJobs(pilots.map((p) => ({ name: p.name, jobs: p.jobs || [], levels: p.skills?.skills ? skillLevels(p.skills, SLOT_SKILLS) : null })), now)
   };
-  var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports };
+  var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports };
   globalThis.EchelonPlanners = {
     version: 1,
     names: () => JSON.stringify(Object.keys(api)),

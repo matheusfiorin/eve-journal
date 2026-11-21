@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Fly timers: an ongoing countdown and an alert at zero while the app is in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".EchelonApp"
@@ -32,6 +35,15 @@
                 <data android:scheme="${authScheme}" android:host="auth" android:path="/callback" />
             </intent-filter>
         </activity>
+        <!-- Fly timers (fly.timers.TimerService): Android has no timer service type, so it is a declared special use. -->
+        <service
+            android:name=".fly.timers.TimerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started countdown timers for a game session, shown in an ongoing notification with an alert when each ends." />
+        </service>
         <!-- Wing pushes (optional Firebase): a wingmate's timer or ping while the app is closed. -->
         <service
             android:name=".core.push.EchelonMessagingService"

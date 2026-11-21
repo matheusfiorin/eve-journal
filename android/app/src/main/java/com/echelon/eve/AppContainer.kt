@@ -42,7 +42,8 @@ import java.util.concurrent.TimeUnit
  * their own objects as `by lazy` properties in an extension file of theirs, or ask for the pieces below.
  */
 class AppContainer(context: Context, val apiBase: String = BuildConfig.API_BASE) {
-    private val app = context.applicationContext
+    /** The application context, for feature objects that start services or post notifications. */
+    val app: Context = context.applicationContext
     /** Lives as long as the process: refreshes and saves survive a screen going away. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 

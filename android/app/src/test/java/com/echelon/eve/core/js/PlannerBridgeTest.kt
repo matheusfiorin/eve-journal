@@ -26,7 +26,7 @@ class PlannerBridgeTest {
 
     @Test fun exposesEveryPlannerModule() = runTest {
         val modules = bridge.modules()
-        assertEquals(setOf("route", "exploration", "industry", "mining", "market", "hauling", "sell"), modules.keys)
+        assertEquals(setOf("route", "exploration", "industry", "mining", "market", "hauling", "sell", "fit", "jobs"), modules.keys)
         assertTrue("rankSystems" in modules.getValue("exploration"))
         assertTrue("planSell" in modules.getValue("sell"))
         assertTrue("route.path" in bridge.names())

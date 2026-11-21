@@ -12,6 +12,8 @@ import * as mining from '../../mining.js';
 import * as market from '../../market.js';
 import * as hauling from '../../hauling.js';
 import * as sell from '../../sell.js';
+import * as fit from '../../fit.js';
+import * as jobs from '../../jobs.js';
 
 // The gate map is about 1 MB: it is loaded once with universe.load and kept, with its graph.
 let universe = null, g = null;
@@ -28,10 +30,16 @@ const api = {
   // Jumps from one system to every system within max (whatever the security), as {systemId: jumps}.
   'route.within': ({from, max = 5}) => { const d = route.hops(need(), from, max), ids = [...route.systemIndex(need()).keys()], out = {}; ids.forEach((id, i) => { if (d[i] >= 0) out[id] = d[i]; }); return out; },
   'route.secShown': ({sec}) => route.secShown(sec),
+  // The Fly feature. A fit's rows are [type_id, location_flag, quantity]; `charges` lists the type ids whose category is
+  // Charge (the app looks them up), and `names` maps type id to name for the EFT text.
+  'fit.groups': ({items, charges = []}) => { const c = new Set(charges), catOf = id => c.has(id) ? 'Charge' : null; return {groups:fit.fitGroups(items, catOf), counts:fit.fitCounts(items, catOf), slots:fit.SLOTS}; },
+  'fit.eft': ({ship, title, items, names = {}, charges = []}) => { const c = new Set(charges); return fit.eft({ship, title, items, nameOf:id => names[id] ?? `#${id}`, catOf:id => c.has(id) ? 'Charge' : null}); },
+  // Every pilot's industry jobs in one list (ready first), with slot use: pilots are [{name, jobs, skills}], skills as ESI sends them.
+  'jobs.wing': ({pilots = [], now = Date.now()}) => jobs.wingJobs(pilots.map(p => ({name:p.name, jobs:p.jobs || [], levels:p.skills?.skills ? industry.skillLevels(p.skills, industry.SLOT_SKILLS) : null})), now),
 };
 
 // Every planner module stays reachable for the Plan agent's adapters, and keeps esbuild from dropping it.
-const modules = {route, exploration, industry, mining, market, hauling, sell};
+const modules = {route, exploration, industry, mining, market, hauling, sell, fit, jobs};
 
 globalThis.EchelonPlanners = {
   version: 1,

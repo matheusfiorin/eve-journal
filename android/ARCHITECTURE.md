@@ -24,7 +24,8 @@ com.echelon.eve
 │   ├── format     ISK and number formatting (the web's format()), durations, security colours
 │   └── catalog    DesignCatalog: every component on one page (and its screenshot test)
 ├── nav            the shell: Destination, routes, FeatureRegistry, top/bottom bars, hubs, Settings, Welcome
-├── plan, fly, corp  the three feature packages (stubs from the scaffold)
+├── fly          timers (shared with the wing, foreground service), where I am, current fit, skill queue, jobs
+├── plan, corp   feature packages (stubs from the scaffold)
 ```
 
 Rules: `ui` depends on nothing in the app but itself. `core` never imports `ui` or `nav` (`core.data.Prefs` reads
@@ -115,6 +116,22 @@ pilot). It connects while held, folds the room's messages into StateFlows, and r
   `PushRegistrar` registers the token (`POST /api/push/register {token}`) for each connected pilot whenever the
   flying pilot or a session changes. Android 13+ needs `POST_NOTIFICATIONS` at run time: the Fly feature asks for it
   when the first timer starts (it needs it for the ongoing timer notification anyway).
+
+## The Fly feature (fly)
+
+- `FlyFeature` registers five screens: `timers`, `live`, `fit`, `skills`, `jobs`. Each has a stateless screen
+  (`fly/<name>/…Screen.kt`, screenshot-tested in `FlySnapshotTest`) and a small route in `FlyFeature.kt` that reads
+  the container. `FlyLoader` (`FlyData.kt`) turns core data into screen state.
+- `container.fly` (`FlyServices`) holds `EveNames` (public ESI: `universe/names`, and type → group → category to tell
+  charges apart, pinned to the web's compatibility date) and `TimerStore`.
+- Timers: `TimerStore` keeps this phone's own timers in `files/fly-timers.json` and merges the wing room's. The room
+  only stores shared timers (worker/wingroom.js), so a private timer lives on this phone only; turning a timer private
+  sends it once more with `shared = false` so the room drops it. `TimerService` (a `specialUse` foreground service)
+  starts while anything counts down: an ongoing notification with a countdown chronometer, an alert on the
+  `timers_done` channel when each timer ends, and a hold on the wing room. The rules (pause, resume, restart, the
+  board's order) are pure functions in `fly/timers/Timers.kt`, tested in `TimersTest`.
+- Fit and jobs reuse the web's `fit.js` and `jobs.js` through the bridge (`fit.groups`, `fit.eft`, `jobs.wing`). Encode
+  ESI records for the bridge with defaults on (`EchelonJson` leaves them out, and jobs.js reads `status`).
 
 ## Sign-in and sessions (core.auth)
 
