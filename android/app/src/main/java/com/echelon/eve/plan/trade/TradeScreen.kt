@@ -34,6 +34,7 @@ import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SkeletonRows
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
+import com.echelon.eve.ui.components.Tag
 import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.format.Kind
 import com.echelon.eve.ui.format.compactNumber
@@ -63,11 +64,22 @@ data class TradeResult(
     val needOwners: List<Long> = emptyList(), val items: Int = 0,
 )
 
+@Serializable
+data class OrderRow(val state: String, val by: Double? = null, val scope: String? = null, val order: Long, val type: Long, val name: String? = null, val buy: Boolean = false,
+    val price: Double, val remain: Long, val total: Long, val loc: Long, val place: String? = null, val daysLeft: Int = 0)
+@Serializable data class HistoryRow(val type: Long, val name: String? = null, val buy: Boolean = false, val price: Double, val traded: Long, val total: Long, val issued: String = "", val outcome: String)
+@Serializable data class HistorySummary(val filled: Int = 0, val expired: Int = 0, val cancelled: Int = 0, val sold: Double = 0.0, val bought: Double = 0.0)
+@Serializable data class OrderHistory(val summary: HistorySummary = HistorySummary(), val rows: List<HistoryRow> = emptyList())
+@Serializable data class OrdersView(val live: List<OrderRow> = emptyList(), val history: OrderHistory? = null)
+/** "My orders": the view, or why there is none (not connected here, no permission, not synced). [error] is a sync problem shown above the last copy. */
+data class OrdersState(val view: OrdersView? = null, val note: String? = null, val error: String? = null)
+
 data class TradeSettings(val from: Long = 30000142, val maxJumps: Int = 5, val cargo: String = "", val budget: String = "", val list: String = "haul", val sort: String = "")
 
 data class TradeUi(
     val pilotName: String, val settings: TradeSettings, val starts: List<Pair<Long, String>>, val result: TradeResult? = null, val problem: String? = null,
     val open: Int? = null, val canSend: Boolean = false, val sent: String? = null, val names: Map<Long, String> = emptyMap(), val regions: Int = 0,
+    val orders: OrdersState? = null,
 )
 
 class TradeActions(val settings: (TradeSettings) -> Unit = {}, val open: (Int?) -> Unit = {}, val send: (List<Long>) -> Unit = {}, val retry: () -> Unit = {})
@@ -228,6 +240,46 @@ private fun Results(ui: TradeUi, r: TradeResult, actions: TradeActions) {
         }
     }
     ui.sent?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
+    ui.orders?.let { MyOrders(ui.pilotName, it, name) }
+}
+
+/** ui/ordersview.js: the pilot's open orders checked against the scan, and how the last 30 days went. */
+@Composable
+private fun MyOrders(pilotName: String, o: OrdersState, name: (Long, String?) -> String) {
+    val c = Echelon.colors
+    SectionHeader("My orders", subtitle = "$pilotName’s open market orders, checked against the last market scan")
+    val v = o.view
+    if (v == null) { EchelonCard { Text(o.note ?: "Not synced yet.", style = MaterialTheme.typography.bodySmall, color = c.textMuted) }; return }
+    o.error?.let { Text("$it Showing the previous orders.", style = MaterialTheme.typography.bodySmall, color = c.danger) }
+    if (v.live.isEmpty()) EchelonCard { Text("No open market orders. Orders you place in game show up here after the next sync.", style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
+    else EchelonCard(padding = false) {
+        v.live.forEachIndexed { i, r ->
+            if (i > 0) Hairline()
+            ListRow(name(r.type, r.name), supporting = "${if (r.buy) "Buy" else "Sell"} · ${r.place ?: "a structure"} · ${if (r.daysLeft > 0) plural(r.daysLeft, "day") + " left" else "expires today"}",
+                meta = when (r.state) {
+                    "outbid" -> "Outbid by ${format(r.by ?: 0.0, Kind.Isk)}${if (r.scope == "region") " (a better price elsewhere in the region)" else ""}"
+                    "best" -> "Best price"
+                    else -> "Not checked: not in the market scan"
+                },
+                trailing = { Column(horizontalAlignment = Alignment.End) {
+                    Text(format(r.price, Kind.Isk), style = Echelon.type.num, color = if (r.state == "outbid") c.danger else c.text)
+                    Text("${"%,d".format(r.remain)} of ${"%,d".format(r.total)} left", style = Echelon.type.label, color = c.textMuted)
+                } })
+        }
+    }
+    v.history?.let { h ->
+        val s = h.summary
+        val parts = listOfNotNull(if (s.filled > 0) "${s.filled} filled" else null, if (s.expired > 0) "${s.expired} expired" else null, if (s.cancelled > 0) "${s.cancelled} cancelled" else null)
+        val money = listOfNotNull(if (s.sold > 0) "${format(s.sold, Kind.Isk)} sold" else null, if (s.bought > 0) "${format(s.bought, Kind.Isk)} bought" else null)
+        Text("Last 30 days: ${if (parts.isEmpty()) "nothing filled or expired" else parts.joinToString() + if (money.isNotEmpty()) " · " + money.joinToString() else ""}", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+        if (h.rows.isNotEmpty()) EchelonCard(padding = false) {
+            h.rows.forEachIndexed { i, r ->
+                if (i > 0) Hairline()
+                ListRow(name(r.type, r.name), supporting = "${if (r.buy) "Buy" else "Sell"} · ${r.issued.take(10)} · ${"%,d".format(r.traded)} of ${"%,d".format(r.total)} traded",
+                    trailing = { Tag(r.outcome.replaceFirstChar { it.uppercase() }) })
+            }
+        }
+    }
 }
 
 @Composable

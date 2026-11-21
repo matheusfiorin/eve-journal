@@ -50,7 +50,7 @@ class PlanEngine(private val c: AppContainer) {
         val text = state.universeJson ?: return null
         val version = data.universe?.version ?: data.snapshot.universeVersion ?: "inline"
         if (version != universeVersion) { c.planners.loadUniverse(text); universeVersion = version; metaStamp = null }
-        val stamp = "$version:${data.snapshot.meta?.updatedAt ?: 0}"
+        val stamp = "$version:${data.snapshot.meta?.updatedAt ?: 0}:${data.snapshot.regions.sumOf { it.updatedAt }}"
         if (stamp != metaStamp) {
             c.planners.callRaw("market.meta", "{\"meta\":${data.metaData},\"stamp\":${JsonPrimitive(stamp)}}")
             // The scanned regions' order book (prices for Mine, Build, Trade and Sell), rebuilt with the same stamp.

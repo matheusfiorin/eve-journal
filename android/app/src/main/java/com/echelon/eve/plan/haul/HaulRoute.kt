@@ -3,6 +3,7 @@ package com.echelon.eve.plan.haul
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -99,11 +100,11 @@ fun HaulRoute(ctx: ScreenContext) {
     var form by remember(pilot) { mutableStateOf<HaulForm?>(null) }
     var touched by remember { mutableStateOf(false) }
     var ui by remember(pilot) { mutableStateOf<HaulUi?>(null) }
-    var planTick by remember { mutableStateOf(0) }
+    var planTick by remember { mutableIntStateOf(0) }
 
     // The saved plan (synced with the website), or here → Amarr the first time.
     LaunchedEffect(pilot, market.data != null) {
-        if (form != null) return@LaunchedEffect
+        if (form != null || market.data == null) return@LaunchedEffect
         val saved = c.plan.haul.sync(pilot) ?: c.plan.haul.read(pilot)
         val here = locationOf(c.pilots.state(pilot), c.wing.of(pilot))?.solarSystemId?.let { market.data?.systems?.get(it)?.name }
         form = HaulForm(stops = if (saved.stops.size >= 2) saved.stops else listOf(here ?: "Jita", "Amarr"), value = saved.value, volume = saved.volume, avoid = saved.avoid)
@@ -118,7 +119,8 @@ fun HaulRoute(ctx: ScreenContext) {
         val data = market.data
         val notReady = c.plan.notReady(data, market.universeJson)
         if (notReady != null || data == null) { ui = base.copy(problem = notReady, result = null); return@LaunchedEffect }
-        c.plan.haul.save(pilot, HaulPlan(f.stops, f.value, f.volume, f.avoid), touched)
+        // The web reads value and volume with Number(): save plain numbers ("1.5b" goes as 1500000000), at most 30 characters.
+        c.plan.haul.save(pilot, HaulPlan(f.stops.take(50).map { it.take(100) }, plainNumber(parseIsk(f.value)?.toDouble()), plainNumber(f.volume.replace(",", "").toDoubleOrNull()), f.avoid.take(2000)), touched)
         val (stops, unknown) = resolve(data, f.stops)
         val (avoid, _) = resolve(data, f.avoid.split(','))
         if (unknown.isNotEmpty() || stops.size < 2) { ui = base.copy(problem = if (unknown.isNotEmpty()) "Unknown system: ${unknown.joinToString()}" else "Add at least two stops.", result = null); return@LaunchedEffect }
@@ -136,6 +138,14 @@ fun HaulRoute(ctx: ScreenContext) {
     }
 
     HaulScreen(base, now, HaulActions(
+        share = {
+            val m = base.result?.modes?.get(base.mode)
+            if (m != null && m.unreachable == null) {
+                c.wingChannel.sharePlan(pilot, com.echelon.eve.core.wing.SharedPlan("haul", m.stops.joinToString(" → ") { it.name }.take(80),
+                    "${m.jumps} jumps, ${risk(1 - m.survival)} risk, ${base.result.hull?.name ?: ""}".trim().trimEnd(','), m.route))
+                ui = base.copy(sent = "Shared with ${pilot.wingmate.displayName}.")
+            }
+        },
         form = { form = it; touched = true },
         plan = { planTick++ },
         mode = { m -> ui = base.copy(mode = m) },
@@ -149,4 +159,11 @@ fun HaulRoute(ctx: ScreenContext) {
             }
         },
     ))
+}
+
+/** A number as the web's Number() reads it back, or "" for none. */
+internal fun plainNumber(v: Double?): String = when {
+    v == null || !v.isFinite() || v < 0 -> ""
+    v == Math.floor(v) && v < 1e15 -> v.toLong().toString()
+    else -> v.toBigDecimal().stripTrailingZeros().toPlainString().take(30)
 }

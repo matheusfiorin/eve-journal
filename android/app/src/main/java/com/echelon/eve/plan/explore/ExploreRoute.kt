@@ -3,6 +3,7 @@ package com.echelon.eve.plan.explore
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -83,7 +84,7 @@ fun ExploreRoute(ctx: ScreenContext) {
     var shortcutsProblem by remember { mutableStateOf<String?>(null) }
     var open by remember { mutableStateOf<Long?>(null) }
     var sent by remember { mutableStateOf<String?>(null) }
-    var tries by remember { mutableStateOf(0) }
+    var tries by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     // Marks sync with the website when the screen opens.
@@ -92,8 +93,8 @@ fun ExploreRoute(ctx: ScreenContext) {
         problem = c.plan.notReady(market.data, market.universeJson)
         if (problem != null || settings.bands.isEmpty()) return@LaunchedEffect
         val r = runCatching { c.exploreRank(pilot, settings, System.currentTimeMillis()) }
-        r.onSuccess { if (it.error == null) result = it else problem = if (it.error == "unknown-system") "That start system is not on the map." else "The map is still loading." }
-            .onFailure { problem = it.message ?: "The planner failed." }
+        r.onSuccess { if (it.error == null) { result = it; problem = null } else problem = if (it.error == "unknown-system") "That start system is not on the map." else "The map is still loading." }
+            .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it; problem = it.message ?: "The planner failed." }
     }
     LaunchedEffect(settings.from, market.data) {
         val bridge = c.plan.ready() ?: return@LaunchedEffect
@@ -123,6 +124,13 @@ fun ExploreRoute(ctx: ScreenContext) {
             sendLoop = { result?.loop?.let { l -> send(if (l.route.size - 1 <= 40) l.route.drop(1) else l.stops.map { it.id } + settings.from) } },
             sendTo = { id -> send(listOf(id)) },
             retry = { tries++ },
+            share = {
+                result?.loop?.let { l ->
+                    c.wingChannel.sharePlan(pilot, com.echelon.eve.core.wing.SharedPlan("explore", "Exploration loop from ${result?.start?.name ?: "here"}".take(80),
+                        "${l.stops.size} systems, ${l.jumps} jumps, about ${l.minutes} min: ${l.stops.joinToString { it.name }}", l.route))
+                    sent = "Shared with ${pilot.wingmate.displayName}."
+                }
+            },
         ),
         canSend = canSend,
     )

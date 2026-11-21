@@ -3,6 +3,7 @@ package com.echelon.eve.plan.mine
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,12 +78,12 @@ fun MineRoute(ctx: ScreenContext) {
     var problem by remember { mutableStateOf<String?>(null) }
     var open by remember { mutableStateOf<Long?>(null) }
     var sent by remember { mutableStateOf<String?>(null) }
-    var tries by remember { mutableStateOf(0) }
+    var tries by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(pilot, settings, market.data, pilots, wing, tries) {
         problem = c.plan.notReady(market.data, market.universeJson)
         if (problem != null) return@LaunchedEffect
-        runCatching { c.minePlan(pilot, settings) }.onSuccess { result = it; problem = if (it == null) "The map is still loading." else null }.onFailure { problem = it.message ?: "The planner failed." }
+        runCatching { c.minePlan(pilot, settings) }.onSuccess { result = it; problem = if (it == null) "The map is still loading." else null }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it; problem = it.message ?: "The planner failed." }
     }
     MineScreen(MineUi(pilot, settings, starts, result, problem, open, c.sessions.has(pilot.id), sent), MineActions(
         settings = { settings = it; sent = null },

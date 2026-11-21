@@ -85,4 +85,12 @@ class FlySnapshotTest {
     @Test fun fitMissing() = paparazzi.echelon { FitScreen(FitUi(Pilot.Decxus, note = "Decxus shares with the wing, but not their fit."), Pilot.Fiofka, {}, {}, scroll = false) }
     @Test fun skills() = paparazzi.echelon { SkillQueueScreen(FlyFixtures.skills, now, {}, scroll = false) }
     @Test fun jobs() = paparazzi.echelon { JobsScreen(FlyFixtures.jobs, now, scroll = false) }
+    @Test fun wing() = paparazzi.echelon {
+        val pings = listOf(com.echelon.eve.core.wing.WingEvent(Pilot.Decxus, now - 4 * MIN, com.echelon.eve.core.wing.WingPing("omw", system = 30000144), "p1"),
+            com.echelon.eve.core.wing.WingEvent(Pilot.Fiofka, now - 9 * MIN, com.echelon.eve.core.wing.WingPing("custom", "Gas site in Tama, bring a scoop"), "p2"))
+        val plans = listOf(com.echelon.eve.core.wing.WingEvent(Pilot.Decxus, now - 30 * MIN, com.echelon.eve.core.wing.SharedPlan("haul", "Jita → Amarr", "45 jumps, 0.8% risk, Deep space transport", listOf(30000142, 30000144, 30003504, 30002187)), "s1"))
+        com.echelon.eve.fly.wing.WingScreen(com.echelon.eve.fly.wing.WingUi(Pilot.Fiofka, com.echelon.eve.core.wing.WingChannel.Status.Connected,
+            mapOf(Pilot.Decxus.id to com.echelon.eve.core.wing.Presence(Pilot.Decxus.id, true, 2)), com.echelon.eve.fly.wing.feed(pings, plans), here = "Perimeter",
+            systemName = mapOf(30000142L to "Jita", 30000144L to "Perimeter", 30003504L to "Niarja", 30002187L to "Amarr")::get, canSend = true), now, com.echelon.eve.fly.wing.WingActions(), scroll = false)
+    }
 }

@@ -66,6 +66,8 @@ interface Feature {
     fun install(registry: FeatureRegistry)
     /** Extra typed routes (a detail screen with its own arguments). Most features need none. */
     fun graph(builder: NavGraphBuilder, nav: NavController) {}
+    /** Work that must start with the app, not with the feature's first screen (Fly's timers resume their service). */
+    fun start(container: com.echelon.eve.AppContainer) {}
 }
 
 /** Holds every feature's sub-screens. Built once at start-up from [Features.all]; read-only afterwards. */

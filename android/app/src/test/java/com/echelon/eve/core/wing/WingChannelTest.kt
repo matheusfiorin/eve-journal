@@ -168,6 +168,16 @@ class WingChannelTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test fun aTimerMadePrivateLeavesTheRoomsCopy() {
+        // Nobody signed in: sends queue, but the local copy follows the rule the room keeps (it drops private timers).
+        val ch = channel(token = null)
+        val t = WingTimer("t1", startedAt = 1, durationMs = 60_000, owner = Pilot.Fiofka.id)
+        ch.upsertTimer(t)
+        assertTrue("t1" in ch.timers.value)
+        ch.upsertTimer(t.copy(shared = false))
+        assertFalse("t1" in ch.timers.value)
+    }
+
     @Test fun codecRoundTripsAndSkipsWhatItDoesNotKnow() {
         val m = WingMessage.TimerUpsert("i", FIO, NOW, WingTimer("a", "gas", "Gas", NOW, 1000, pausedAt = NOW + 10, owner = FIO))
         assertEquals(m, WingCodec.decode(WingCodec.encode(m)))

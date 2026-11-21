@@ -56,6 +56,11 @@ class HaulTest {
         assertEquals("need-two-stops", plan("""{"stops":[30000142]}""").error)
     }
 
+    @Test fun savedNumbersReadBackWithTheWebsNumber() {
+        assertEquals("1500000000", com.echelon.eve.plan.haul.plainNumber(1.5e9)); assertEquals("12.5", com.echelon.eve.plan.haul.plainNumber(12.5))
+        assertEquals("", com.echelon.eve.plan.haul.plainNumber(null)); assertEquals("", com.echelon.eve.plan.haul.plainNumber(-3.0))
+    }
+
     @Test fun riskWordsAndMergeMatchTheWeb() {
         assertEquals("<0.1%", risk(0.0004)); assertEquals("0.8%", risk(0.0078)); assertEquals("12%", risk(0.1234))
         assertEquals(Tone.Ok, level(0.004)); assertEquals(Tone.Warn, level(0.02)); assertEquals(Tone.Danger, level(0.2))

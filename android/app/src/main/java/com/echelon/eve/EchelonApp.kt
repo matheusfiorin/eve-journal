@@ -12,6 +12,7 @@ class EchelonApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         container.sync.refresh()
+        com.echelon.eve.nav.Features.all.forEach { it.start(container) }
     }
 
     // Coil shares the app's OkHttp client, so portraits and type icons use its disk cache and connection pool.

@@ -3,6 +3,7 @@ package com.echelon.eve.plan.trade
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +65,21 @@ suspend fun AppContainer.tradePlan(pilot: Pilot, s: TradeSettings): TradeResult?
     return r
 }
 
+/** The flying pilot's orders through orders.view (ui/ordersview.js), or why they can't be shown. */
+suspend fun AppContainer.myOrders(pilot: Pilot): OrdersState {
+    val own = pilots.state(pilot).private ?: return OrdersState(note = "${pilot.displayName}’s orders are private. Connect ${pilot.displayName} on this phone to see them.")
+    val orders = own.op("orders") ?: return OrdersState(note = "Not synced yet. Pull down on the Plan hub to sync.")
+    if (orders.permission == false) return OrdersState(note = "${pilot.displayName} has not allowed Echelon to read market orders. Reconnect them in Settings to grant it.")
+    val live = orders.value as? JsonArray ?: return OrdersState(note = orders.error ?: "Not synced yet. Pull down on the Plan hub to sync.")
+    val bridge = plan.ready() ?: return OrdersState(note = "The market has not loaded yet.")
+    val history = own.op("orderHistory")?.takeIf { it.permission != false }?.value as? JsonArray
+    val view = EchelonJson.decodeFromJsonElement(OrdersView.serializer(), bridge.call("orders.view", buildJsonObject {
+        put("orders", live); history?.let { put("history", it) }; put("now", System.currentTimeMillis())
+    }))
+    runCatching { eveNames.resolve(view.live.filter { it.name == null }.map { it.type } + view.history?.rows.orEmpty().filter { it.name == null }.map { it.type }) }
+    return OrdersState(view, error = orders.error)
+}
+
 @Composable
 fun TradeRoute(ctx: ScreenContext) {
     val c = LocalAppContainer.current
@@ -82,7 +98,8 @@ fun TradeRoute(ctx: ScreenContext) {
     var problem by remember { mutableStateOf<String?>(null) }
     var open by remember { mutableStateOf<Int?>(null) }
     var sent by remember { mutableStateOf<String?>(null) }
-    var tries by remember { mutableStateOf(0) }
+    var tries by remember { mutableIntStateOf(0) }
+    var orders by remember(pilot) { mutableStateOf<OrdersState?>(null) }
     val scope = rememberCoroutineScope()
     // Cargo from the current ship and budget from the wallet, as the web fills them until someone types.
     LaunchedEffect(pilot) {
@@ -98,9 +115,10 @@ fun TradeRoute(ctx: ScreenContext) {
         if (settings == null) return@LaunchedEffect
         problem = c.plan.notReady(market.data, market.universeJson)
         if (problem != null) return@LaunchedEffect
-        runCatching { c.tradePlan(pilot, s) }.onSuccess { result = it; problem = if (it == null) "The map is still loading." else null }.onFailure { problem = it.message ?: "The planner failed." }
+        runCatching { c.tradePlan(pilot, s) }.onSuccess { result = it; problem = if (it == null) "The map is still loading." else null }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it; problem = it.message ?: "The planner failed." }
     }
-    TradeScreen(TradeUi(pilot.displayName, s, starts, result, problem, open, c.sessions.has(pilot.id), sent, names, market.data?.snapshot?.regions?.size ?: 0), TradeActions(
+    LaunchedEffect(pilot, pilots, market.data) { orders = runCatching { c.myOrders(pilot) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it; OrdersState(note = it.message) } }
+    TradeScreen(TradeUi(pilot.displayName, s, starts, result, problem, open, c.sessions.has(pilot.id), sent, names, market.data?.snapshot?.regions?.size ?: 0, orders), TradeActions(
         settings = { settings = it; sent = null },
         open = { open = it },
         send = { ids -> scope.launch { sent = "Sending…"; sent = c.sendWaypoints(pilot, ids).fold({ "Autopilot set: ${plural(it, "waypoint")}." }, { it.message ?: "EVE did not take the route." }) } },

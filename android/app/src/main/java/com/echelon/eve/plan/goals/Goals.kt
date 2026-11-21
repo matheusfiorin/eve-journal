@@ -71,9 +71,9 @@ object GoalRules {
     fun problem(f: GoalFields): String? = when {
         f.title.isBlank() -> "Give the goal a title."
         f.title.length > 160 -> "Keep the title under 160 characters."
-        f.due.isNotEmpty() && !DATE.matches(f.due) -> "Write the target date as YYYY-MM-DD."
-        f.target.isNotEmpty() && f.target.replace(",", "").toDoubleOrNull() == null -> "The target must be a number."
-        f.result.isNotEmpty() && f.result.replace(",", "").toDoubleOrNull() == null -> "The result must be a number."
+        f.due.isNotEmpty() && (!DATE.matches(f.due) || runCatching { java.time.LocalDate.parse(f.due) }.isFailure) -> "Write the target date as YYYY-MM-DD."
+        f.target.isNotEmpty() && f.target.replace(",", "").toDoubleOrNull().let { it == null || Math.abs(it) >= 1e15 } -> "The target must be a number under a quadrillion ISK."
+        f.result.isNotEmpty() && f.result.replace(",", "").toDoubleOrNull().let { it == null || Math.abs(it) >= 1e15 } -> "The result must be a number under a quadrillion ISK."
         f.steps.lines().count { it.isNotBlank() } > 30 -> "Use at most 30 steps."
         f.steps.lines().any { it.trim().length > 160 } -> "Keep each step under 160 characters."
         f.notes.length > 4000 -> "Keep the notes under 4,000 characters."

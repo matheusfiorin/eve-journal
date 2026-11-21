@@ -1478,6 +1478,53 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     return { list, ready: list.filter((x) => x.ready).length, running: running.length, next: running[0] || null, usage };
   }
 
+  // orders.js
+  var orders_exports = {};
+  __export(orders_exports, {
+    checkOrder: () => checkOrder,
+    contractDue: () => contractDue,
+    daysLeft: () => daysLeft,
+    historySummary: () => historySummary,
+    outcome: () => outcome
+  });
+  var EPS = 5e-3;
+  function checkOrder(order2, regions) {
+    const t = regions?.find((r) => r.region === order2.region_id)?.data?.types?.[order2.type_id];
+    if (!t) return { state: "unchecked" };
+    const list = order2.is_buy_order ? t.b : t.s;
+    if (!Array.isArray(list)) return { state: "unchecked" };
+    const gap = (price) => order2.is_buy_order ? price - order2.price : order2.price - price;
+    const here = list.find((row) => row[0] === order2.location_id);
+    if (here) return gap(here[1]) > EPS ? { state: "outbid", by: gap(here[1]), scope: "station" } : { state: "best" };
+    const top = list.reduce((best, row) => best === null || gap(row[1]) > gap(best) ? row[1] : best, null);
+    return top !== null && gap(top) > EPS ? { state: "outbid", by: gap(top), scope: "region" } : { state: "best" };
+  }
+  var DAY = 864e5;
+  var daysLeft = (order2, now = Date.now()) => Math.max(0, Math.ceil((Date.parse(order2.issued) + order2.duration * DAY - now) / DAY));
+  var outcome = (order2) => order2.state === "cancelled" ? "cancelled" : order2.volume_remain === 0 ? "filled" : "expired";
+  function historySummary(list, now = Date.now(), days = 30) {
+    const since = now - days * DAY, out4 = { filled: 0, expired: 0, cancelled: 0, sold: 0, bought: 0 };
+    for (const o of list || []) {
+      const issued = Date.parse(o.issued), end = issued + o.duration * DAY;
+      if (!(issued >= since || end >= since && end <= now)) continue;
+      out4[outcome(o)]++;
+      const value = (o.volume_total - o.volume_remain) * o.price;
+      if (value > 0) out4[o.is_buy_order ? "bought" : "sold"] += value;
+    }
+    return out4;
+  }
+  function contractDue(c) {
+    if (c.status === "outstanding") {
+      const end = Date.parse(c.date_expired);
+      return Number.isFinite(end) ? end : null;
+    }
+    if (c.status === "in_progress" && c.type === "courier") {
+      const end = Date.parse(c.date_accepted) + c.days_to_complete * DAY;
+      return Number.isFinite(end) ? end : null;
+    }
+    return null;
+  }
+
   // android/js/plan/explore.js
   var out = (s) => s && { id: s.id, name: s.name, sec: s.sec, region: s.region };
   var LABEL = {
@@ -1943,7 +1990,40 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
   // android/js/plan/trade.js
   var HUBS = [[30000142, "Jita"], [30002187, "Amarr"], [30002659, "Dodixie"], [30002510, "Rens"], [30002053, "Hek"]];
   var isNpcStation2 = (id) => id >= 6e7 && id < 64e6;
-  var api5 = ({ graph: graph2, meta: meta2, book: book2 }) => ({
+  var api5 = ({ graph: graph2, meta: meta2, book: book2, regions }) => ({
+    /**
+     * The pilot's market orders (ui/ordersview.js): live ones checked against the market scan (best, or outbid by how much,
+     * at the station or elsewhere in the region) and the last 30 days of history. orders/history: ESI rows as the Worker keeps them.
+     */
+    "orders.view": ({ orders: orders3 = [], history = null, now = Date.now() }) => {
+      const b = book2(), types = meta2().types || {};
+      const place = (loc) => b.stations.get(loc)?.name ?? null;
+      return {
+        live: orders3.map((o) => ({
+          ...checkOrder(o, regions()),
+          order: o.order_id,
+          type: o.type_id,
+          name: types[o.type_id]?.n ?? null,
+          buy: Boolean(o.is_buy_order),
+          price: o.price,
+          remain: o.volume_remain,
+          total: o.volume_total,
+          loc: o.location_id,
+          place: place(o.location_id),
+          daysLeft: daysLeft(o, now)
+        })),
+        history: Array.isArray(history) ? { summary: historySummary(history, now), rows: history.slice(0, 20).map((o) => ({
+          type: o.type_id,
+          name: types[o.type_id]?.n ?? null,
+          buy: Boolean(o.is_buy_order),
+          price: o.price,
+          traded: o.volume_total - o.volume_remain,
+          total: o.volume_total,
+          issued: o.issued,
+          outcome: outcome(o)
+        })) } : null
+      };
+    },
     /**
      * {from, maxJumps, cargo, budget?, me:{skills, standings}, owners:{loc:[corp, faction]}}
      * → {ready, hauls, spreads, builds, tooDear, index, fees, brokers, needOwners, regions, items}
@@ -2195,6 +2275,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
   var g = null;
   var meta = null;
   var orders2 = null;
+  var rawRegions = [];
   var need = () => {
     if (!g) throw new Error("Load the universe first (universe.load).");
     return g;
@@ -2208,7 +2289,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     if (!orders2) throw new Error("Load the order book first (market.book).");
     return orders2;
   };
-  var ctx = { graph: need, meta: needMeta, book: needBook };
+  var ctx = { graph: need, meta: needMeta, book: needBook, regions: () => rawRegions };
   var api7 = {
     "universe.load": ({ universe: u }) => {
       universe = u;
@@ -2223,6 +2304,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
       return { stamp };
     },
     "market.book": ({ regions = [], stamp = null }) => {
+      rawRegions = regions;
       orders2 = book(regions);
       orders2.__stamp = stamp;
       return { items: orders2.items.size, stations: orders2.stations.size };
@@ -2263,7 +2345,7 @@ ${blocks.map((b) => b.join("\n")).join("\n\n")}`.trimEnd();
     ...api5(ctx),
     ...api6(ctx)
   };
-  var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports };
+  var modules = { route: route_exports, exploration: exploration_exports, industry: industry_exports, mining: mining_exports, market: market_exports, hauling: hauling_exports, sell: sell_exports, fit: fit_exports, jobs: jobs_exports, orders: orders_exports };
   globalThis.EchelonPlanners = {
     version: 1,
     names: () => JSON.stringify(Object.keys(api7)),

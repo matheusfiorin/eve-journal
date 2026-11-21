@@ -7,11 +7,26 @@ import {isAlpha} from '../../../industry.js';
 import {leg} from '../../../route.js';
 import {feeBook, brokerFee} from '../../../standings.js';
 import {esiLists} from './build.js';
+import {checkOrder, daysLeft, outcome, historySummary} from '../../../orders.js';
 
 const HUBS = [[30000142, 'Jita'], [30002187, 'Amarr'], [30002659, 'Dodixie'], [30002510, 'Rens'], [30002053, 'Hek']];
 const isNpcStation = id => id >= 60000000 && id < 64000000;
 
-export const api = ({graph, meta, book}) => ({
+export const api = ({graph, meta, book, regions}) => ({
+  /**
+   * The pilot's market orders (ui/ordersview.js): live ones checked against the market scan (best, or outbid by how much,
+   * at the station or elsewhere in the region) and the last 30 days of history. orders/history: ESI rows as the Worker keeps them.
+   */
+  'orders.view': ({orders = [], history = null, now = Date.now()}) => {
+    const b = book(), types = meta().types || {};
+    const place = loc => b.stations.get(loc)?.name ?? null;
+    return {
+      live:orders.map(o => ({...checkOrder(o, regions()), order:o.order_id, type:o.type_id, name:types[o.type_id]?.n ?? null, buy:Boolean(o.is_buy_order), price:o.price,
+        remain:o.volume_remain, total:o.volume_total, loc:o.location_id, place:place(o.location_id), daysLeft:daysLeft(o, now)})),
+      history:Array.isArray(history) ? {summary:historySummary(history, now), rows:history.slice(0, 20).map(o => ({type:o.type_id, name:types[o.type_id]?.n ?? null, buy:Boolean(o.is_buy_order),
+        price:o.price, traded:o.volume_total - o.volume_remain, total:o.volume_total, issued:o.issued, outcome:outcome(o)}))} : null,
+    };
+  },
   /**
    * {from, maxJumps, cargo, budget?, me:{skills, standings}, owners:{loc:[corp, faction]}}
    * → {ready, hauls, spreads, builds, tooDear, index, fees, brokers, needOwners, regions, items}

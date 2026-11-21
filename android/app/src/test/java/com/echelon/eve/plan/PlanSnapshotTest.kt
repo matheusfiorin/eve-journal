@@ -144,7 +144,11 @@ class PlanSnapshotTest {
             names = mapOf(2456L to "Hobgoblin I Blueprint", 60003760L to "Jita IV - Moon 4 - Caldari Navy Assembly Plant"), mateName = "Decxus"), com.echelon.eve.plan.build.BuildActions(), scroll = false)
     }
     @Test fun trade() = paparazzi.echelon {
-        com.echelon.eve.plan.trade.TradeScreen(com.echelon.eve.plan.trade.TradeUi("Fiofka", com.echelon.eve.plan.trade.TradeSettings(cargo = "5000", budget = "50000000"), PlanFixtures.starts, PlanFixtures.trade, open = 0, canSend = true),
+        com.echelon.eve.plan.trade.TradeScreen(com.echelon.eve.plan.trade.TradeUi("Fiofka", com.echelon.eve.plan.trade.TradeSettings(cargo = "5000", budget = "50000000"), PlanFixtures.starts, PlanFixtures.trade, open = 0, canSend = true,
+            orders = com.echelon.eve.plan.trade.OrdersState(com.echelon.eve.plan.trade.OrdersView(listOf(
+                com.echelon.eve.plan.trade.OrderRow("outbid", 0.5, "station", 1, 34, "Tritanium", false, 5.5, 500, 1000, 1, "Jita IV - Moon 4 - Caldari Navy Assembly Plant", 27),
+                com.echelon.eve.plan.trade.OrderRow("best", null, null, 2, 35, "Pyerite", true, 9.1, 10_000, 10_000, 1, "Jita IV - Moon 4 - Caldari Navy Assembly Plant", 89)),
+                com.echelon.eve.plan.trade.OrderHistory(com.echelon.eve.plan.trade.HistorySummary(filled = 3, expired = 1, sold = 12_400_000.0), emptyList())))),
             com.echelon.eve.plan.trade.TradeActions(), scroll = false)
     }
     @Test fun sell() = paparazzi.echelon {

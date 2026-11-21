@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,7 +61,10 @@ import com.echelon.eve.ui.theme.Spacing
 /** FLY: help during play. Timers (shared with the wingmate), where you are, your fit, the skill queue and jobs. */
 object FlyFeature : Feature {
     override val destination = Destination.Fly
+    /** Timers outlive the process: the store reads them back and restarts the service while one still counts down. */
+    override fun start(container: com.echelon.eve.AppContainer) { container.fly.timers }
     override fun install(registry: FeatureRegistry) {
+        registry.register(destination, SubScreen("wing", "Wing", "Calls, shared plans and who is online", EchelonIcons.Wing, 5) { com.echelon.eve.fly.wing.WingRoute(it) })
         registry.register(destination, SubScreen("timers", "Timers", "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, 10, card = { ctx, onOpen -> TimersCard(ctx, onOpen) }) { TimersRoute(it) })
         registry.register(destination, SubScreen("live", "Where I am", "Live location and ship from EVE", EchelonIcons.Route, 20) { LiveRoute(it) })
         registry.register(destination, SubScreen("fit", "Current fit", "Copy as EFT", EchelonIcons.Fly, 30) { FitRoute(it) })
@@ -124,7 +128,7 @@ private fun LiveRoute(ctx: ScreenContext) {
     val container = LocalAppContainer.current
     val now = rememberNow(periodMillis = 30_000)
     var ui by remember(ctx.pilot) { mutableStateOf(LiveUi(loading = container != null)) }
-    var reads by remember { mutableStateOf(0) }
+    var reads by remember { mutableIntStateOf(0) }
     LaunchedEffect(ctx.pilot, reads) {
         val pilot = ctx.pilot ?: return@LaunchedEffect
         container ?: return@LaunchedEffect

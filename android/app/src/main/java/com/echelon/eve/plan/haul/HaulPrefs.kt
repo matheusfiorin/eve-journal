@@ -73,7 +73,8 @@ class HaulPrefs(api: EchelonApi, private val sessions: SessionStore, private val
                 val there = copy.record?.let { runCatching { json.decodeFromJsonElement(HaulPlan.serializer(), it) }.getOrNull() }
                 val merged = HaulPlan.merge(here, there)
                 if (merged == there) { store(p, merged, copy.rev); return@withLock merged }
-                if (merged.updatedAt == 0L && merged.stops.isEmpty()) return@withLock merged
+                // Like the web (syncplan.js prefStep): a plan nobody changed is never sent, so defaults can't overwrite another device's plan.
+                if (merged.updatedAt == 0L) return@withLock merged
                 val record = JsonObject(mapOf("id" to kotlinx.serialization.json.JsonPrimitive(id)) + json.encodeToJsonElement(merged).jsonObject)
                 when (val r = journal.push(token, id, copy.rev, record)) {
                     is PrefJournal.Push.Applied -> { store(p, merged, r.rev); return@withLock merged }

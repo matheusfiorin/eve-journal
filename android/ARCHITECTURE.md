@@ -24,9 +24,9 @@ com.echelon.eve
 │   ├── format     ISK and number formatting (the web's format()), durations, security colours
 │   └── catalog    DesignCatalog: every component on one page (and its screenshot test)
 ├── nav            the shell: Destination, routes, FeatureRegistry, top/bottom bars, hubs, Settings, Welcome
-├── fly          timers (shared with the wing, foreground service), where I am, current fit, skill queue, jobs
+├── fly          wing (calls, shared plans, presence), timers (foreground service), where I am, fit, skills, jobs
 ├── plan         explore, build, mine, trade, sell, haul routes, wing goals (the web's planners via the bridge)
-├── corp         feature package (stubs from the scaffold)
+├── corp         starbases, structures, wallet, members, corp jobs, customs offices, assets (GET /api/corp, /api/assets)
 ```
 
 Rules: `ui` depends on nothing in the app but itself. `core` never imports `ui` or `nav` (`core.data.Prefs` reads
@@ -153,6 +153,21 @@ pilot). It connects while held, folds the room's messages into StateFlows, and r
 - Tests: every adapter is pinned to what Node prints for the same call on `src/test/resources/plan-fixture.json`
   (the web's e2e market with times pinned; regenerate with `node scripts/android-plan-fixture.mjs`), plus a
   screenshot golden per screen in `PlanSnapshotTest`.
+
+## The Corp feature (corp)
+
+- `CorpRepository` (`container.corp`) reads `GET /api/corp` with the flying pilot's session (else the wingmate's) and
+  each pilot's own `GET /api/assets`; pull-to-refresh reloads the snapshot. Assets are valued at ESI's average prices
+  (markets/prices, hourly), as the website values them.
+- `CorpSection` gives every screen the same frame: no snapshot yet (404), the backend's error, a section the source
+  pilot's in-game role can't read ("needs role Director"), one never read, then the content; the snapshot's age and
+  source pilot sit on top. Fuel hours and days come computed from the Worker (worker/corp.js withHealth).
+- Tests parse `src/test/resources/corp-fixture.json`, an answer built with the Worker's own corp.js helpers.
+
+## Features that start with the app
+
+`Feature.start(container)` runs from `EchelonApp.onCreate`. Fly uses it so timers saved on the phone come back (and
+their service restarts) when the app is opened, before anyone visits the Fly tab.
 
 ## Sign-in and sessions (core.auth)
 

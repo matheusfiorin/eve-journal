@@ -3,6 +3,7 @@ package com.echelon.eve.plan.sell
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,7 +70,7 @@ fun SellRoute(ctx: ScreenContext) {
     val names by c.eveNames.names.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var ui by remember(pilot) { mutableStateOf(SellUi(SellForm())) }
-    var tries by remember { mutableStateOf(0) }
+    var tries by remember { mutableIntStateOf(0) }
 
     // What there is to sell, whenever the pilots' data or the pasted list changes.
     LaunchedEffect(pilot, market.data, pilots, wing, ui.form.pasted, tries) {
@@ -79,7 +80,7 @@ fun SellRoute(ctx: ScreenContext) {
         val g = runCatching { EchelonJson.decodeFromJsonElement(Gathered.serializer(), bridge.call("sell.gather", buildJsonObject {
             put("pilots", c.sellPilots(pilot))
             put("pasted", buildJsonArray { ui.form.pasted.forEach { (t, q) -> add(buildJsonArray { add(JsonPrimitive(t)); add(JsonPrimitive(q)) }) } })
-        })) }.getOrElse { ui = ui.copy(problem = it.message ?: "Couldn’t read what the pilots carry."); return@LaunchedEffect }
+        })) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it; ui = ui.copy(problem = it.message ?: "Couldn’t read what the pilots carry."); return@LaunchedEffect }
         val info = runCatching { SellData.typeInfo(c, g.rows.map { it.type } + g.ships.map { it.shipType }) }.getOrDefault(emptyMap())
         ui = ui.copy(gathered = g, info = ui.info + info, problem = null)
     }
@@ -128,6 +129,8 @@ fun SellRoute(ctx: ScreenContext) {
             val age = loaded.at?.let { maxOf(0, (System.currentTimeMillis() - it) / 60_000) }
             ui = ui.copy(result = result, loaded = loaded, mode = mode, planning = false, problem = null,
                 status = "${plural(result.plans.size, "plan")} · ${age?.let { if (it < 1) "buy orders as of just now" else "buy orders as of ${plural(it.toInt(), "minute")} ago" } ?: "no buy orders loaded"} · ${plural(loaded.calls, "request")} to EVE${if (loaded.cached > 0) ", ${loaded.cached} from the last 5 minutes" else ""}.")
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
         } catch (e: Exception) {
             ui = ui.copy(planning = false, result = null, status = "Couldn’t plan the sale: ${e.message}")
         }
@@ -141,7 +144,7 @@ fun SellRoute(ctx: ScreenContext) {
         ui = ui.copy(pickupHits = hits)
     }
 
-    SellScreen(ui.copy(names = names, canSend = c.pilots.pilots.value.filter { c.sessions.has(it.id) }.map { it.id }.toSet()), SellActions(
+    SellScreen(ui.copy(names = names, canSend = pilots.filter { c.sessions.has(it.id) }.map { it.id }.toSet()), SellActions(
         form = { ui = ui.copy(form = it) },
         mode = { ui = ui.copy(mode = it) },
         paste = { ui = ui.copy(pasteText = it) },
@@ -181,5 +184,11 @@ fun SellRoute(ctx: ScreenContext) {
             }
         },
         retry = { tries++ },
+        share = { p ->
+            val ship = p.ships.firstOrNull { it.route.size > 1 }
+            c.wingChannel.sharePlan(pilot, com.echelon.eve.core.wing.SharedPlan("sell", "${p.label}: ${p.ships.joinToString { it.name }}".take(80),
+                "${plural(p.jumps, "jump")}, ${com.echelon.eve.ui.format.format(p.net, com.echelon.eve.ui.format.Kind.Isk)} after tax, ${Math.round(p.soldShare * 100)}% sold", ship?.route.orEmpty()))
+            ui = ui.copy(sent = ui.sent + (pilot.id to "Shared with ${pilot.wingmate.displayName}."))
+        },
     ))
 }

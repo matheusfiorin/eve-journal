@@ -94,6 +94,8 @@ class ExploreActions(
     val sendLoop: () -> Unit = {},
     val sendTo: (Long) -> Unit = {},
     val retry: () -> Unit = {},
+    /** Sends tonight's loop to the wingmate through the wing room. */
+    val share: () -> Unit = {},
 )
 
 private val ROMAN = listOf("0", "I", "II", "III", "IV", "V")
@@ -168,6 +170,7 @@ private fun Results(ui: ExploreUi, r: ExploreResult, now: Long, actions: Explore
                 }
             }
             if (canSend) PrimaryButton("Send loop to ${ui.pilot.displayName}’s autopilot", actions.sendLoop, Modifier.fillMaxWidth())
+            SecondaryButton("Share with ${ui.pilot.wingmate.displayName}", actions.share, Modifier.fillMaxWidth())
             ui.sent?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
         }
     }

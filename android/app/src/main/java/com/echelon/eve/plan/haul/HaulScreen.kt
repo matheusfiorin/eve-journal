@@ -103,6 +103,7 @@ class HaulActions(
     val plan: () -> Unit = {},
     val mode: (String) -> Unit = {},
     val send: () -> Unit = {},
+    val share: () -> Unit = {},
 )
 
 private val MODES = listOf("safest" to "Safest", "balanced" to "Balanced", "shortest" to "Shortest")
@@ -193,6 +194,7 @@ private fun Result(ui: HaulUi, r: HaulResult, now: Long, actions: HaulActions) {
             style = MaterialTheme.typography.bodySmall, color = level(worst.first().p).color())
         else Text("No hotspots on this route right now.", style = MaterialTheme.typography.bodySmall, color = c.ok)
         if (ui.canSend) PrimaryButton("Send to ${ui.pilotName}’s autopilot", actions.send, Modifier.fillMaxWidth())
+        SecondaryButton("Share with your wingmate", actions.share, Modifier.fillMaxWidth())
         if (ui.canSend && m.route.size - 1 > 40) Text("Over 40 jumps: only your stops are sent, so the in-game autopilot picks the path between them.", style = MaterialTheme.typography.bodySmall, color = c.textFaint)
         ui.sent?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
         ui.liveNote?.let { Text("$it Kill history: ${if (r.killDays > 0) plural(r.killDays, "day") + " of hourly ESI data" else "starting"}.", style = MaterialTheme.typography.bodySmall, color = c.textFaint) }

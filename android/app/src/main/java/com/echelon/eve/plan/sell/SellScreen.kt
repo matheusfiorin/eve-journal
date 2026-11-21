@@ -81,6 +81,7 @@ data class SellUi(
 class SellActions(
     val form: (SellForm) -> Unit = {}, val mode: (String) -> Unit = {}, val paste: (String) -> Unit = {}, val addPaste: () -> Unit = {},
     val pickupQuery: (String?) -> Unit = {}, val savePickup: (Long?) -> Unit = {}, val send: (ShipPlan) -> Unit = {}, val retry: () -> Unit = {},
+    val share: (SellPlan) -> Unit = {},
 )
 
 private val REASONS = mapOf("no quotes" to "No buy orders found", "below floor" to "Buy orders are below the price floor", "no buyer in range" to "No buyer within reach",
@@ -227,6 +228,7 @@ private fun Plans(ui: SellUi, r: SellResult, actions: SellActions, name: (Long) 
             }
             if (s.route.size > 1) Text(s.routeNames.joinToString(" → "), style = Echelon.type.label, color = c.textFaint)
             if (s.route.size > 1 && s.pilot in ui.canSend) PrimaryButton("Send ${s.name}’s route to autopilot", { actions.send(s) }, Modifier.fillMaxWidth().padding(top = Spacing.xs))
+            if (s.route.size > 1) SecondaryButton("Share this plan with your wingmate", { actions.share(chosen) }, Modifier.fillMaxWidth().padding(top = Spacing.xs))
             ui.sent[s.pilot]?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
         }
     }

@@ -41,6 +41,9 @@ class GoalsTest {
         assertEquals("Write the target date as YYYY-MM-DD.", GoalRules.problem(GoalFields(title = "x", due = "1/12/2026")))
         assertEquals("Use at most 30 steps.", GoalRules.problem(GoalFields(title = "x", steps = (1..31).joinToString("\n") { "s$it" })))
         assertNull(GoalRules.problem(GoalFields(title = "x", result = "12.5")))
+        // What the server's validateBackup would refuse is caught on the form.
+        assertEquals("Write the target date as YYYY-MM-DD.", GoalRules.problem(GoalFields(title = "x", due = "2026-02-30")))
+        assertEquals("The target must be a number under a quadrillion ISK.", GoalRules.problem(GoalFields(title = "x", target = "1e15")))
     }
 
     @Test fun ticksAndConflictCopies() {
