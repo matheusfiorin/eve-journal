@@ -27,7 +27,7 @@ const config={name,main:resolve('worker/index.js'),compatibility_date:'2025-09-0
 // plan keeps 200k log events a day for 3 days; every run is sampled (the traffic is far below that) and the automatic
 // invocation log is off, so each request costs one event, not two.
 observability:{enabled:true,head_sampling_rate:1,logs:{enabled:true,invocation_logs:false,head_sampling_rate:1}},vars:{FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:clientId},d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid,migrations_dir:resolve('worker/migrations')}],// Rate Limiting bindings, per client address per minute (the Worker does nothing when one is missing).
-ratelimits:[{name:'RATE_AUTH',namespace_id:'710001',simple:{limit:10,period:60}},{name:'RATE_MARKET',namespace_id:'710002',simple:{limit:60,period:60}},{name:'RATE_JOURNAL',namespace_id:'710003',simple:{limit:120,period:60}}],
+ratelimits:[{name:'RATE_AUTH',namespace_id:'710001',simple:{limit:10,period:60}},{name:'RATE_MARKET',namespace_id:'710002',simple:{limit:60,period:60}},{name:'RATE_JOURNAL',namespace_id:'710003',simple:{limit:120,period:60}},{name:'RATE_LIVE',namespace_id:'710004',simple:{limit:30,period:60}}],
 // Every 5 minutes: pilot sync or the hourly kills sample. Daily: cleanup of expired sessions and journal tombstones.
 triggers:{crons:['*/5 * * * *',DAILY_CRON]}};
 const configPath=resolve('.cloudflare/wrangler.json');await writeFile(configPath,JSON.stringify(config,null,2));

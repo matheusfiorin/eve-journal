@@ -20,7 +20,9 @@ export const OPERATIONS_SCOPES = {
   // Read now so each pilot reconnects only once; the planner and standings views come later.
   blueprints:'esi-characters.read_blueprints.v1',
   planets:'esi-planets.manage_planets.v1',
-  standings:'esi-characters.read_standings.v1'
+  standings:'esi-characters.read_standings.v1',
+  // The Android app's live view (GET /api/live): is the pilot online. Location and ship come from the scopes above.
+  online:'esi-location.read_online.v1'
 };
 export const REQUESTED_SCOPES = [...new Set([...SCOPES, ...Object.values(OPERATIONS_SCOPES)])];
 export function base64url(bytes) {

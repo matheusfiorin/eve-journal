@@ -343,6 +343,40 @@ async function contractItems(id,contractId,env,fetchImpl){
   await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();
  }
 }
+// The pilot's live position, ship and online state for the Android app: 3 ESI calls (ESI caches them about 5 s), kept 5 s per
+// pilot in this isolate so a few taps or two devices cost one set. Nothing here is stored or logged (it is where the pilot is).
+// Credentials follow freshCredentials' rules: a token still valid is used as it is, without the lock; only a refresh (which
+// rotates the refresh token) takes the pilot's sync lock, and it is released right after.
+export const LIVE_TTL=5000;
+const liveCache=new Map();
+export const resetLive=()=>liveCache.clear();
+async function live(id,env,fetchImpl){
+ const now=Date.now(),hit=liveCache.get(id);
+ if(hit&&now-hit.at<LIVE_TTL)return hit.task;
+ const task=liveRead(id,env,fetchImpl);
+ liveCache.set(id,{at:now,task});
+ for(const [k,v] of liveCache)if(now-v.at>=LIVE_TTL&&k!==id)liveCache.delete(k);
+ try{return await task;}catch(error){if(liveCache.get(id)?.task===task)liveCache.delete(id);throw error;}
+}
+async function liveRead(id,env,fetchImpl){
+ const row=await env.DB.prepare('SELECT * FROM pilots WHERE character_id = ?').bind(id).first();
+ if(!row)throw new ServiceError('This pilot is no longer connected.',401);
+ let credentials=await decrypt(row.credentials,env.TOKEN_ENCRYPTION_KEY,`pilot:${id}`);
+ if(credentials.expires<Date.now()+60000){
+  const lock=Date.now()+30000;
+  const locked=await env.DB.prepare('UPDATE pilots SET sync_lock_until = ? WHERE character_id = ? AND sync_lock_until < ? RETURNING *').bind(lock,id,Date.now()).first();
+  if(!locked)throw new ServiceError('This pilot is syncing. Try again in a moment.',409);
+  try{credentials=await freshCredentials(locked,env,fetchImpl,lock);}
+  finally{await env.DB.prepare('UPDATE pilots SET sync_lock_until = 0 WHERE character_id = ? AND sync_lock_until = ?').bind(id,lock).run();}
+ }
+ if(![OPERATIONS_SCOPES.location,OPERATIONS_SCOPES.ship].every(s=>credentials.scopes.includes(s)))throw new ServiceError('Permission not granted. Reconnect to allow reading location and ship.',403);
+ const headers={Authorization:`Bearer ${credentials.accessToken}`,Accept:'application/json'},get=path=>remote(`${ESI}/characters/${id}/${path}/`,{headers},fetchImpl);
+ const [where,ship,online]=await Promise.allSettled([get('location'),get('ship'),credentials.scopes.includes(OPERATIONS_SCOPES.online)?get('online'):Promise.resolve(null)]);
+ if(where.status==='rejected'&&ship.status==='rejected')throw where.reason instanceof ServiceError?where.reason:new ServiceError('EVE service is temporarily unavailable.',502);
+ const w=where.value||{},sh=ship.value||{},on=online.value;
+ return {system:w.solar_system_id??null,station:w.station_id??null,structure:w.structure_id??null,shipType:sh.ship_type_id??null,shipItem:sh.ship_item_id??null,shipName:sh.ship_name??null,
+  online:on?{online:Boolean(on.online),lastLogin:on.last_login??null,lastLogout:on.last_logout??null}:null,at:new Date().toISOString()};
+}
 // A sync stops asking ESI after this many fetches (token and key calls included): the free plan allows 50 subrequests per
 // invocation, and the alert posts that follow a cron sync need a few of them.
 export const SYNC_LIMIT=44;
@@ -758,6 +792,11 @@ async function route(request,env,ctx,fetchImpl){
   const s=await session(request,env);
   return response(await contractItems(s.character_id,Number(url.searchParams.get('id')),env,fetchImpl));
  }
+ if(url.pathname==='/api/live'&&request.method==='GET'){
+  await limit(env,request,'RATE_LIVE',`l:${(await hash(request.headers.get('Authorization')||'')).slice(0,16)}`);
+  const s=await session(request,env);
+  return response(await live(s.character_id,env,fetchImpl));
+ }
  if(url.pathname==='/api/waypoints'&&request.method==='POST'){
   const s=await session(request,env);
   let body;try{body=JSON.parse(await readText(request,4096,'Send fewer waypoints.'));}catch(error){if(error instanceof ServiceError)throw error;throw new ServiceError('Waypoints must be JSON.');}
@@ -793,7 +832,7 @@ async function route(request,env,ctx,fetchImpl){
  throw new ServiceError('Not found.',404);
 }
 // Route names for logs: only the fixed paths, so a request for any other path (which may carry anything) logs as 'other'.
-const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
+const LOGGED=new Set(['/health','/health/freshness','/auth/start','/auth/callback','/api/public/pilots','/api/market/regions','/api/market/survey','/api/market/ingest','/api/mobile/redeem','/api/market/universe','/api/market','/api/wing','/api/waypoints','/api/live','/api/sell-station','/api/contract-items','/api/journal','/api/session/revoke','/api/session','/api/sync','/api/disconnect','/api/forget']);
 export async function handleRequest(request,env,ctx={},fetchImpl=fetch){
  const started=Date.now();
  const result=await handle(request,env,ctx,fetchImpl);

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign,createHmac,createHash} from 'node:crypto';
 import {signPipelineRequest} from '../worker/pipeline-auth.js';
-import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
+import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetLive,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
@@ -23,6 +23,7 @@ function database(db){
  return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{if(/\bRETURNING\b/i.test(sql)){const results=statement.all(...values);return {results,meta:{changes:results.length}};}const r=statement.run(...values);return {results:[],meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
 }
 function setup(options={}){
+ resetLive();
  const env={DB:database(),FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:'test-client',EVE_CLIENT_SECRET:'test-client-secret',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,4).toString('base64')};
  const calls=[];const fetchImpl=async(url,init={})=>{
   calls.push({url:String(url),init});const path=new URL(url).pathname;
@@ -60,6 +61,7 @@ function setup(options={}){
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
+  if(path.endsWith('/online/'))return options.onlineFail?json({},403):json({online:true,last_login:'2026-11-20T10:00:00Z',last_logout:'2026-11-20T08:00:00Z',logins:5});
   if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name',ship_item_id:1001});
   if(path.endsWith('/location/'))return json({solar_system_id:30000142,...(options.dock?{station_id:options.dock}:{})});
   if(path.endsWith('/industry/jobs/'))return json(options.jobs||[]);
@@ -1229,7 +1231,7 @@ test('android sign-in: consent page, one-time code, redeem with the verifier, se
  assert.equal(callback.status,303);assert.match(location,/^echelon:\/\/auth\/callback\?code=[\w-]{43}&pilot=2124810474$/);
  assert.ok(!location.includes('backend_session'),'the session is not in the URL');
  const code=new URL(location).searchParams.get('code'),row=app.env.DB.raw.prepare('SELECT * FROM mobile_codes').get();
- assert.notEqual(row.code_hash,code);assert.equal(row.challenge,CHALLENGE);assert.ok(!row.session_token_encrypted.includes('ey'),'stored encrypted');
+ assert.notEqual(row.code_hash,code);assert.equal(row.challenge,CHALLENGE);assert.equal(JSON.parse(row.session_token_encrypted).v,2,'stored encrypted, bound to its row');
  assert.ok(row.expires_at>Date.now()&&row.expires_at<=Date.now()+300000);
  const ok=await redeem(app,{code,verifier:VERIFIER});assert.equal(ok.status,200);const body=await ok.json();
  assert.equal(body.pilot,id);assert.match(body.session,/^[\w-]{43}$/);assert.ok(body.expires>Date.now());
@@ -1277,4 +1279,58 @@ test('android sign-in: the start request is validated, the browser flow is untou
  // A POST that claims android without a valid challenge is refused.
  const p=await app.request(`/auth/start?pilot=${id}`),csrf=(await p.text()).match(/name="csrf" value="([^"]+)"/)[1];
  const forged=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:p.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(id),csrf,share:'yes',client:'android',challenge:'x'})});assert.equal(forged.status,400);
+});
+
+// GET /api/live: position, ship and online state, 3 ESI calls, 5 s cache per pilot, never logged.
+test('live: returns location, ship and online state with three ESI calls, then serves the cache for 5 s',async()=>{
+ const app=setup({dock:60003760}),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const before=app.calls.length;
+ const r=await app.request('/api/live',auth);assert.equal(r.status,200);assert.equal(r.headers.get('Cache-Control'),'no-store');
+ const body=await r.json();
+ assert.deepEqual({...body,at:undefined},{system:30000142,station:60003760,structure:null,shipType:605,shipItem:1001,shipName:'Private ship name',online:{online:true,lastLogin:'2026-11-20T10:00:00Z',lastLogout:'2026-11-20T08:00:00Z'},at:undefined});
+ assert.ok(Number.isFinite(Date.parse(body.at)));
+ const esi=app.calls.slice(before).filter(c=>c.url.includes('/characters/'));assert.deepEqual(esi.map(c=>new URL(c.url).pathname.split('/')[3]).sort(),['location','online','ship']);assert.equal(app.calls.length-before,3,'no token refresh needed');
+ await app.request('/api/live',auth);assert.equal(app.calls.length-before,3,'cached');
+ // After 5 s the next request asks ESI again (the cache entry is aged by hand).
+ const realNow=Date.now;Date.now=()=>realNow()+6000;
+ try{await app.request('/api/live',auth);}finally{Date.now=realNow;}
+ assert.equal(app.calls.length-before,6);
+ assert.equal((await app.request('/api/live')).status,401);
+});
+test('live: an expired access token is refreshed under the sync lock, which is released; a busy pilot answers 409',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length;
+ assert.equal((await app.request('/api/live',auth)).status,200);
+ assert.ok(app.calls.slice(before).some(c=>c.url.endsWith('/oauth/token')&&String(c.init.body).includes('grant_type=refresh_token')),'refreshed');
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until AS l FROM pilots').get().l,0,'the lock is released');
+ const rotated=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);assert.ok(rotated.expires>Date.now()+60000,'the rotated credentials were saved');
+ resetLive();
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, sync_lock_until = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P),Date.now()+60000);
+ assert.equal((await app.request('/api/live',auth)).status,409,'a refresh waits for the sync that holds the lock');
+ // A valid token needs no lock at all: a running sync does not block the read.
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt(old,app.env.TOKEN_ENCRYPTION_KEY,P));
+ assert.equal((await app.request('/api/live',auth)).status,200);
+ // A refused grant is not asked again.
+ resetLive();app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, sync_lock_until = 0, grant_revoked_at = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P),Date.now());
+ assert.equal((await app.request('/api/live',auth)).status,502);
+});
+test('live: missing scopes, an unreadable online state and ESI failures degrade as described',async()=>{
+ const noLoc=setup({scopes:SCOPES}),a=await connect(noLoc);assert.equal((await noLoc.request('/api/live',{headers:{Authorization:`Bearer ${a.bearer}`}})).status,403);
+ const noOnline=setup({scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-location.read_online.v1')}),b=await connect(noOnline);const before=noOnline.calls.length;
+ const body=await(await noOnline.request('/api/live',{headers:{Authorization:`Bearer ${b.bearer}`}})).json();assert.equal(body.online,null);assert.equal(body.system,30000142);assert.equal(noOnline.calls.length-before,2);
+ const flaky=setup({onlineFail:true}),c=await connect(flaky);const part=await(await flaky.request('/api/live',{headers:{Authorization:`Bearer ${c.bearer}`}})).json();assert.equal(part.online,null);assert.equal(part.shipType,605);
+ const gone=setup({limitPath:'/ship/'}),e=await connect(gone);assert.equal((await gone.request('/api/live',{headers:{Authorization:`Bearer ${e.bearer}`}})).status,200,'one of the two core reads failing still answers');
+});
+test('live: rate limited per session (30 a minute binding), and no location reaches a log line',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const lines=[];const sink=logger.sink;logger.sink=l=>lines.push(l);
+ try{
+  const rl=app.env.RATE_LIVE=limiter(1);
+  assert.equal((await app.request('/api/live',auth)).status,200);assert.equal((await app.request('/api/live',auth)).status,429);
+  assert.ok(!rl.keys.join().includes(bearer),'keyed by a hash of the session');assert.equal(new Set(rl.keys).size,1);
+ }finally{logger.sink=sink;}
+ const text=lines.join('\n');for(const secret of ['30000142','Private ship name',String(id),'60003760'])assert.ok(!text.includes(secret),`${secret} stays out of logs`);
+ assert.ok(text.includes('/api/live'));
 });
