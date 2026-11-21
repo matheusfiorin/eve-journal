@@ -4,11 +4,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign,createHmac,createHash} from 'node:crypto';
 import {signPipelineRequest} from '../worker/pipeline-auth.js';
-import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
+import {handleRequest,scheduled,cleanup,DAILY_CRON,INGEST_TYPES,logger,encrypt,decrypt,retryAt,syncPilot,scheduledSync,sampleActivity,pipelineToken,HUB_REGIONS,SYNC_EVERY,SAMPLE_EVERY,ESI_COMPAT,ESI_FLOOR,STATIC_META,joinObjects,resetLive,syncCorp,CORP_EVERY,CORP_RESUME,CORP_RETRY,assetTree,ASSET_TTL,resetJwks,JOURNAL_CHANGES,EXTRAS,SYNC_LIMIT} from '../worker/index.js';
 import {EXTRA_MAX} from '../model.js';
 import {HUBS} from '../scripts/market-pipeline.mjs';
 import {REQUESTED_SCOPES,SCOPES} from '../auth.js';
-const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
+const sql=(await Promise.all(['0001_initial.sql','0002_wing_sharing.sql','0003_market.sql','0004_journal.sql','0005_journal_prefs.sql','0006_refresh_holds.sql','0007_market_docs.sql','0008_cleanup_indexes.sql','0009_alerts.sql','0010_share_alerts.sql','0011_mobile_codes.sql','0012_corp_assets.sql','0013_push_tokens.sql'].map(f=>readFile(new URL(`../worker/migrations/${f}`,import.meta.url),'utf8')))).join('\n');
 const pair=generateKeyPairSync('rsa',{modulusLength:2048});
 const jwk={...pair.publicKey.export({format:'jwk'}),kid:'worker-test',alg:'RS256',use:'sig'};
 const id=2124810474,P=`pilot:${id}`;
@@ -23,6 +23,7 @@ function database(db){
  return {raw:db,prepare(sql){return {bind(...values){const statement=db.prepare(sql);return {first:async()=>statement.get(...values)||null,all:async()=>({results:statement.all(...values)}),run:async()=>{if(/\bRETURNING\b/i.test(sql)){const results=statement.all(...values);return {results,meta:{changes:results.length}};}const r=statement.run(...values);return {results:[],meta:{changes:Number(r.changes)}};}};},first:async()=>db.prepare(sql).get()||null,all:async()=>({results:db.prepare(sql).all()})};},async batch(statements){db.exec('BEGIN');try{const result=await Promise.all(statements.map(s=>s.run()));db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}};
 }
 function setup(options={}){
+ resetLive();
  const env={DB:database(),FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:'test-client',EVE_CLIENT_SECRET:'test-client-secret',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,4).toString('base64')};
  const calls=[];const fetchImpl=async(url,init={})=>{
   calls.push({url:String(url),init});const path=new URL(url).pathname;
@@ -43,6 +44,8 @@ function setup(options={}){
   if(/^\/killmails\/\d+\/\w+\/$/.test(path)){const kid=Number(path.split('/')[2]);return json(options.killmail?.(kid)||{killmail_id:kid,killmail_time:new Date(Date.now()-kid*60000).toISOString(),solar_system_id:30000142,victim:{ship_type_id:605,character_id:kid%2?id:99},attackers:[{final_blow:true,corporation_id:1000044},{corporation_id:5}]});}
   if(new URL(url).hostname==='discord.com'){if(options.webhookStatus>=400)return new Response('{}',{status:options.webhookStatus});(options.posts||=[]).push(JSON.parse(init.body));return new Response(null,{status:204});}
   if(path==='/universe/names/')return json(JSON.parse(init.body).map(i=>({id:i,name:options.typeNames?.[i]||`Type ${i}`,category:'inventory_type'})));
+  // ESI's public character route (the sync reads the corporation id from it); options.corp is the id, none by default.
+  if(/^\/characters\/\d+\/$/.test(path))return json({name:'Pilot',...(options.corp?{corporation_id:options.corp}:{})});
   assert.match(init.headers.Authorization,/^Bearer /);
   const res=await character(url,path,init);
   // options.cache = {ttl(path) -> ms until Expires, unchanged: answer 304 to a matching ETag}; options.limitPath answers
@@ -52,16 +55,29 @@ function setup(options={}){
   if(options.limitPath&&path.endsWith(options.limitPath))return new Response('{}',{status:429,headers:{'Retry-After':'120'}});
   if(!options.cache)return new Response(res.body,{status:res.status,headers});
   const tag=`"${path}"`;headers.set('ETag',tag);headers.set('Expires',new Date(Date.now()+options.cache.ttl(path)).toUTCString());headers.set('Last-Modified','Fri, 13 Nov 2026 10:00:00 GMT');
-  if(options.cache.unchanged&&init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
+  if(options.cache.unchanged&&!options.cache.changed?.test(path)&&init.headers?.['If-None-Match']===tag)return new Response(null,{status:304,headers});
   return new Response(res.body,{status:res.status,headers});
  };
  const character=async(url,path)=>{
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+  // Corporation routes: options.corpData = {starbases:[...], fuels:{id:[...]}, structures, wallets, divisions, members, jobs, customs, assets, pages};
+  // options.deny lists sections ESI answers 403 (no in-game role); options.starbases404 answers the starbase list 404.
+  const cm=path.match(/^\/corporations\/(\d+)\/(.*)$/);
+  if(cm){
+   const d=options.corpData||{},key={'starbases/':'starbases','structures/':'structures','wallets/':'wallets','divisions/':'divisions','members/':'members','industry/jobs/':'jobs','customs_offices/':'customs','assets/':'assets'}[cm[2]]||(cm[2].startsWith('starbases/')?'starbases':null);
+   if(!key)throw new Error(`Unexpected corporation request ${path}`);
+   if(options.deny?.includes(key))return json({error:'Character does not have required role(s)'},403);
+   if(key==='starbases'&&cm[2]!=='starbases/'){const sid=Number(cm[2].split('/')[1]);return json({state:d.starbases.find(t=>t.starbase_id===sid)?.state||'online',fuels:d.fuels?.[sid]||[]});}
+   if(key==='starbases'&&options.starbases404)return json({error:'gone'},404);
+   const page=Number(new URL(url).searchParams.get('page')||1),paged=d.pages?.[key]>1;
+   return new Response(JSON.stringify(paged?d[key]?.[page-1]??[]:d[key]??[]),{headers:{'Content-Type':'application/json','X-Pages':String(d.pages?.[key]||1)}});
+  }
   if(path.endsWith('/skills/'))return json({total_sp:125000,unallocated_sp:5000,skills:[{skill_id:3300,trained_skill_level:4,active_skill_level:4}]});
   if(path.endsWith('/skillqueue/'))return json([{queue_position:0,skill_id:3300,finished_level:5,start_date:new Date(Date.now()-3600000).toISOString(),finish_date:new Date(Date.now()+3600000).toISOString()}]);
   if(path.endsWith('/wallet/'))return options.walletFail?json({},503):json(12345678.25);
+  if(path.endsWith('/online/'))return options.onlineFail?json({},403):json({online:true,last_login:'2026-11-20T10:00:00Z',last_logout:'2026-11-20T08:00:00Z',logins:5});
   if(path.endsWith('/ship/'))return json({ship_type_id:605,ship_name:'Private ship name',ship_item_id:1001});
-  if(path.endsWith('/location/'))return json({solar_system_id:30000142});
+  if(path.endsWith('/location/'))return json({solar_system_id:30000142,...(options.dock?{station_id:options.dock}:{})});
   if(path.endsWith('/industry/jobs/'))return json(options.jobs||[]);
   if(path.endsWith('/wallet/journal/'))return json(Array.from({length:120},(_,i)=>({id:i,date:'2026-10-30T00:00:00Z',ref_type:'bounty_prizes',amount:1000+i,balance:5})));
   if(path.endsWith('/wallet/transactions/'))return json([{transaction_id:1,date:'2026-10-30T00:00:00Z',type_id:34,quantity:10,unit_price:5,is_buy:true,location_id:60003760}]);
@@ -69,7 +85,8 @@ function setup(options={}){
   if(path.endsWith('/clones/'))return json({home_location:{location_id:60003760,location_type:'station'},jump_clones:[]});
   if(path.endsWith('/implants/'))return json([9899]);
   if(path.endsWith('/mining/'))return json([{date:'2026-11-01',solar_system_id:30000142,type_id:1230,quantity:100}]);
-  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
+  if(path.endsWith('/assets/')&&options.assetRows){const page=Number(new URL(url).searchParams.get('page')||1);return new Response(JSON.stringify(options.assetRows[page-1]||[]),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||options.assetRows.length),'Last-Modified':'Fri, 13 Nov 2026 10:00:00 GMT'}});}
+  if(path.endsWith('/assets/')){const page=Number(new URL(url).searchParams.get('page')||1);const rows=page===1?[{type_id:34,quantity:1000,location_id:1},{type_id:34,quantity:500,location_id:2},{type_id:605,quantity:1,location_id:1},{type_id:999,quantity:1,location_id:1,is_blueprint_copy:true},...(options.fit||[]),...(options.hangar||[])]:[{type_id:35,quantity:7,location_id:3}];return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json','X-Pages':String(options.assetPages||2)}});}
   if(path.endsWith('/orders/history/'))return json(options.history||[]);
   if(path.endsWith('/orders/'))return json(options.orders||[]);
   if(path.endsWith('/contracts/'))return json(options.contracts||[]);
@@ -87,10 +104,10 @@ function setup(options={}){
 }
 // The hourly kills sample is not due, so a cron run goes to a pilot sync (see the sampling tests for the other case).
 const sampled=(app,turns=0)=>app.env.DB.raw.prepare("INSERT INTO market_docs (name, data, updated_at, expires_at, turns) VALUES ('activity', '{}', ?, ?, ?) ON CONFLICT(name) DO UPDATE SET expires_at = excluded.expires_at, turns = excluded.turns").run(Date.now(),Date.now()+3600000,turns);
-async function consent(app,{wing=true,wing3=false,alerts=false,character=id}={}){
- const page=await app.request(`/auth/start?pilot=${character}`);assert.equal(page.status,200);
+async function consent(app,{wing=true,wing3=false,alerts=false,character=id,mobile=null}={}){
+ const page=await app.request(`/auth/start?pilot=${character}${mobile?`&client=android&challenge=${mobile}`:''}`);assert.equal(page.status,200);
  const body=await page.text(),csrf=body.match(/name="csrf" value="([^"]+)"/)[1];
- const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{}),...(wing3?{wing3:'yes'}:{}),...(alerts?{alerts:'yes'}:{})})});
+ const start=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:page.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(character),csrf,share:'yes',...(wing?{wing:'yes'}:{}),...(wing3?{wing3:'yes'}:{}),...(alerts?{alerts:'yes'}:{}),...(mobile?{client:body.match(/name="client" value="([^"]+)"/)[1],challenge:body.match(/name="challenge" value="([^"]+)"/)[1]}:{})})});
  assert.equal(start.status,303);const login=new URL(start.headers.get('Location'));
  return {state:login.searchParams.get('state'),cookie:start.headers.get('Set-Cookie').split(';')[0],login};
 }
@@ -197,7 +214,7 @@ test('v:1 credentials keep working and are rewritten as v:2 on the next refresh;
  assert.match(moved.last_error,/Synchronization failed/);assert.equal(app.calls.length,before,'no EVE call is made with it');
 });
 test('journal records are bound to kind and id; v:1 rows are still served and become v:2 when next written',async()=>{
- const {app,a,call}=await wingApp(),key=app.env.TOKEN_ENCRYPTION_KEY;
+ const {app,a,call}=await wingRouteApp(),key=app.env.TOKEN_ENCRYPTION_KEY;
  await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:entry}]});
  const stored=app.env.DB.raw.prepare("SELECT data FROM journal WHERE id = 'e1'").get().data;
  assert.deepEqual(await decrypt(stored,key,'entry:e1'),entry);await assert.rejects(decrypt(stored,key,'entry:e2'));await assert.rejects(decrypt(stored,key,'goal:e1'));
@@ -348,7 +365,7 @@ test('disconnect waits for a running sync before revoking, so it revokes the lat
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pilots').get().n,0);
 });
 const other=2124815118;
-async function wingApp(){
+async function wingRouteApp(){
  const options={};const app=setup(options);const a=(await connect(app)).bearer;
  options.character=other;const b=(await connect(app,{character:other})).bearer;options.character=id;
  const call=async(bearer,method,body,query='')=>{const res=await app.request(`/api/journal${query}`,{method,headers:{Authorization:`Bearer ${bearer}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:res.status,body:await res.json()};};
@@ -357,7 +374,7 @@ async function wingApp(){
 const goal={id:'g1',title:'Fly a Heron',pilot:'Both pilots',done:false};
 const entry={id:'e1',title:'First trip',pilot:'Fiofka',date:'2026-11-01',body:'JOURNAL-SECRET-4411'};
 test('journal sync: goals reach both pilots, entries only their author, and nothing is stored in plain text',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  const put=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
  assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.kind,x.rev]),[['goal',1],['entry',2]]);
  const mine=await call(a,'GET',null,'?since=0');assert.deepEqual(mine.body.records.map(r=>r.id),['g1','e1']);assert.equal(mine.body.rev,2);assert.deepEqual(mine.body.records[1].record,entry);
@@ -370,7 +387,7 @@ test('journal sync: goals reach both pilots, entries only their author, and noth
  assert.equal((await app.request('/api/journal')).status,401);
 });
 test('journal sync: a stale base is a conflict that returns the stored copy; deletes leave a tombstone; disconnect keeps the journal',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
  const edit=await call(b,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,done:true}}]});assert.deepEqual(edit.body.applied,[{kind:'goal',id:'g1',rev:2}]);
  const stale=await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:1,record:{...goal,title:'Fly a Buzzard'}}]});
@@ -384,7 +401,7 @@ test('journal sync: a stale base is a conflict that returns the stored copy; del
  assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM journal').get().n,1);
 });
 test('journal sync: a change based on a row the server no longer has is applied, not a 500, and purging never lowers the rev',async()=>{
- const {app,a,call}=await wingApp();
+ const {app,a,call}=await wingRouteApp();
  const ghost=await call(a,'POST',{changes:[{kind:'entry',id:'e9',base:7,record:{...entry,id:'e9'}},{kind:'goal',id:'g9',base:3,record:null}]});
  assert.equal(ghost.status,200);assert.deepEqual(ghost.body.applied.map(x=>[x.id,x.rev]).sort(),[['e9',1],['g9',0]]);
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal}]});
@@ -395,7 +412,7 @@ test('journal sync: a change based on a row the server no longer has is applied,
  const next=await call(a,'POST',{changes:[{kind:'goal',id:'g2',base:0,record:{...goal,id:'g2'}}]});assert.equal(next.body.applied[0].rev,4);
 });
 test('journal sync keeps fields a newer build added and edit times, within the same size limits',async()=>{
- const {a,call,app}=await wingApp();
+ const {a,call,app}=await wingRouteApp();
  const newer={...entry,updatedAt:1762000000000,mood:{stars:4,tags:['calm']}};
  assert.equal((await call(a,'POST',{changes:[{kind:'entry',id:'e1',base:0,record:newer}]})).status,200);
  assert.deepEqual((await call(a,'GET',null,'?since=0')).body.records[0].record,newer,'mood is not stripped');
@@ -412,7 +429,7 @@ test('journal sync keeps fields a newer build added and edit times, within the s
 const explored={id:`explored:${id}`,marks:{30000142:1762000000000,30003504:1762100000000}};
 const haul={id:`haul:${id}`,stops:['Jita','Amarr'],value:'100000000',volume:'5000',avoid:'Uedama',updatedAt:1762000000000};
 test('journal sync: a pilot\'s prefs reach only that pilot, only clients that ask, and only the pilot named in the id can write them',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  const put=await call(a,'POST',{changes:[{kind:'pref',id:explored.id,base:0,record:explored},{kind:'pref',id:haul.id,base:0,record:haul},{kind:'goal',id:'g1',base:0,record:goal}]});
  assert.equal(put.status,200);assert.deepEqual(put.body.applied.map(x=>[x.id,x.rev]),[[explored.id,1],[haul.id,2],['g1',3]]);
  const mine=await call(a,'GET',null,'?since=0&prefs=1');assert.deepEqual(mine.body.records.map(r=>r.id),[explored.id,haul.id,'g1']);assert.deepEqual(mine.body.records[1].record,haul);
@@ -428,7 +445,7 @@ test('journal sync: a pilot\'s prefs reach only that pilot, only clients that as
  assert.equal((await call(a,'GET',null,'?since=3&prefs=1')).body.records[0].record.extra,undefined,'unknown fields are not stored');
 });
 test('journal sync: prefs are validated per kind with size caps, and never deleted',async()=>{
- const {call,a}=await wingApp();const send=async(record,extra={})=>(await call(a,'POST',{changes:[{kind:'pref',id:record?.id??explored.id,base:0,record,...extra}]})).status;
+ const {call,a}=await wingRouteApp();const send=async(record,extra={})=>(await call(a,'POST',{changes:[{kind:'pref',id:record?.id??explored.id,base:0,record,...extra}]})).status;
  assert.equal(await send(null),400);
  assert.equal(await send({...explored,marks:{Jita:1}}),400);assert.equal(await send({...explored,marks:{30000142:-1}}),400);assert.equal(await send({...explored,marks:[1]}),400);
  assert.equal(await send({...explored,marks:Object.fromEntries(Array.from({length:1001},(_,i)=>[30000000+i,1]))}),400,'at most 1000 marks');
@@ -770,7 +787,7 @@ test('consent records the three choices separately; level 3 needs the wing box, 
  const again=setup();await connect(again,{wing:true,wing3:true,alerts:true});await connect(again,{wing:false});assert.deepEqual({...again.env.DB.raw.prepare('SELECT share_wing, share_alerts FROM pilots').get()},{share_wing:0,share_alerts:0});
 });
 test('Delete my data removes the journal, prefs, grant, pilot and sessions; goals and the wingmate stay',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  assert.equal((await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry},{kind:'pref',id:explored.id,base:0,record:explored}]})).status,200);
  assert.equal((await call(b,'POST',{changes:[{kind:'entry',id:'e2',base:0,record:{...entry,id:'e2',pilot:'Decxus'}}]})).status,200);
  const forget=(bearer,body)=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},...(body?{body:JSON.stringify(body)}:{})});
@@ -789,7 +806,7 @@ test('Delete my data removes the journal, prefs, grant, pilot and sessions; goal
  const next=await call(b,'POST',{changes:[{kind:'entry',id:'e3',base:0,record:{...entry,id:'e3',pilot:'Decxus'}}]});assert.ok(next.body.applied[0].rev>3);
 });
 test('Delete my data: wing goals go only when asked and confirmed, as tombstones the wingmate learns of',async()=>{
- const {app,a,b,call}=await wingApp();
+ const {app,a,b,call}=await wingRouteApp();
  await call(a,'POST',{changes:[{kind:'goal',id:'g1',base:0,record:goal},{kind:'entry',id:'e1',base:0,record:entry}]});
  const forget=body=>app.request('/api/forget',{method:'POST',headers:{Authorization:`Bearer ${a}`},body:JSON.stringify(body)});
  assert.equal((await forget({goals:true})).status,400,'unconfirmed');
@@ -1133,4 +1150,537 @@ test('an order that vanishes waits for the hourly order history, then fires the 
  const later=snap();later.pendingOrders[0].vanishedAt=Date.now()-day-1000;app.env.DB.raw.prepare('UPDATE pilots SET snapshot = ?').run(JSON.stringify(later));
  await resync();assert.equal(snap().pendingOrders,undefined);assert.equal(kinds().length,3);
  const text=JSON.stringify(await(await app.request('/api/public/pilots')).json());assert.ok(!text.includes('pendingOrders'));
+});
+// ── Sell planner data: hangar stacks and the pickup station ──
+const DOCK=60003760,OTHER=60008494,hangar=(type,quantity,at=DOCK,extra={})=>({type_id:type,quantity,location_id:at,location_flag:'Hangar',...extra});
+test('hangar stacks: the docked station only, packaged stacks only, cargo and ships left out, capped at 300',async()=>{
+ const rows=[hangar(34,1000),hangar(34,500),hangar(35,7),hangar(587,1,DOCK,{is_singleton:true}),hangar(3293,1,DOCK,{is_singleton:true}),hangar(999,1,DOCK,{is_blueprint_copy:true}),
+  hangar(36,50,OTHER),{type_id:37,quantity:9,location_id:1001,location_flag:'Cargo'},{type_id:38,quantity:4,location_id:DOCK,location_flag:'Deliveries'},hangar(39,0)];
+ const app=setup({dock:DOCK,hangar:rows}),{bearer}=await connect(app),payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.deepEqual(payload.operations.stacks,{permission:true,value:{[DOCK]:[[34,1500],[35,7]]},fetched:payload.fetchedAt});
+ assert.equal(payload.operations.location.value.station_id,DOCK);assert.equal(payload.operations.ship.value.ship_type_id,605);
+ assert.deepEqual(payload.operations.fit.value.items,[[37,'Cargo',9]],'cargo stays in the fit, not in the stacks');
+ const many=setup({dock:DOCK,hangar:Array.from({length:400},(_,i)=>hangar(1000+i,i+1))}),b2=(await connect(many)).bearer;
+ const big=(await(await many.request('/api/session',{headers:{Authorization:`Bearer ${b2}`}})).json()).operations.stacks.value[DOCK];
+ assert.equal(big.length,300);assert.deepEqual(big[0],[1399,400],'the biggest stacks stay');
+ const text=JSON.stringify(await(await many.request('/api/public/pilots')).json());assert.ok(!text.includes('1399'),'never public');
+});
+test('cargo is the fit, and undocked pilots have no stacks',async()=>{
+ const app=setup({hangar:[hangar(34,5)],fit:[{type_id:37,quantity:9,location_id:1001,location_flag:'Cargo'}]});await connect(app);
+ assert.deepEqual(snap(app).operations.stacks.value,{});assert.deepEqual(snap(app).operations.fit.value.items,[[37,'Cargo',9]]);
+});
+test('the stacks follow the docked station, and an unchanged assets answer keeps them',async()=>{
+ const options={dock:DOCK,hangar:[hangar(34,5),hangar(35,6,OTHER)],cache:{ttl:()=>-1000}},app=setup(options);await connect(app);
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+ options.cache.unchanged=true;let before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.ok(!characterCalls(app,before).some(c=>c.url.includes('page=2')),'unchanged assets are not read again');
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]},'stored stacks stand on a 304');
+ // The pilot docks elsewhere: the stored stacks do not cover it, so the whole list is read once more.
+ options.dock=OTHER;options.cache.changed=/location/;before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ const calls=characterCalls(app,before),first=calls.find(c=>/\/assets\/$/.test(c.url));
+ assert.ok(first&&!first.init.headers['If-None-Match']&&calls.some(c=>c.url.includes('page=2')));
+ assert.deepEqual(snap(app).operations.stacks.value,{[OTHER]:[[35,6]]});
+ // Not expired: the pages are skipped, unless the stacks miss a station.
+ options.cache.ttl=path=>/location/.test(path)?-1000:3600000;options.cache.unchanged=false;
+ await syncPilot(id,app.env,app.fetchImpl,{force:true}); // refreshes the hints so the assets are fresh
+ options.dock=DOCK;before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ assert.ok(characterCalls(app,before).some(c=>/\/assets\/$/.test(c.url)),'a new dock forces a read');assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+ before=app.calls.length;await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.ok(!characterCalls(app,before).some(c=>/\/assets\/$/.test(c.url)),'covered and fresh: nothing is asked');
+ assert.deepEqual(snap(app).operations.stacks.value,{[DOCK]:[[34,5]]});
+});
+test('a page newer than page 1 keeps the stored stacks too',async()=>{
+ const app=setup({dock:DOCK,hangar:[hangar(34,5)]});await connect(app);
+ let n=0;const shifting=async(url,init)=>{const r=await app.fetchImpl(url,init);if(!new URL(url).pathname.endsWith('/assets/'))return r;const h=new Headers(r.headers);h.set('Last-Modified',new Date(Date.UTC(2026,10,13,10,n++)).toUTCString());return new Response(r.body,{status:r.status,headers:h});};
+ app.env.DB.raw.prepare('UPDATE pilots SET snapshot = json_set(snapshot, \'$.operations.stacks.value\', json(?))').run('{"1":[[1,1]]}');
+ await syncPilot(id,app.env,shifting,{force:true});assert.deepEqual(snap(app).operations.stacks.value,{1:[[1,1]]},'not replaced by a mixed read');
+});
+test('without the assets scope there are no stacks',async()=>{
+ const app=setup({scopes:SCOPES.filter(s=>!/read_assets/.test(s)),hangar:[hangar(34,5)],dock:DOCK});await connect(app);
+ assert.deepEqual(snap(app).operations.stacks,{permission:false});
+});
+test('POST /api/sell-station needs a session, validates the id and is kept by the next sync',async()=>{
+ const options={dock:DOCK,hangar:[hangar(34,5),hangar(35,6,OTHER)]},app=setup(options),{bearer}=await connect(app);
+ const post=(body,auth=bearer,raw)=>app.request('/api/sell-station',{method:'POST',headers:{...(auth?{Authorization:`Bearer ${auth}`}:{}),'Content-Type':'application/json'},body:raw??JSON.stringify(body)});
+ assert.equal((await post({station:OTHER},null)).status,401);assert.equal((await post({station:OTHER},'x'.repeat(43))).status,401);
+ for(const station of [0,-5,1.5,'60008494',59999999,64000001,1e12,2**53,undefined,[],{},true])assert.equal((await post({station})).status,400,String(station));
+ assert.equal((await post(null,bearer,'not json')).status,400);assert.equal((await post(null,bearer,JSON.stringify({station:OTHER,pad:'x'.repeat(1100)}))).status,413);
+ assert.equal((await app.request('/api/sell-station',{headers:{Authorization:`Bearer ${bearer}`}})).status,404,'GET is not a route');
+ const ok=await post({station:OTHER});assert.equal(ok.status,200);assert.deepEqual(await ok.json(),{sellStation:OTHER});assert.equal(snap(app).sellStation,OTHER);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();
+ assert.equal(payload.sellStation,OTHER);assert.deepEqual(payload.operations.stacks.value,{[DOCK]:[[34,5]],[OTHER]:[[35,6]]});
+ assert.equal((await post({station:1e12+1})).status,200,'structures are accepted');assert.equal(snap(app).sellStation,1e12+1);
+ assert.equal((await post({station:null})).status,200);assert.equal(snap(app).sellStation,undefined);assert.equal(snap(app).operations.stacks.permission,true,'the rest of the snapshot stays');
+ assert.ok(!JSON.stringify(await(await app.request('/api/public/pilots')).json()).includes(String(OTHER)),'never public');
+});
+test('a pickup station chosen while a sync runs is not lost',async()=>{
+ const app=setup({dock:DOCK}),{bearer}=await connect(app);
+ let done=false;const racing=async(url,init)=>{if(!done&&String(url).endsWith('/skills/')){done=true;await app.request('/api/sell-station',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},body:JSON.stringify({station:OTHER})});}return app.fetchImpl(url,init);};
+ await syncPilot(id,app.env,racing,{force:true});assert.equal(snap(app).sellStation,OTHER);
+});
+test('/api/sell-station is rate limited with the journal limiter',async()=>{
+ const app=setup(),{bearer}=await connect(app);app.env.RATE_JOURNAL={limit:async()=>({success:false})};
+ const r=await app.request('/api/sell-station',{method:'POST',headers:{Authorization:`Bearer ${bearer}`},body:JSON.stringify({station:null})});assert.equal(r.status,429);
+});
+test('the wing summary carries hangar stacks only at consent level 3',async()=>{
+ const app=setup({dock:DOCK,hangar:[hangar(34,5)]}),{bearer}=await connect(app,{wing3:true});
+ const wing=async()=>(await(await app.request('/api/wing',{headers:{Authorization:`Bearer ${bearer}`}})).json()).pilots;
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3').run();assert.deepEqual((await wing())[0].stacks,{[DOCK]:[[34,5]]});
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 1').run();assert.deepEqual((await wing())[0].stacks,{[DOCK]:[[34,5]]},'the pilot always sees their own');
+ app.env.DB.raw.prepare("INSERT INTO pilots (character_id,name,credentials,snapshot,share_wing) VALUES (2124815118,'Decxus','x',?,2)").run(JSON.stringify({sellStation:OTHER,operations:{ship:{value:{ship_type_id:1}},stacks:{value:{[OTHER]:[[34,1]]}}}}));
+ const other=(await wing()).find(x=>x.name==='Decxus');assert.ok(other.ship);assert.equal(other.stacks,undefined);assert.ok(!JSON.stringify(other).includes('sellStation'));
+ app.env.DB.raw.prepare('UPDATE pilots SET share_wing = 3 WHERE character_id = 2124815118').run();assert.deepEqual((await wing()).find(x=>x.name==='Decxus').stacks,{[OTHER]:[[34,1]]});
+});
+
+// Android sign-in (migration 0011): PKCE between the app and the Worker, a one-time code in the custom-scheme URL.
+const sha=v=>createHash('sha256').update(v).digest('base64url');
+const VERIFIER='v'.repeat(43),CHALLENGE=sha(VERIFIER);
+async function mobileConnect(app,challenge=CHALLENGE){
+ const pending=await consent(app,{mobile:challenge});
+ const callback=await app.request(`/auth/callback?code=test-code&state=${pending.state}`,{headers:{Cookie:pending.cookie}});
+ return {callback,location:callback.headers.get('Location')};
+}
+const redeem=(app,body,init={})=>app.request('/api/mobile/redeem',{method:'POST',body:typeof body==='string'?body:JSON.stringify(body),...init});
+test('android sign-in: consent page, one-time code, redeem with the verifier, session works',async()=>{
+ const app=setup(),{callback,location}=await mobileConnect(app);
+ assert.equal(callback.status,303);assert.match(location,/^echelon:\/\/auth\/callback\?code=[\w-]{43}&pilot=2124810474$/);
+ assert.ok(!location.includes('backend_session'),'the session is not in the URL');
+ const code=new URL(location).searchParams.get('code'),row=app.env.DB.raw.prepare('SELECT * FROM mobile_codes').get();
+ assert.notEqual(row.code_hash,code);assert.equal(row.challenge,CHALLENGE);assert.equal(JSON.parse(row.session_token_encrypted).v,2,'stored encrypted, bound to its row');
+ assert.ok(row.expires_at>Date.now()&&row.expires_at<=Date.now()+300000);
+ const ok=await redeem(app,{code,verifier:VERIFIER});assert.equal(ok.status,200);const body=await ok.json();
+ assert.equal(body.pilot,id);assert.match(body.session,/^[\w-]{43}$/);assert.ok(body.expires>Date.now());
+ assert.equal(ok.headers.get('Cache-Control'),'no-store');
+ assert.equal((await app.request('/api/session',{headers:{Authorization:`Bearer ${body.session}`}})).status,200);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0,'single use: the row is gone');
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'reuse is refused');
+});
+test('android sign-in: a wrong verifier is refused and spends the code',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ const bad=await redeem(app,{code,verifier:'w'.repeat(43)});assert.equal(bad.status,400);assert.ok(!(await bad.text()).includes('verifier'),'generic error');
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'the right verifier no longer helps');
+});
+test('android sign-in: expired and malformed redeems are refused; the daily cleanup purges old codes',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ for(const body of ['nope',{},{code:'short',verifier:VERIFIER},{code,verifier:'x'},{code:'a'.repeat(43)}])assert.equal((await redeem(app,body)).status,400);
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET expires_at = ?').run(Date.now()-1);
+ assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,400,'expired');
+ const second=await mobileConnect(app);assert.equal(second.callback.status,303);
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET expires_at = ?').run(Date.now()-1);
+ await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0);
+ assert.equal((await redeem(app,'x'.repeat(2000))).status,413,'the body is capped');
+ assert.equal((await app.request('/api/mobile/redeem')).status,404,'POST only');
+});
+test('android sign-in: redeem is rate limited with RATE_AUTH and a code cannot be used for another pilot or row',async()=>{
+ const app=setup(),{location}=await mobileConnect(app),code=new URL(location).searchParams.get('code');
+ app.env.RATE_AUTH=limiter(0);assert.equal((await redeem(app,{code,verifier:VERIFIER})).status,429);
+ app.env.RATE_AUTH=undefined;
+ // The encrypted session is bound to its own row: copied under another hash it does not decrypt.
+ const row=app.env.DB.raw.prepare('SELECT * FROM mobile_codes').get(),other=sha('another-code');
+ app.env.DB.raw.prepare('UPDATE mobile_codes SET code_hash = ? WHERE code_hash = ?').run(other,row.code_hash);
+ assert.equal((await redeem(app,{code:'another-code'.padEnd(43,'a'),verifier:VERIFIER})).status,400);
+});
+test('android sign-in: the start request is validated, the browser flow is untouched, and the consent page keeps its CSP',async()=>{
+ const app=setup();
+ for(const q of ['client=android','client=android&challenge=short','client=ios&challenge='+CHALLENGE,'client=android&challenge='+'+'.repeat(43)])assert.equal((await app.request(`/auth/start?pilot=${id}&${q}`)).status,400);
+ const page=await app.request(`/auth/start?pilot=${id}&client=android&challenge=${CHALLENGE}`),csp=page.headers.get('Content-Security-Policy');
+ assert.equal(page.status,200);assert.match(await page.clone().text(),new RegExp(`<form method="post" action="/auth/start">.*name="challenge" value="${CHALLENGE}"`));
+ assert.match(csp,/form-action 'self' https:\/\/login\.eveonline\.com(;|$)/);assert.match(csp,/frame-ancestors 'none'/);assert.match(csp,/default-src 'none'/);assert.match(csp,/base-uri 'none'/);
+ assert.ok(!/echelon:/.test(csp),'the custom scheme is a redirect target, never a form target');
+ // The POST without the app's fields is the browser flow, and its callback still ends in the fragment redirect.
+ const plain=await connect(app);assert.equal(plain.callback.status,303);assert.match(plain.callback.headers.get('Location'),/^https:\/\/matheusfiorin\.github\.io\/eve-journal\/#backend_session=/);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM mobile_codes').get().n,0);
+ const browserPage=await(await app.request(`/auth/start?pilot=${id}`)).text();assert.ok(!browserPage.includes('name="challenge"'));
+ // A POST that claims android without a valid challenge is refused.
+ const p=await app.request(`/auth/start?pilot=${id}`),csrf=(await p.text()).match(/name="csrf" value="([^"]+)"/)[1];
+ const forged=await app.request('/auth/start',{method:'POST',headers:{Origin:'https://api.example',Cookie:p.headers.get('Set-Cookie').split(';')[0]},body:new URLSearchParams({pilot:String(id),csrf,share:'yes',client:'android',challenge:'x'})});assert.equal(forged.status,400);
+});
+
+// GET /api/live: position, ship and online state, 3 ESI calls, 5 s cache per pilot, never logged.
+test('live: returns location, ship and online state with three ESI calls, then serves the cache for 5 s',async()=>{
+ const app=setup({dock:60003760}),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const before=app.calls.length;
+ const r=await app.request('/api/live',auth);assert.equal(r.status,200);assert.equal(r.headers.get('Cache-Control'),'no-store');
+ const body=await r.json();
+ assert.deepEqual({...body,at:undefined},{system:30000142,station:60003760,structure:null,shipType:605,shipItem:1001,shipName:'Private ship name',online:{online:true,lastLogin:'2026-11-20T10:00:00Z',lastLogout:'2026-11-20T08:00:00Z'},at:undefined});
+ assert.ok(Number.isFinite(Date.parse(body.at)));
+ const esi=app.calls.slice(before).filter(c=>c.url.includes('/characters/'));assert.deepEqual(esi.map(c=>new URL(c.url).pathname.split('/')[3]).sort(),['location','online','ship']);assert.equal(app.calls.length-before,3,'no token refresh needed');
+ await app.request('/api/live',auth);assert.equal(app.calls.length-before,3,'cached');
+ // After 5 s the next request asks ESI again (the cache entry is aged by hand).
+ const realNow=Date.now;Date.now=()=>realNow()+6000;
+ try{await app.request('/api/live',auth);}finally{Date.now=realNow;}
+ assert.equal(app.calls.length-before,6);
+ assert.equal((await app.request('/api/live')).status,401);
+});
+test('live: an expired access token is refreshed under the sync lock, which is released; a busy pilot answers 409',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length;
+ assert.equal((await app.request('/api/live',auth)).status,200);
+ assert.ok(app.calls.slice(before).some(c=>c.url.endsWith('/oauth/token')&&String(c.init.body).includes('grant_type=refresh_token')),'refreshed');
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until AS l FROM pilots').get().l,0,'the lock is released');
+ const rotated=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);assert.ok(rotated.expires>Date.now()+60000,'the rotated credentials were saved');
+ resetLive();
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, sync_lock_until = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P),Date.now()+60000);
+ assert.equal((await app.request('/api/live',auth)).status,409,'a refresh waits for the sync that holds the lock');
+ // A valid token needs no lock at all: a running sync does not block the read.
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt(old,app.env.TOKEN_ENCRYPTION_KEY,P));
+ assert.equal((await app.request('/api/live',auth)).status,200);
+ // A refused grant is not asked again.
+ resetLive();app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?, sync_lock_until = 0, grant_revoked_at = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P),Date.now());
+ assert.equal((await app.request('/api/live',auth)).status,502);
+});
+test('live: missing scopes, an unreadable online state and ESI failures degrade as described',async()=>{
+ const noLoc=setup({scopes:SCOPES}),a=await connect(noLoc);assert.equal((await noLoc.request('/api/live',{headers:{Authorization:`Bearer ${a.bearer}`}})).status,403);
+ const noOnline=setup({scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-location.read_online.v1')}),b=await connect(noOnline);const before=noOnline.calls.length;
+ const body=await(await noOnline.request('/api/live',{headers:{Authorization:`Bearer ${b.bearer}`}})).json();assert.equal(body.online,null);assert.equal(body.system,30000142);assert.equal(noOnline.calls.length-before,2);
+ const flaky=setup({onlineFail:true}),c=await connect(flaky);const part=await(await flaky.request('/api/live',{headers:{Authorization:`Bearer ${c.bearer}`}})).json();assert.equal(part.online,null);assert.equal(part.shipType,605);
+ const gone=setup({limitPath:'/ship/'}),e=await connect(gone);assert.equal((await gone.request('/api/live',{headers:{Authorization:`Bearer ${e.bearer}`}})).status,200,'one of the two core reads failing still answers');
+});
+test('live: rate limited per session (30 a minute binding), and no location reaches a log line',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const lines=[];const sink=logger.sink;logger.sink=l=>lines.push(l);
+ try{
+  const rl=app.env.RATE_LIVE=limiter(1);
+  assert.equal((await app.request('/api/live',auth)).status,200);assert.equal((await app.request('/api/live',auth)).status,429);
+  assert.ok(!rl.keys.join().includes(bearer),'keyed by a hash of the session');assert.equal(new Set(rl.keys).size,1);
+ }finally{logger.sink=sink;}
+ const text=lines.join('\n');for(const secret of ['30000142','Private ship name',String(id),'60003760'])assert.ok(!text.includes(secret),`${secret} stays out of logs`);
+ assert.ok(text.includes('/api/live'));
+});
+
+// Corporation data (migration 0012): the pilot's corporation id, the hourly corp sync, role errors, budget, /api/corp and alerts.
+const CORP=98000001,H1=3600000;
+const corpFixture=(extra={})=>({corp:CORP,typeNames:{16213:'Caldari Control Tower',20063:'Gallente Control Tower Medium',20066:'Minmatar Control Tower Small'},corpData:{
+ starbases:[{starbase_id:501,type_id:20063,system_id:30000142,moon_id:40000001,state:'online',onlined_since:'2026-01-01T00:00:00Z'},{starbase_id:502,type_id:16213,system_id:30000142,state:'reinforced',reinforced_until:'2026-11-22T00:00:00Z'}],
+ fuels:{501:[{type_id:4051,quantity:200},{type_id:16275,quantity:2000}],502:[{type_id:4246,quantity:4000},{type_id:16275,quantity:800}]},
+ structures:[{structure_id:9001,type_id:35832,system_id:30000142,name:'Jita - Keepstar one',state:'shield_vulnerable',fuel_expires:new Date(Date.now()+2*86400000).toISOString(),services:[{name:'Market',state:'online'}]},{structure_id:9002,type_id:35826,system_id:30000142,name:'Fortress',state:'armor_reinforce',state_timer_end:'2026-11-22T10:00:00Z',fuel_expires:new Date(Date.now()+20*86400000).toISOString()}],
+ wallets:[{division:1,balance:5e9},{division:2,balance:100}],divisions:{wallet:[{division:1,name:'Master wallet'}],hangar:[{division:1,name:'Hangar 1'}]},
+ members:[id,2124815118,555],jobs:[{job_id:1,installer_id:id,activity_id:1,blueprint_type_id:1,product_type_id:2,status:'active',runs:1,start_date:'2026-11-20T00:00:00Z',end_date:'2026-11-23T00:00:00Z',location_id:60003760}],
+ customs:[{office_id:7001,system_id:30000142,reinforce_exit_start:3,reinforce_exit_end:4,standing_level_tax_rates:{good:0.05}}],
+ assets:[{item_id:1,type_id:27,quantity:1,location_id:60003760,location_type:'station',location_flag:'OfficeFolder'},{item_id:2,type_id:34,quantity:900,location_id:1,location_type:'item',location_flag:'CorpSAG1'},{item_id:3,type_id:35,quantity:100,location_id:60003760,location_type:'station',location_flag:'Hangar'}]},...extra});
+async function corpApp(extra={}){const app=setup(corpFixture(extra)),c=await connect(app);return {app,bearer:c.bearer,auth:{headers:{Authorization:`Bearer ${c.bearer}`}}};}
+const corpSnap=app=>JSON.parse(app.env.DB.raw.prepare('SELECT snapshot FROM corp_snapshots').get().snapshot);
+const unlock=app=>app.env.DB.raw.prepare('UPDATE pilots SET sync_lock_until = 0, updated_at = ?').run(Date.now());
+test('corp: the pilot corporation id is read from the public character route, at most every 6 hours, and exposed to its owner',async()=>{
+ const app=setup({corp:CORP}),{bearer}=await connect(app),pilotCalls=()=>app.calls.filter(c=>/\/characters\/\d+\/$/.test(c.url));
+ assert.equal(app.env.DB.raw.prepare('SELECT corporation_id AS c FROM pilots').get().c,CORP);assert.equal(pilotCalls().length,1);assert.ok(!pilotCalls()[0].init.headers.Authorization,'a public route: no token sent');
+ const payload=await(await app.request('/api/session',{headers:{Authorization:`Bearer ${bearer}`}})).json();assert.equal(payload.corporationId,CORP);
+ await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(pilotCalls().length,1,'not asked again within 6 hours');
+ app.env.DB.raw.prepare('UPDATE pilots SET corp_checked_at = ?, sync_lock_until = 0').run(Date.now()-7*H1);await syncPilot(id,app.env,app.fetchImpl,{force:true});assert.equal(pilotCalls().length,2);
+ const none=setup();await connect(none);assert.equal(none.env.DB.raw.prepare('SELECT corporation_id AS c FROM pilots').get().c,null,'no id from ESI: none stored');
+ assert.ok(none.env.DB.raw.prepare('SELECT corp_checked_at AS t FROM pilots').get().t<Date.now()-5*H1,'a miss is retried in about 30 minutes');
+});
+test('corp sync: every section, derived health from the tower type, names resolved',async()=>{
+ const {app}=await corpApp(),calls0=app.calls.length;
+ assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ const snap=corpSnap(app),row=app.env.DB.raw.prepare('SELECT * FROM corp_snapshots').get();
+ assert.equal(row.source_pilot,id);assert.equal(row.error,null);assert.equal(snap.partial,false);assert.deepEqual(snap.errors,{});
+ const [medium,large]=snap.starbases.value;
+ assert.equal(medium.size,'medium');assert.equal(medium.fuelBlocks,200);assert.equal(medium.fuelHours,10,'200 blocks at 20 an hour');assert.equal(medium.strontiumHours,10,'2000 clathrates at 200 an hour');assert.ok(Math.abs(medium.fuelEmptyAt-(Date.now()+10*H1))<5000);
+ assert.equal(large.size,'large');assert.equal(large.fuelHours,100);assert.equal(large.strontiumHours,2);assert.equal(large.fuelEmptyAt,null,'a reinforced tower is not burning fuel');assert.equal(large.state,'reinforced');
+ assert.equal(snap.structures.value[0].services[0].name,'Market');
+ assert.deepEqual(snap.wallets.value,[{division:1,balance:5e9},{division:2,balance:100}]);assert.equal(snap.divisions.value.wallet[0].name,'Master wallet');
+ assert.equal(snap.members.value.count,3);assert.equal(snap.members.value.members[0][1],`Type ${id}`);
+ assert.equal(snap.jobs.value[0].job_id,1);assert.equal(snap.customs.value[0].office_id,7001);
+ assert.deepEqual(snap.assets.value.places.find(p=>p.id===60003760),{id:60003760,items:3,types:[[34,900],[35,100],[27,1]]},'the container contents roll up to the station');
+ const detail=app.calls.slice(calls0).filter(c=>/starbases\/\d+\/\?system_id=30000142$/.test(c.url));assert.equal(detail.length,2,'one detail call per tower, with its system');
+});
+test('corp sync: a missing in-game role is a per-section note; the other sections and the last good copy stay',async()=>{
+ const options=corpFixture({deny:['wallets','structures']}),app=setup(options);await connect(app);
+ assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ let snap=corpSnap(app);assert.equal(snap.errors.wallets,'needs role Accountant');assert.equal(snap.errors.structures,'needs role Station Manager');assert.equal(snap.starbases.value.length,2);assert.equal(snap.wallets.value,undefined);
+ assert.equal(app.env.DB.raw.prepare('SELECT error FROM corp_snapshots').get().error,null,'the run itself did not fail');
+ // The role arrives: the sections fill in. It leaves again: the good copy stays, with the note.
+ delete options.deny;unlock(app);await syncCorp(CORP,app.env,app.fetchImpl,Date.now()+CORP_EVERY);
+ snap=corpSnap(app);assert.deepEqual(snap.errors,{});assert.equal(snap.wallets.value.length,2);
+ options.deny=['wallets'];unlock(app);await syncCorp(CORP,app.env,app.fetchImpl,Date.now()+2*CORP_EVERY);
+ snap=corpSnap(app);assert.equal(snap.errors.wallets,'needs role Accountant');assert.equal(snap.wallets.value.length,2,'the last good copy is kept');
+ // Without the scope at all: a reconnect note and no ESI call for it.
+ const noScope=setup({...corpFixture(),scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-wallet.read_corporation_wallets.v1')});await connect(noScope);const before=noScope.calls.length;
+ await syncCorp(CORP,noScope.env,noScope.fetchImpl);assert.match(corpSnap(noScope).errors.wallets,/needs permission/);assert.ok(!noScope.calls.slice(before).some(c=>c.url.includes('/wallets/')));
+ // No pilot with any corporation scope: one stored error, no ESI.
+ const bare=setup({corp:CORP,scopes:SCOPES});await connect(bare);const n=bare.calls.length;assert.deepEqual(await syncCorp(CORP,bare.env,bare.fetchImpl),{corp:'failed'});
+ assert.match(bare.env.DB.raw.prepare('SELECT error FROM corp_snapshots').get().error,/allowed corporation access/);assert.equal(bare.calls.length,n);
+});
+test('corp sync: a removed starbase endpoint (404) is an empty list, not a failure',async()=>{
+ const {app}=await corpApp({starbases404:true});assert.deepEqual(await syncCorp(CORP,app.env,app.fetchImpl),{corp:'ok'});
+ const snap=corpSnap(app);assert.deepEqual(snap.starbases.value,[]);assert.equal(snap.starbases.gone,true);assert.equal(snap.errors.starbases,undefined);assert.equal(snap.structures.value.length,2);
+});
+test('corp sync: the subrequest budget holds in the worst case (30 towers, every page, a token refresh)',async()=>{
+ const towers=Array.from({length:30},(_,i)=>({starbase_id:600+i,type_id:20063,system_id:30000142,state:'online'}));
+ const jobs=Array.from({length:10},(_,i)=>({job_id:i,installer_id:id,activity_id:1,blueprint_type_id:1,status:'active',runs:1,start_date:'x',end_date:'y',location_id:1}));
+ const {app}=await corpApp({corpData:{...corpFixture().corpData,starbases:towers,fuels:{},pages:{structures:3,jobs:2,customs:2,assets:9},structures:[[],[],[]],jobs:[jobs,jobs],customs:[[],[]],assets:Array.from({length:9},(_,p)=>Array.from({length:1000},(_,i)=>({item_id:p*1000+i+10,type_id:34,quantity:1,location_id:60003760,location_type:'station',location_flag:'Hangar'})))}});
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length,r=await syncCorp(CORP,app.env,app.fetchImpl);
+ assert.ok(app.calls.length-before<=SYNC_LIMIT,`${app.calls.length-before} requests`);assert.ok(app.calls.length-before>=38,'the worst case really was exercised');assert.equal(r.corp,'ok');
+ const snap=corpSnap(app);assert.equal(snap.starbases.value.length,20,'capped at 20 towers');assert.equal(snap.starbases.truncated,true);assert.equal(snap.starbases.total,30);assert.equal(snap.assets.truncated,true);
+ assert.equal(app.calls.slice(before).filter(c=>c.url.includes('/assets/')).length,5,'five asset pages at most');
+});
+test('corp sync: a run that ESI cuts short is partial, due again after a few minutes, and finishes the same cycle',async()=>{
+ const options=corpFixture(),app=setup(options);await connect(app);sampled(app);options.remaining=ESI_FLOOR-1;
+ assert.equal((await syncCorp(CORP,app.env,app.fetchImpl)).corp,'partial');
+ const first=corpSnap(app);assert.equal(first.partial,true);assert.ok(first.starbases.value,'what was reached is kept');assert.equal(first.wallets,undefined,'the rest waits');
+ // Too soon: the pilots' own syncs go on. After CORP_RESUME the corporation takes a run and carries on.
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync');
+ delete options.remaining;app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-CORP_RESUME-1000);unlock(app);
+ assert.deepEqual(await scheduledSync(app.env,app.fetchImpl,Date.now()),{job:'corp',corp:'ok'});
+ const done=corpSnap(app);assert.equal(done.partial,false);assert.equal(done.cycleStart,first.cycleStart,'the same cycle');assert.equal(done.wallets.value.length,2);
+});
+test('corp turn on the cron: at most hourly per corporation, and only while the pilots are fresh',async()=>{
+ const {app}=await corpApp();sampled(app);
+ app.env.DB.raw.prepare('UPDATE pilots SET updated_at = ?').run(Date.now()-3600000);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync','a stale pilot is synced before the corporation');
+ unlock(app);assert.deepEqual(await scheduledSync(app.env,app.fetchImpl,Date.now()),{job:'corp',corp:'ok'});
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync','built less than an hour ago');
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.cycleStart', ?)").run(Date.now()-CORP_EVERY-1000);
+ unlock(app);assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'corp','an hour later it is due again');
+ // A failed run is tried again after CORP_RETRY, not every five minutes.
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET error = 'x', updated_at = ?").run(Date.now()-60000);unlock(app);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'sync');
+ app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-CORP_RETRY-1000);unlock(app);
+ assert.equal((await scheduledSync(app.env,app.fetchImpl,Date.now())).job,'corp');
+});
+test('GET /api/corp: the snapshot of the caller\'s own corporation with age and errors; 404 without one; other corporations stay out',async()=>{
+ const {app,auth}=await corpApp({deny:['members']});
+ assert.equal((await app.request('/api/corp',auth)).status,404,'nothing built yet');assert.equal((await app.request('/api/corp')).status,401);
+ await syncCorp(CORP,app.env,app.fetchImpl);
+ const r=await app.request('/api/corp',auth);assert.equal(r.status,200);assert.equal(r.headers.get('Cache-Control'),'no-store');const body=await r.json();
+ assert.equal(body.corporationId,CORP);assert.ok(body.age<5);assert.equal(body.partial,false);assert.equal(body.source,'Fiofka');assert.equal(body.errors.members,'needs role Director');
+ assert.equal(body.starbases.value[0].fuelHoursLeft,10,'health is worked out for now');assert.ok(body.structures.value[0].fuelDaysLeft<=2&&body.structures.value[0].fuelDaysLeft>1.9);
+ assert.ok(!('names' in body)&&!('cycleStart' in body),'bookkeeping stays inside');
+ // The corporation comes from the caller's pilot row: another corporation's snapshot is never reachable.
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = 98000002').run();assert.equal((await app.request(`/api/corp?corporation_id=${CORP}`,auth)).status,404);
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = NULL').run();assert.equal((await app.request('/api/corp',auth)).status,404);
+ app.env.RATE_JOURNAL=limiter(0);assert.equal((await app.request('/api/corp',auth)).status,429);
+});
+test('corp alerts: fuel, reinforcement, de-duplicated, no places, only with the source pilot\'s alert consent',async()=>{
+ const {app}=await corpApp({corpData:{...corpFixture().corpData,fuels:{501:[{type_id:4051,quantity:100},{type_id:16275,quantity:2000}],502:[{type_id:4246,quantity:4000}]}}});
+ app.env.DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1/abc';
+ app.env.DB.raw.prepare('INSERT INTO market_snapshots (region_id, data, updated_at) VALUES (1, ?, ?)').run(JSON.stringify({systems:{30000142:['Jita',0.9,10000002,[],0]}}),Date.now());
+ await syncCorp(CORP,app.env,app.fetchImpl);
+ const posts=[],send=(url,init)=>String(url).includes('discord.com')?(posts.push(JSON.parse(init.body).content),Promise.resolve(new Response(null,{status:204}))):app.fetchImpl(url,init);
+ const {sendAlerts}=await import('../worker/alerts.js');
+ await sendAlerts(app.env,send);assert.equal(posts.length,0,'the source pilot did not tick the alerts box');
+ app.env.DB.raw.prepare('UPDATE pilots SET share_alerts = 1').run();
+ await sendAlerts(app.env,send);await sendAlerts(app.env,send);
+ assert.ok(posts.some(t=>/^A tower is low on fuel: about 5 h left$/.test(t)),posts.join('|'));
+ assert.ok(posts.some(t=>/^A tower is reinforced/.test(t)));
+ assert.ok(posts.some(t=>/^A structure is low on fuel: about 2 d left$/.test(t)),'a name with a system in it is not used');
+ assert.ok(posts.some(t=>/^Structure Fortress is reinforced \(armor\)/.test(t)),'its own name, when it carries no place');
+ for(const t of posts.filter(t=>/[Tt]ower|[Ss]tructure/.test(t)))for(const place of ['Jita','30000142','Keepstar','98000001','Fiofka','2124810474'])assert.ok(!t.includes(place),`${place} not in ${t}`);
+ const n=posts.length;await sendAlerts(app.env,send);await sendAlerts(app.env,send);assert.equal(posts.length,n,'each event once');
+ // A refuel moves the empty time out; the next dry spell alerts again.
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.starbases.value[0].fuelEmptyAt', ?)").run(Date.now()+10*86400000);
+ await sendAlerts(app.env,send);assert.equal(posts.length,n);
+ const later=Date.now()+10*86400000;
+ app.env.DB.raw.prepare("UPDATE corp_snapshots SET snapshot = json_set(snapshot, '$.starbases.value[0].fuelEmptyAt', ?)").run(later+3*3600000);
+ await sendAlerts(app.env,send,later);assert.equal(posts.length,n+1);assert.match(posts.at(-1),/about 3 h left/);
+});
+test('corp: the daily cleanup drops snapshots of corporations nobody belongs to; disconnect drops the asset cache',async()=>{
+ const {app,auth}=await corpApp();await syncCorp(CORP,app.env,app.fetchImpl);
+ app.env.DB.raw.prepare('UPDATE corp_snapshots SET updated_at = ?').run(Date.now()-8*86400000);await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM corp_snapshots').get().n,1,'a member still belongs to it');
+ app.env.DB.raw.prepare('UPDATE pilots SET corporation_id = 5').run();await cleanup(app.env);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM corp_snapshots').get().n,0);
+ app.env.DB.raw.prepare('INSERT INTO asset_cache (character_id, data, fetched_at, expires_at) VALUES (?, ?, ?, ?)').run(id,'x',Date.now(),Date.now()+1000);
+ assert.equal((await app.request('/api/disconnect',{method:'POST',...auth})).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,0);
+});
+
+// GET /api/assets: the caller's own assets as a tree, read live, cached in D1 (migration 0012).
+const STATION=60003760,STRUCT=1030000000001;
+const assetRows=[[{item_id:10,type_id:605,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:true},
+ {item_id:11,type_id:3293,quantity:1,location_id:10,location_type:'item',location_flag:'FighterBay',is_singleton:false},
+ {item_id:12,type_id:34,quantity:500,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:false},
+ {item_id:13,type_id:17363,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:true},
+ {item_id:14,type_id:35,quantity:9,location_id:13,location_type:'item',location_flag:'Unlocked',is_singleton:false},
+ {item_id:15,type_id:36,quantity:3,location_id:STRUCT,location_type:'other',location_flag:'Hangar',is_singleton:false},
+ {item_id:16,type_id:37,quantity:2,location_id:30000142,location_type:'solar_system',location_flag:'Hangar',is_singleton:true},
+ {item_id:17,type_id:38,quantity:1,location_id:999,location_type:'item',location_flag:'Hangar',is_singleton:false}]];
+const assetApp=async(extra={})=>{const options={assetRows,...extra},app=setup(options),c=await connect(app);return {app,options,auth:{headers:{Authorization:`Bearer ${c.bearer}`}}};};
+test('assets: a tree by location with containers nested, station names resolved, structures unnamed',async()=>{
+ const {app,auth}=await assetApp();
+ const r=await app.request('/api/assets?location=all',auth);assert.equal(r.status,200);const body=await r.json();
+ assert.equal(body.cached,false);assert.equal(body.truncated,false);assert.equal(body.items,8);
+ const at=lid=>body.locations.find(l=>l.id===lid);
+ assert.deepEqual([at(STATION).kind,at(STATION).name,at(STATION).count],['station',`Type ${STATION}`,3]);
+ const ship=at(STATION).items.find(i=>i.item_id===10);assert.equal(ship.singleton,true);assert.deepEqual(ship.contents,[{item_id:11,type_id:3293,quantity:1,flag:'FighterBay',singleton:false}]);
+ assert.equal(at(STATION).items.find(i=>i.item_id===13).contents[0].quantity,9,'items in a container');
+ assert.deepEqual([at(STRUCT).kind,at(STRUCT).name],['structure',null],'a structure has no name without its scope');
+ assert.equal(at(30000142).kind,'solar_system');
+ assert.equal(at(999).kind,'other','an item whose container was not listed is its own root, not dropped');
+ const names=app.calls.filter(c=>c.url.endsWith('/universe/names/'));assert.equal(names.length,1);assert.deepEqual(JSON.parse(names[0].init.body),[STATION],'only stations are looked up');
+ const one=await(await app.request(`/api/assets?location=${STATION}`,auth)).json();assert.equal(one.locations.length,1);assert.equal(one.locations[0].id,STATION);
+ assert.equal((await app.request('/api/assets?location=12345',auth)).status,404);
+ for(const q of ['','?location=abc','?location=-1'])assert.equal((await app.request(`/api/assets${q}`,auth)).status,q===''?200:400,q);
+ assert.equal((await app.request('/api/assets?location=all')).status,401);
+});
+test('assets: cached in D1 (gzipped) for ten minutes at least and refetched after',async()=>{
+ const {app,auth}=await assetApp(),base=app.calls.filter(c=>/\/assets\/$/.test(c.url)).length,count=()=>app.calls.filter(c=>/\/assets\/$/.test(c.url)).length-base;
+ await app.request('/api/assets?location=all',auth);assert.equal(count(),1);
+ const row=app.env.DB.raw.prepare('SELECT * FROM asset_cache').get();assert.ok(!row.data.includes('item_id')&&!row.data.includes('['),'compressed, not plain JSON');
+ assert.ok(row.expires_at-row.fetched_at>=ASSET_TTL);assert.ok(row.expires_at-row.fetched_at<=3600000);
+ const again=await(await app.request(`/api/assets?location=${STATION}`,auth)).json();assert.equal(again.cached,true);assert.equal(count(),1,'browsing another location costs no ESI call');assert.equal(again.fetchedAt,new Date(row.fetched_at).toISOString());
+ app.env.DB.raw.prepare('UPDATE asset_cache SET expires_at = ?').run(Date.now()-1);
+ assert.equal((await(await app.request('/api/assets?location=all',auth)).json()).cached,false);assert.equal(count(),2);
+ assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,1);
+});
+test('assets: pages are capped (the request stays inside 50 subrequests), a missing scope is refused, a failed read caches nothing',async()=>{
+ const pages=Array.from({length:30},(_,p)=>[{item_id:100+p,type_id:34,quantity:1,location_id:STATION,location_type:'station',location_flag:'Hangar',is_singleton:false}]);
+ const {app,auth}=await assetApp({assetRows:pages,assetPages:30});
+ const old=await decrypt(app.env.DB.raw.prepare('SELECT credentials FROM pilots').get().credentials,app.env.TOKEN_ENCRYPTION_KEY,P);
+ app.env.DB.raw.prepare('UPDATE pilots SET credentials = ?').run(await encrypt({...old,expires:1},app.env.TOKEN_ENCRYPTION_KEY,P));
+ const before=app.calls.length,body=await(await app.request('/api/assets?location=all',auth)).json();
+ assert.equal(body.truncated,true);assert.equal(body.items,20);assert.equal(app.calls.slice(before).filter(c=>/assets\/(\?page=\d+)?$/.test(c.url)).length,20);assert.ok(app.calls.length-before<=30,'well inside the 50');
+ assert.equal(app.env.DB.raw.prepare('SELECT sync_lock_until AS l FROM pilots').get().l,0);
+ const noScope=setup({scopes:REQUESTED_SCOPES.filter(x=>x!=='esi-assets.read_assets.v1')}),c=await connect(noScope);
+ assert.equal((await noScope.request('/api/assets?location=all',{headers:{Authorization:`Bearer ${c.bearer}`}})).status,403);
+ const mid=await assetApp({assetRows:pages,assetPages:5,limitPath:'/assets/'});assert.equal((await mid.app.request('/api/assets?location=all',mid.auth)).status,502);assert.equal(mid.app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM asset_cache').get().n,0);
+ app.env.RATE_JOURNAL=limiter(0);assert.equal((await app.request('/api/assets?location=all',auth)).status,429);
+});
+test('assetTree: nesting depth is bounded and roots keep every item',()=>{
+ const rows=[[1,1,1,100,'Hangar',1,0,0]];for(let i=2;i<=12;i++)rows.push([i,1,1,i-1,'Unlocked',0,2,0]);
+ const [loc]=assetTree(rows,{},100);let depth=0,n=loc.items[0];while(n.contents){depth++;n=n.contents[0];}assert.ok(depth<=7,'a chain deeper than the cap stops');
+ assert.deepEqual(assetTree([],{}),[]);
+});
+
+// The wing room (worker/wingroom.js) and its routes. The Durable Object class is tested directly with a fake state over SQLite.
+const wingMod=await import('../worker/wingroom.js');
+const {WingRoom,cleanTimer,timerExpiry,fcmJwt,DAY,MAX_ITEMS}=wingMod;
+const FIO=2124810474,DEC=2124815118;
+function fakeState(){
+ const raw=new DatabaseSync(':memory:'),sockets=[],alarms=[];
+ return {raw,sockets,alarms,storage:{sql:{exec(text,...bind){const st=raw.prepare(text);return {toArray:()=>st.columns().length?st.all(...bind):(st.run(...bind),[])};}},setAlarm:async at=>{alarms.push(at);}},
+  acceptWebSocket(ws){sockets.push(ws);},getWebSockets:()=>sockets.filter(w=>!w.closed)};
+}
+function fakeSocket(){const ws={sent:[],closed:false,att:null,send(m){this.sent.push(JSON.parse(m));},serializeAttachment(a){this.att=a;},deserializeAttachment(){return this.att;},close(){this.closed=true;},last(type){return [...this.sent].reverse().find(m=>m.type===type);}};return ws;}
+function room(env={},extra={}){const state=fakeState(),r=new WingRoom(state,env,extra);return {state,r,join(pilot,name){const ws=fakeSocket();r.attach(ws,pilot,name);return ws;}};}
+const send=(r,ws,msg)=>r.webSocketMessage(ws,typeof msg==='string'?msg:JSON.stringify(msg));
+const gas={id:'t1',kind:'gas',label:'Gas site',startedAt:Date.now(),durationMs:3600000,owner:1,shared:true,meta:{system:'x'}};
+test('wing room: a connecting app gets the state first, and presence is announced to both',()=>{
+ const {join}=room(),a=join(FIO,'Fiofka');assert.equal(a.sent[0].type,'state');assert.deepEqual(a.sent[0].timers,[]);assert.deepEqual(a.sent[0].items,[]);
+ const b=join(DEC,'Decxus');assert.equal(b.sent[0].type,'state');assert.deepEqual(b.last('presence').presence.map(p=>p.pilot).sort(),[FIO,DEC]);
+ assert.deepEqual(a.last('presence').presence.map(p=>p.pilot).sort(),[FIO,DEC],'the first app hears the second join');
+});
+test('wing room: timers fan out to the other pilot only, `from` and `owner` are the authenticated pilot, private timers stay private',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');a.sent.length=0;b.sent.length=0;
+ await send(r,a,{type:'timer.upsert',from:DEC,id:'m1',timer:{...gas,owner:DEC}});
+ const got=b.sent.find(m=>m.type==='timer.upsert');assert.equal(got.from,FIO);assert.equal(got.timer.owner,FIO);assert.equal(got.id,'m1');assert.ok(Math.abs(got.at-Date.now())<5000);
+ assert.ok(!a.sent.some(m=>m.type==='timer.upsert'),'not echoed to the sender');
+ // Another pilot cannot change or remove it.
+ await send(r,b,{type:'timer.upsert',timer:{...gas,label:'mine now'}});assert.equal(b.last('error').code,'not_your_timer');
+ await send(r,b,{type:'timer.remove',timer:{id:'t1'}});assert.equal(b.last('error').code,'not_your_timer');
+ // A reconnecting app sees it in the snapshot.
+ const c=join(DEC,'Decxus');assert.equal(c.sent[0].timers[0].id,'t1');
+ await send(r,a,{type:'timer.upsert',timer:{...gas,shared:false}});assert.equal(b.last('timer.remove').timer.id,'t1','making a timer private removes it for the wingmate');
+ assert.deepEqual(join(DEC,'Decxus').sent[0].timers,[]);
+ await send(r,a,{type:'timer.upsert',id:'p',timer:{...gas,id:'private',shared:false}});assert.ok(!b.sent.some(m=>m.timer?.id==='private'));assert.deepEqual(room().r.snapshot().timers,[]);
+ await send(r,a,{type:'timer.upsert',timer:gas});await send(r,a,{type:'timer.remove',timer:{id:'t1'}});assert.equal(b.last('timer.remove').timer.id,'t1');assert.deepEqual(r.snapshot().timers,[]);
+});
+test('wing room: plans and pings are delivered and kept (the last 50), pings may carry a system only when sent',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');
+ await send(r,a,{type:'ping',kind:'help',text:'tackled'});assert.deepEqual([b.last('ping').kind,b.last('ping').text,b.last('ping').system],['help','tackled',undefined]);
+ await send(r,a,{type:'ping',kind:'omw',system:30000142});assert.equal(b.last('ping').system,30000142);
+ await send(r,a,{type:'plan.share',plan:{kind:'haul',title:'Jita to Amarr',summary:'3 jumps',route:[30000142,30002187,5,'x']}});assert.deepEqual(b.last('plan.share').plan.route,[30000142,30002187]);
+ for(let i=0;i<60;i++)await send(r,a,{type:'ping',kind:'custom',text:`n${i}`}),a.rates=null,r.rates=new WeakMap();
+ const items=r.snapshot().items;assert.equal(items.length,MAX_ITEMS);assert.equal(items.at(-1).text,'n59');assert.equal(items[0].text,'n10');
+ await send(r,a,{type:'ping',kind:'nope'});assert.equal(a.last('error').code,'invalid_ping');
+ await send(r,a,{type:'plan.share',plan:{kind:'sell',title:''}});assert.equal(a.last('error').code,'invalid_plan');
+ await send(r,a,{type:'wat'});assert.equal(a.last('error').code,'unknown_type');
+ await send(r,a,'{nope');assert.equal(a.last('error').code,'bad_json');
+ await send(r,a,'x'.repeat(9000));assert.equal(a.last('error').code,'too_large');
+});
+test('wing room: presence reports the timer count; a closed socket leaves; flooding is limited',async()=>{
+ const {r,join}=room(),a=join(FIO,'Fiofka'),b=join(DEC,'Decxus');
+ await send(r,a,{type:'presence',timers:3});assert.deepEqual(b.last('presence').presence.find(p=>p.pilot===FIO),{pilot:FIO,name:'Fiofka',online:true,timers:3});
+ await r.webSocketClose(a);assert.deepEqual(b.last('presence').presence.map(p=>p.pilot),[DEC]);
+ let limited=false;for(let i=0;i<50;i++){await send(r,b,{type:'ping',kind:'help'});if(b.last('error')?.code==='rate_limited')limited=true;}assert.ok(limited);
+});
+test('wing room: timers expire a day after they end; a timer is validated',()=>{
+ const {r}=room(),now=Date.now();
+ const old={...gas,id:'old',startedAt:now-3*DAY,durationMs:3600000},fresh={...gas,id:'new',startedAt:now-2*3600000};
+ for(const t of [old,fresh,{...gas,id:'paused',startedAt:now-5*DAY,durationMs:1000,pausedAt:now-3600000}])r.apply({type:'timer.upsert',timer:t},FIO,'Fiofka',now);
+ assert.deepEqual(r.snapshot(now).timers.map(t=>t.id).sort(),['new','paused']);
+ assert.equal(timerExpiry(fresh),fresh.startedAt+fresh.durationMs+DAY);
+ assert.equal(r.snapshot(now+2*DAY).timers.length,0);
+ for(const bad of [null,{},{...gas,id:''},{...gas,durationMs:-1},{...gas,durationMs:8*DAY},{...gas,label:'x'.repeat(81)},{...gas,meta:{a:'x'.repeat(3000)}},{...gas,startedAt:'now'}])assert.equal(cleanTimer(bad,FIO),null);
+ assert.equal(cleanTimer(gas,FIO).owner,FIO);
+});
+test('wing room: no push without the FCM secrets (nothing is fetched); with them a wingmate who is away gets a data message',async()=>{
+ const calls=[];const fetchImpl=async(url,init)=>{calls.push({url:String(url),init});if(String(url).includes('oauth2'))return new Response(JSON.stringify({access_token:'at',expires_in:3600}));return new Response('{}',{status:calls.at(-1).init.body.includes('dead')?404:200});};
+ const app=setup();app.env.DB.raw.prepare('INSERT INTO push_tokens (token, character_id, updated_at) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)').run('t-dec-1',DEC,1,'t-dec-dead',DEC,2,'t-fio',FIO,3);
+ const none=room({DB:app.env.DB},{fetchImpl}),a=none.join(FIO,'Fiofka');await send(none.r,a,{type:'ping',kind:'help'});assert.equal(calls.length,0,'a no-op without secrets');
+ const pair=generateKeyPairSync('rsa',{modulusLength:2048}),account={client_email:'svc@x.iam',private_key:pair.privateKey.export({type:'pkcs8',format:'pem'}),token_uri:'https://oauth2.googleapis.com/token'};
+ const env={DB:app.env.DB,FCM_SERVICE_ACCOUNT:JSON.stringify(account),FCM_PROJECT_ID:'proj'};
+ const on=room(env,{fetchImpl}),f=on.join(FIO,'Fiofka');
+ await send(on.r,f,{type:'ping',kind:'help',text:'tackled',system:30000142});
+ const exchange=calls.find(c=>c.url.includes('oauth2'));assert.ok(exchange);const jwt=new URLSearchParams(String(exchange.init.body)).get('assertion'),[h,p,sig]=jwt.split('.');
+ assert.equal(JSON.parse(Buffer.from(h,'base64url')).alg,'RS256');assert.equal(JSON.parse(Buffer.from(p,'base64url')).iss,'svc@x.iam');
+ const {verify}=await import('node:crypto');assert.ok(verify('RSA-SHA256',Buffer.from(`${h}.${p}`),pair.publicKey,Buffer.from(sig,'base64url')),'a real RS256 signature');
+ const pushes=calls.filter(c=>c.url.includes('fcm.googleapis.com/v1/projects/proj/messages:send'));assert.deepEqual(pushes.map(c=>JSON.parse(c.init.body).message.token).sort(),['t-dec-1','t-dec-dead'],'only the wingmate\'s devices');
+ const msg=JSON.parse(pushes[0].init.body).message;assert.equal(msg.data.kind,'ping');assert.equal(msg.data.from,'Fiofka');assert.ok(!JSON.stringify(msg).includes('30000142'),'no location in a push');assert.equal(pushes[0].init.headers.Authorization,'Bearer at');
+ assert.deepEqual(app.env.DB.raw.prepare('SELECT token FROM push_tokens ORDER BY token').all().map(r=>r.token),['t-dec-1','t-fio'],'a token FCM refused is dropped');
+ // A connected wingmate is not pushed to; a timer start is.
+ calls.length=0;const d=on.join(DEC,'Decxus');await send(on.r,f,{type:'ping',kind:'help'});assert.equal(calls.length,0,'the app is open: no push');on.r.webSocketClose(d);d.closed=true;
+ await send(on.r,f,{type:'timer.upsert',timer:{...gas,startedAt:Date.now()-3000000,durationMs:3000500}});assert.equal(JSON.parse(calls.filter(c=>c.url.includes('messages:send')).at(-1).init.body).message.data.kind,'timer.start');
+ assert.ok(on.state.alarms.length>0,'an alarm is set for the timer end');
+ await new Promise(r=>setTimeout(r,1100));calls.length=0;await on.r.alarm();assert.equal(JSON.parse(calls.filter(c=>c.url.includes('messages:send')).at(-1).init.body).message.data.kind,'timer.end');
+ calls.length=0;await on.r.alarm();assert.equal(calls.length,0,'one end push per timer');
+ assert.ok((await fcmJwt(account)).split('.').length===3);
+});
+test('wing room: the REST paths of the room need the pilot header',async()=>{
+ const {r}=room();assert.equal((await r.fetch(new Request('https://wing-room/state'))).status,403);
+ const ok=await r.fetch(new Request('https://wing-room/state',{headers:{'X-Wing-Pilot':String(FIO)}}));assert.deepEqual(Object.keys(await ok.json()),['timers','items','presence']);
+ assert.equal((await r.fetch(new Request('https://wing-room/nope',{headers:{'X-Wing-Pilot':String(FIO)}}))).status,404);
+});
+// The Worker's side: the ticket, the socket hand-over, the REST fallback and the device token.
+function wingRoomApp(){
+ const app=setup(),state=fakeState(),r=new WingRoom(state,{DB:app.env.DB}),forwarded=[];
+ app.env.WING_ROOM={idFromName:n=>n,get:name=>({fetch:req=>{forwarded.push({name,url:req.url,pilot:req.headers.get('X-Wing-Pilot'),pilotName:req.headers.get('X-Wing-Name'),upgrade:req.headers.get('Upgrade')});return req.url.endsWith('/socket')?new Response('forwarded'):r.fetch(req);}})};
+ return {app,forwarded,r};
+}
+test('wing routes: ticket, socket hand-over with a bearer or a ticket, upgrade required, expired and forged tickets refused',async()=>{
+ const {app,forwarded}=wingRoomApp(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ assert.equal((await app.request('/api/wing/ticket',{method:'POST'})).status,401);
+ const {ticket,expires}=await(await app.request('/api/wing/ticket',{method:'POST',...auth})).json();assert.ok(expires>Date.now()&&expires<=Date.now()+60000);assert.ok(ticket.startsWith(`${id}.`));
+ assert.equal((await app.request('/api/wing/socket',auth)).status,426,'a plain GET is not a socket');
+ const up={Upgrade:'websocket'};
+ assert.equal((await app.request('/api/wing/socket',{headers:{...up,...auth.headers}})).status,200);
+ assert.deepEqual(forwarded.at(-1),{name:'wing',url:'https://wing-room/socket',pilot:String(id),pilotName:'Fiofka',upgrade:'websocket'});
+ assert.equal((await app.request(`/api/wing/socket?ticket=${ticket}`,{headers:up})).status,200);assert.equal(forwarded.at(-1).pilot,String(id),'the ticket names the pilot');
+ const [pilot,exp,mac]=ticket.split('.');
+ for(const bad of [`${pilot}.${exp}.${mac.slice(1)}x`,`${DEC}.${exp}.${mac}`,`${pilot}.${Date.now()-1}.${mac}`,'garbage'])assert.equal((await app.request(`/api/wing/socket?ticket=${bad}`,{headers:up})).status,401,bad);
+ const old=await(async()=>{const realNow=Date.now;Date.now=()=>realNow()-120000;try{return (await(await app.request('/api/wing/ticket',{method:'POST',...auth})).json()).ticket;}finally{Date.now=realNow;}})();
+ assert.equal((await app.request(`/api/wing/socket?ticket=${old}`,{headers:up})).status,401,'expired');
+ assert.equal((await app.request('/api/wing/socket',{headers:{...up,Authorization:`Bearer ${'a'.repeat(43)}`}})).status,401);
+ delete app.env.WING_ROOM;assert.equal((await app.request('/api/wing/socket',{headers:{...up,...auth.headers}})).status,503);
+});
+test('wing routes: the REST fallback reads and changes the room timers; and nothing about the room reaches a log',async()=>{
+ const {app,r}=wingRoomApp(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}};
+ const lines=[];const sink=logger.sink;logger.sink=l=>lines.push(l);
+ try{
+  assert.deepEqual((await(await app.request('/api/wing/timers',auth)).json()).timers,[]);assert.equal((await app.request('/api/wing/timers')).status,401);
+  const post=body=>app.request('/api/wing/timers',{method:'POST',...auth,body:JSON.stringify(body)});
+  const set=await(await post({timer:{...gas,label:'Secret label'}})).json();assert.equal(set.timers[0].owner,id);assert.equal(set.timers[0].label,'Secret label');
+  assert.equal((await post({timer:{...gas,durationMs:-5}})).status,400);
+  assert.equal(r.snapshot().timers.length,1);
+  assert.deepEqual((await(await post({remove:'t1'})).json()).timers,[]);
+  assert.equal((await app.request('/api/wing/timers',{method:'POST',...auth,body:'x'.repeat(9000)})).status,413);
+ }finally{logger.sink=sink;}
+ const text=lines.join('\n');assert.ok(!text.includes('Secret label')&&!text.includes('t1'));assert.ok(text.includes('/api/wing/timers'));
+});
+test('push tokens: register, move between pilots, five per pilot, unregister, and removal with the pilot\'s data',async()=>{
+ const app=setup(),{bearer}=await connect(app),auth={headers:{Authorization:`Bearer ${bearer}`}},reg=(token,path='register')=>app.request(`/api/push/${path}`,{method:'POST',...auth,body:JSON.stringify({token})});
+ assert.equal((await app.request('/api/push/register',{method:'POST',body:'{}'})).status,401);
+ assert.equal((await reg('short')).status,400);assert.equal((await app.request('/api/push/register',{method:'POST',...auth,body:'nope'})).status,400);
+ for(let i=0;i<7;i++){assert.equal((await reg(`token-${i}-`.padEnd(30,'x'))).status,200);app.env.DB.raw.prepare('UPDATE push_tokens SET updated_at = updated_at + ? WHERE token LIKE ?').run(i,`token-${i}-%`);}
+ const rows=app.env.DB.raw.prepare('SELECT token FROM push_tokens ORDER BY updated_at').all();assert.equal(rows.length,5,'five newest per pilot');
+ const keep=rows.at(-1).token;assert.equal((await reg(keep,'unregister')).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM push_tokens').get().n,4);
+ app.env.DB.raw.prepare('UPDATE push_tokens SET character_id = ?').run(DEC);assert.equal((await reg(rows[0].token)).status,200);assert.equal(app.env.DB.raw.prepare('SELECT character_id AS c FROM push_tokens WHERE token = ?').get(rows[0].token).c,id,'a re-registered token moves to the new pilot');
+ assert.equal((await app.request('/api/disconnect',{method:'POST',...auth})).status,200);assert.equal(app.env.DB.raw.prepare('SELECT COUNT(*) AS n FROM push_tokens WHERE character_id = ?').get(id).n,0);
+});
+test('the deploy config binds the wing room as a SQLite Durable Object and the Worker exports it',async()=>{
+ const deploy=await readFile(new URL('../scripts/deploy-backend.mjs',import.meta.url),'utf8');
+ assert.match(deploy,/durable_objects:\{bindings:\[\{name:'WING_ROOM',class_name:'WingRoom'\}\]\}/);assert.match(deploy,/migrations:\[\{tag:'v1',new_sqlite_classes:\['WingRoom'\]\}\]/);
+ assert.equal(typeof (await import('../worker/index.js')).WingRoom,'function');
 });

@@ -20,7 +20,19 @@ export const OPERATIONS_SCOPES = {
   // Read now so each pilot reconnects only once; the planner and standings views come later.
   blueprints:'esi-characters.read_blueprints.v1',
   planets:'esi-planets.manage_planets.v1',
-  standings:'esi-characters.read_standings.v1'
+  standings:'esi-characters.read_standings.v1',
+  // The Android app's live view (GET /api/live): is the pilot online. Location and ship come from the scopes above.
+  online:'esi-location.read_online.v1',
+  // Corporation data for the Android app's Corp tab (worker/index.js syncCorp). Optional: ESI also needs the pilot to hold the
+  // matching in-game role (Director, Station Manager, Accountant, Factory Manager), and a missing role is shown, not fatal.
+  starbases:'esi-corporations.read_starbases.v1',
+  structures:'esi-corporations.read_structures.v1',
+  corpAssets:'esi-assets.read_corporation_assets.v1',
+  corpWallets:'esi-wallet.read_corporation_wallets.v1',
+  corpMembers:'esi-corporations.read_corporation_membership.v1',
+  corpJobs:'esi-industry.read_corporation_jobs.v1',
+  customs:'esi-planets.read_customs_offices.v1',
+  divisions:'esi-corporations.read_divisions.v1'
 };
 export const REQUESTED_SCOPES = [...new Set([...SCOPES, ...Object.values(OPERATIONS_SCOPES)])];
 export function base64url(bytes) {

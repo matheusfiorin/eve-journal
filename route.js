@@ -67,6 +67,23 @@ export function paths(g, from, {safe = true, weight} = {}) {
     }
   };
 }
+// Each system's number in the arrays that hops() returns.
+export const systemIndex = g => numbered(g).index;
+// Gate jumps from one system to every system within `max`, whatever the security: how a buy order's range is counted.
+// An Int16Array by systemIndex(g); -1 beyond `max` or unreachable.
+export function hops(g, from, max = Infinity) {
+  const {index, start, to, ids} = numbered(g), dist = new Int16Array(ids.length).fill(-1), src = index.get(from);
+  if (src === undefined) return dist;
+  const queue = new Int32Array(ids.length);
+  let head = 0, tail = 0;
+  dist[src] = 0; queue[tail++] = src;
+  while (head < tail) {
+    const at = queue[head++], d = dist[at];
+    if (d >= max) continue;
+    for (let k = start[at]; k < start[at + 1]; k++) if (dist[to[k]] < 0) { dist[to[k]] = d + 1; queue[tail++] = to[k]; }
+  }
+  return dist;
+}
 // One gate route; `safe:false` allows the shortest path through low/null-sec. The cache is keyed per mode.
 export function leg(g, from, to, cache = new Map(), {safe = true} = {}) {
   const key = safe ? from : `${from}:unsafe`;

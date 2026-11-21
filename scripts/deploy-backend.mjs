@@ -27,12 +27,14 @@ const config={name,main:resolve('worker/index.js'),compatibility_date:'2025-09-0
 // plan keeps 200k log events a day for 3 days; every run is sampled (the traffic is far below that) and the automatic
 // invocation log is off, so each request costs one event, not two.
 observability:{enabled:true,head_sampling_rate:1,logs:{enabled:true,invocation_logs:false,head_sampling_rate:1}},vars:{FRONTEND_URL:'https://matheusfiorin.github.io/eve-journal/',EVE_CLIENT_ID:clientId},d1_databases:[{binding:'DB',database_name:dbName,database_id:database.uuid,migrations_dir:resolve('worker/migrations')}],// Rate Limiting bindings, per client address per minute (the Worker does nothing when one is missing).
-ratelimits:[{name:'RATE_AUTH',namespace_id:'710001',simple:{limit:10,period:60}},{name:'RATE_MARKET',namespace_id:'710002',simple:{limit:60,period:60}},{name:'RATE_JOURNAL',namespace_id:'710003',simple:{limit:120,period:60}}],
+ratelimits:[{name:'RATE_AUTH',namespace_id:'710001',simple:{limit:10,period:60}},{name:'RATE_MARKET',namespace_id:'710002',simple:{limit:60,period:60}},{name:'RATE_JOURNAL',namespace_id:'710003',simple:{limit:120,period:60}},{name:'RATE_LIVE',namespace_id:'710004',simple:{limit:30,period:60}}],
 // Every 5 minutes: pilot sync or the hourly kills sample. Daily: cleanup of expired sessions and journal tombstones.
-triggers:{crons:['*/5 * * * *',DAILY_CRON]}};
+triggers:{crons:['*/5 * * * *',DAILY_CRON]},
+// The wing room (worker/wingroom.js): one SQLite-backed Durable Object, which the free plan allows. The class is exported by the main module.
+durable_objects:{bindings:[{name:'WING_ROOM',class_name:'WingRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['WingRoom']}]};
 const configPath=resolve('.cloudflare/wrangler.json');await writeFile(configPath,JSON.stringify(config,null,2));
 // Wrangler needs the Cloudflare credentials, not the EVE or pipeline secrets, so those are left out of its environment.
-const {EVE_CLIENT_SECRET:_eve,PIPELINE_SECRET:_pipeline,DISCORD_WEBHOOK_URL:_discord,...wranglerEnv}=process.env;
+const {EVE_CLIENT_SECRET:_eve,PIPELINE_SECRET:_pipeline,DISCORD_WEBHOOK_URL:_discord,FCM_SERVICE_ACCOUNT:_fcm,FCM_PROJECT_ID:_fcmProject,...wranglerEnv}=process.env;
 function wrangler(args){
  const result=spawnSync('npx',['--no-install','wrangler',...args,'--config',configPath],{encoding:'utf8',input:'y\n',env:wranglerEnv,maxBuffer:4*1024*1024});
  if(result.status!==0)throw new Error(`Wrangler ${args[0]} failed (exit ${result.status}). No secret values are included in this log.`);
@@ -53,6 +55,13 @@ if(discordWebhook){
  if(!/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+\/?$/.test(discordWebhook))throw new Error('DISCORD_WEBHOOK_URL is not a Discord webhook URL (https://discord.com/api/webhooks/<id>/<token>).');
  await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'DISCORD_WEBHOOK_URL',type:'secret_text',text:discordWebhook});console.log('Discord alert webhook configured in Cloudflare.');
 }else console.log('DISCORD_WEBHOOK_URL is not set: no Discord alerts. See worker/README.md.');
+// Optional: background push for the Android app (the wing room sends FCM data messages). Without them push does nothing.
+const fcmAccount=process.env.FCM_SERVICE_ACCOUNT?.trim(),fcmProject=process.env.FCM_PROJECT_ID?.trim();
+if(fcmAccount&&fcmProject){
+ try{JSON.parse(fcmAccount);}catch{throw new Error('FCM_SERVICE_ACCOUNT is not JSON (the service account key file).');}
+ await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'FCM_SERVICE_ACCOUNT',type:'secret_text',text:fcmAccount});
+ await cf(`/workers/scripts/${name}/secrets`,'PUT',{name:'FCM_PROJECT_ID',type:'secret_text',text:fcmProject});console.log('FCM push configured in Cloudflare.');
+}else console.log('FCM_SERVICE_ACCOUNT and FCM_PROJECT_ID are not set: no background push. See worker/README.md.');
 let healthy=false,lastHealth={};
 for(let attempt=0;attempt<30;attempt++){
  try{const r=await fetch(`${url}/health`,{signal:AbortSignal.timeout(15000)});lastHealth={status:r.status};const body=await r.json();lastHealth={status:r.status,ready:body.ready,database:body.database,error:body.error};healthy=r.ok&&body.ready;}catch(error){lastHealth={networkError:error.code||error.cause?.code||error.name};}
@@ -61,5 +70,5 @@ for(let attempt=0;attempt<30;attempt++){
 if(!healthy)console.error(`Health diagnostic: ${JSON.stringify(lastHealth)}`);
 if(!healthy)throw new Error('Worker health check failed after deployment. Check the Worker and D1 binding in Cloudflare.');
 if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`url=${url}\n`);
-if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## EVE backend deployed\n\n- API: ${url}\n- **Set the EVE application callback to: ${url}/auth/callback**\n- Refresh schedule: every 5 minutes (a pilot sync or the hourly kills sample), plus a daily cleanup at 03:17 UTC.\n- Pipeline signing: ${pipelineSecret?'PIPELINE_SECRET is set; uploads must be signed.':'**PIPELINE_SECRET is not set**; uploads use the legacy fixed token (see worker/README.md).'}\n- Skill totals and queue are published only after each pilot confirms sharing consent.\n- Wallet, ship, location, and industry data require that pilot's private dashboard session.\n`);
+if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,`## EVE backend deployed\n\n- API: ${url}\n- **Set the EVE application callback to: ${url}/auth/callback**\n- Refresh schedule: every 5 minutes (a pilot sync, an hourly corporation turn or the hourly kills sample), plus a daily cleanup at 03:17 UTC.\n- Pipeline signing: ${pipelineSecret?'PIPELINE_SECRET is set; uploads must be signed.':'**PIPELINE_SECRET is not set**; uploads use the legacy fixed token (see worker/README.md).'}\n- Skill totals and queue are published only after each pilot confirms sharing consent.\n- Wallet, ship, location, and industry data require that pilot's private dashboard session.\n- **EVE application scopes:** the Android app and Corp tab need the scopes listed in README.md (online state and eight corporation scopes) ticked on the application; each pilot reconnects once.\n`);
 console.log(`Backend ready: ${url}`);console.log(`EVE callback: ${url}/auth/callback`);

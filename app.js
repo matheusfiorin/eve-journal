@@ -35,16 +35,16 @@ const LOADED = {}, LOADING = {};
 // Load a lazy screen's code once, then run its wire(), as the eager screens' wire() runs at boot.
 const load = key => LOADING[key] ||= LOADERS[key]().then(module => { LOADED[key] = module; module.wire?.(); return module; }, error => { delete LOADING[key]; throw error; });
 const lazy = (key, name) => (...args) => LOADED[key]?.[name](...args);
-const VIEW_CODE = {industry:'earn', mining:'earn', exploration:'earn', market:'earn', planets:'earn', map:'navigate', hauling:'navigate'};
+const VIEW_CODE = {industry:'earn', mining:'earn', exploration:'earn', market:'earn', planets:'earn', sell:'earn', map:'navigate', hauling:'navigate'};
 const RENDER = {
   bridge:bridge.render, strengths:wing.renderCrew, goals:wing.renderGoals,
   training:pilot.renderTraining, skills:pilot.renderSkills, clones:pilot.renderClones,
-  industry:lazy('earn', 'renderIndustry'), mining:lazy('earn', 'renderMining'), exploration:lazy('earn', 'renderExploration'), market:lazy('earn', 'renderMarket'), planets:lazy('earn', 'renderPlanets'), jobs:jobs.render,
+  industry:lazy('earn', 'renderIndustry'), mining:lazy('earn', 'renderMining'), exploration:lazy('earn', 'renderExploration'), market:lazy('earn', 'renderMarket'), planets:lazy('earn', 'renderPlanets'), sell:lazy('earn', 'renderSell'), jobs:jobs.render,
   map:lazy('navigate', 'renderMap'), hauling:lazy('navigate', 'renderHauling'), ledger:ledger.render, logbook:logbook.render
 };
 // Views that load market data or rank the whole map draw only while they're on screen (Bridge and the crew map
 // score mining, industry and exploration, which is too heavy to redo for every hidden view).
-const LAZY = new Set(['bridge', 'strengths', 'industry', 'mining', 'exploration', 'market', 'planets', 'map', 'hauling']);
+const LAZY = new Set(['bridge', 'strengths', 'industry', 'mining', 'exploration', 'market', 'planets', 'sell', 'map', 'hauling']);
 
 function renderAll() {
   shell.renderStrip(); hero.renderMe(); pilotOptions();

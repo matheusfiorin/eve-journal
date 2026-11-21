@@ -27,6 +27,14 @@ test('risk grows with recent kills per passing ship, cargo value in high-sec, an
  const bubbles=new Map([[3,{gates:{4:{n:1,last:now}},sb:0,dictor:1}]]);
  assert.ok(systemRisk(sys(3,0.3),{live:bubbles,via:[4],now,hull:'br'}).camp>systemRisk(sys(3,0.3),{live:new Map([[3,{gates:{4:{n:1,last:now}},sb:0,dictor:0}]]),via:[4],now,hull:'br'}).camp*3,'bubbles catch blockade runners');
 });
+test('a destroyer is a softer gank target than a T1 industrial with the same hold, but slips gate camps more often',()=>{
+ const hist={2:[24,168]},traffic={2:100},d=HULLS.destroyer;
+ assert.ok(d.cargo>=375&&d.cargo<HULLS.br.cargo,'holds a Coercer load');assert.equal(suggestHull(300,1e9),'br','never suggested for the Haul plan');
+ const at=hull=>systemRisk(sys(2,0.9),{history:hist,traffic,value:5e8,hull});
+ assert.ok(Math.abs(at('destroyer').background-at('t1').background*1.2)<1e-12,'1.2 × the industrial’s background risk');
+ const live=new Map([[3,{gates:{4:{n:2,last:now}},sb:0,dictor:0}]]),camp=hull=>systemRisk(sys(3,0.3),{live,via:[4],now,hull}).camp;
+ assert.ok(camp('destroyer')<camp('t1')&&camp('destroyer')>camp('br'));
+});
 test('best order keeps the start, then tries every order of the stops',()=>{
  const c=[[0,5,1,9],[5,0,4,1],[1,4,0,8],[9,1,8,0]];
  assert.deepEqual(bestOrder(c,{end:'free'}),[0,2,1,3]);assert.deepEqual(bestOrder(c,{end:'fixed'}),[0,2,1,3]);

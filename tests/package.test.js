@@ -115,7 +115,7 @@ test('check-health reads the Worker address from the published config and report
 test('the deploy script turns on logs, the rate limits, both cron triggers and the pipeline secret, and says 5 minutes',async()=>{
   const [deploy,worker]=await Promise.all([read('scripts/deploy-backend.mjs'),read('worker/index.js')]);
   assert.match(deploy,/observability:\{enabled:true,head_sampling_rate:1,/);
-  for(const n of ['RATE_AUTH','RATE_MARKET','RATE_JOURNAL'])assert.match(deploy,new RegExp(`name:'${n}',namespace_id:'\\d+',simple:\\{limit:\\d+,period:60\\}`));
+  for(const n of ['RATE_AUTH','RATE_MARKET','RATE_JOURNAL','RATE_LIVE'])assert.match(deploy,new RegExp(`name:'${n}',namespace_id:'\\d+',simple:\\{limit:\\d+,period:60\\}`));
   assert.match(deploy,/crons:\['\*\/5 \* \* \* \*',DAILY_CRON\]/);
   assert.equal(deploy.match(/const DAILY_CRON='([^']+)'/)[1],worker.match(/export const DAILY_CRON='([^']+)'/)[1],'the deploy script and the Worker name the same daily cron');
   assert.match(deploy,/name:'PIPELINE_SECRET'/);assert.doesNotMatch(deploy,/every 30 minutes/);assert.match(deploy,/every 5 minutes/);

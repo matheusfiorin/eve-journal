@@ -5,7 +5,7 @@
 const num = v => Number.isFinite(v) ? v : undefined;
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => o[k] !== undefined && o[k] !== null).map(k => [k, o[k]]));
 
-export const MAX_ORDERS = 100, MAX_HISTORY = 60, MAX_CONTRACTS = 100, MAX_LOSSES = 25, NEW_LOSSES = 10, MAX_BLUEPRINTS = 400, MAX_PLANETS = 12, MAX_STANDINGS = 120, MAX_FIT = 150;
+export const MAX_ORDERS = 100, MAX_HISTORY = 60, MAX_CONTRACTS = 100, MAX_LOSSES = 25, NEW_LOSSES = 10, MAX_BLUEPRINTS = 400, MAX_PLANETS = 12, MAX_STANDINGS = 120, MAX_FIT = 150, MAX_STACKS = 300;
 
 export const compactOrders = list => list.slice(0, MAX_ORDERS).map(o => pick(o, ['order_id', 'type_id', 'location_id', 'region_id', 'is_buy_order', 'price', 'volume_remain', 'volume_total', 'issued', 'duration', 'range', 'escrow']));
 // An order's history entry: kept when it was issued or ran out in the last 30 days, newest first.
@@ -47,6 +47,22 @@ export function fitCollector(shipItemId) {
   return {add: rows => { if (!Number.isSafeInteger(shipItemId)) return; for (const a of rows) if (a.location_id === shipItemId && a.location_flag && items.length < MAX_FIT) items.push([a.type_id, a.location_flag, a.quantity || 1]); },
     result: () => Number.isSafeInteger(shipItemId) ? {ship: shipItemId, items} : undefined};
 }
+
+/**
+ * The sellable item stacks in the item hangar (location_flag 'Hangar') of each wanted station, as {station: [[type, quantity]]},
+ * biggest first, at most MAX_STACKS types per station. Every wanted station gets a row list, empty or not, so a later sync can tell
+ * "nothing there" from "never read". Singletons (assembled ships, containers, fitted or assembled gear) are left out: only
+ * packaged stacks can be listed as lots, and a blueprint copy cannot be sold. Cargo is already in the fit, so it is not repeated.
+ */
+export function stackCollector(stations) {
+  const want = new Set([...stations].filter(Number.isSafeInteger)), by = new Map([...want].map(s => [s, new Map()]));
+  return {add: rows => { for (const a of rows) { const at = by.get(a.location_id); if (at && a.location_flag === 'Hangar' && !a.is_singleton && !a.is_blueprint_copy && a.quantity > 0) at.set(a.type_id, (at.get(a.type_id) || 0) + a.quantity); } },
+    result: () => Object.fromEntries([...by].map(([s, m]) => [s, [...m].sort((a, b) => b[1] - a[1]).slice(0, MAX_STACKS)]))};
+}
+/** Whether stored stacks already cover every wanted station (the docked one and the chosen pickup), so unchanged assets can stand. */
+export const stacksCover = (stored, stations) => [...stations].filter(Number.isSafeInteger).every(s => Array.isArray(stored?.[s]));
+/** A station or structure id a pilot may name as pickup: NPC stations 60,000,000 to 64,000,000, player structures above 1e12. */
+export const isStationId = n => Number.isSafeInteger(n) && ((n >= 60000000 && n <= 64000000) || n > 1e12);
 
 // ── Losses ──
 export function summarizeKill(k) {

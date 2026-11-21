@@ -1,0 +1,27 @@
+package com.echelon.eve.plan
+
+import com.echelon.eve.nav.Destination
+import com.echelon.eve.nav.Feature
+import com.echelon.eve.nav.FeatureRegistry
+import com.echelon.eve.nav.Placeholder
+import com.echelon.eve.nav.SubScreen
+import com.echelon.eve.ui.EchelonIcons
+
+/**
+ * PLAN: decide what to do next. Stub entries from the scaffold; the Plan agent replaces each content lambda with the
+ * real screen (and its card with a live summary). The planners run through core.js.PlannerBridge.
+ */
+object PlanFeature : Feature {
+    override val destination = Destination.Plan
+    override fun install(registry: FeatureRegistry) {
+        fun stub(key: String, title: String, summary: String, order: Int, icon: androidx.compose.ui.graphics.vector.ImageVector = EchelonIcons.Plan) =
+            registry.register(destination, SubScreen(key, title, summary, icon, order) { Placeholder(title, summary) })
+        stub("explore", "Explore", "Where to scan for relic and data sites", 10, EchelonIcons.Search)
+        stub("industry", "Build", "Which blueprint to buy and build", 20)
+        stub("mining", "Mine", "What to mine and where", 30)
+        stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
+        stub("sell", "Sell", "The best markets for a cargo", 50)
+        stub("haul", "Haul routes", "Safest, balanced and shortest routes", 60, EchelonIcons.Route)
+        stub("goals", "Wing goals", "Shared goals and their progress", 70, EchelonIcons.Wing)
+    }
+}

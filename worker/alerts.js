@@ -3,6 +3,7 @@
 // stations or regions, only the pilot, what happened and the item. Without the secret none of this runs.
 import {queueState} from '../model.js';
 import {checkOrder, contractDue} from '../orders.js';
+import {corpCandidates} from './corp.js';
 
 const HOURS = ms => { const h = Math.max(1, Math.round(ms / 3600000)); return h < 24 ? `${h} h` : `${Math.round(h / 24)} d`; };
 // Posts per run: the sync that precedes them may have used up to SYNC_LIMIT of the free plan's 50 subrequests (worker/index.js).
@@ -60,6 +61,20 @@ async function post(url, text, fetchImpl) {
   const r = await fetchImpl(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'User-Agent': 'Echelon wing console (Cloudflare Worker)'}, body: JSON.stringify({content: text, allowed_mentions: {parse: []}}), signal: AbortSignal.timeout(10000)});
   if (!r.ok) throw new Error(`webhook ${r.status}`);
 }
+// Corporation alerts (towers and structures from corp_snapshots), only for a corporation whose source pilot ticked the alerts box.
+// A structure's own name is posted only if it holds no place, so the system names of the structures that alert are looked up in
+// the stored gate map (SQLite reads the one entry; the Worker does not load the map).
+async function corpAlerts(env, now) {
+  const rows = (await env.DB.prepare('SELECT c.corporation_id, c.snapshot FROM corp_snapshots c JOIN pilots p ON p.character_id = c.source_pilot WHERE p.share_alerts = 1').all()).results;
+  const out = [];
+  for (const r of rows) {
+    let snap; try { snap = JSON.parse(r.snapshot); } catch { continue; }
+    const systems = [...new Set((snap.structures?.value || []).filter(s => s.name).map(s => s.system).filter(Number.isSafeInteger))].slice(0, 20), systemNames = {};
+    for (const sys of systems) { const n = (await env.DB.prepare('SELECT json_extract(data, ?) AS name FROM market_snapshots WHERE region_id = 1').bind(`$.systems."${sys}"[0]`).first().catch(() => null))?.name; if (n) systemNames[sys] = n; }
+    out.push(...corpCandidates(r.corporation_id, snap, {now, systemNames}));
+  }
+  return out;
+}
 /** Send what is new, at most MAX_ALERTS per run. A key is claimed before the post and released if it fails, so a retry is possible and a double run cannot double-post. */
 export async function sendAlerts(env, fetchImpl = fetch, now = Date.now()) {
   const url = env.DISCORD_WEBHOOK_URL;
@@ -71,6 +86,7 @@ export async function sendAlerts(env, fetchImpl = fetch, now = Date.now()) {
   for (const p of pilots) { const orders = p.snapshot.operations?.orders?.value; if (orders?.length) slices.set(p.id, await marketSlice(env, orders, now).catch(() => [])); }
   const all = [];
   for (const p of pilots) all.push(...candidates([p], {now, outbid: orders => orders.map(o => checkOrder(o, slices.get(p.id) || []))}));
+  all.push(...await corpAlerts(env, now).catch(() => []));
   // D1's free plan allows 50 queries per invocation, so the known keys are read in a few chunked lookups (not one write per
   // old candidate) and only the first MAX_ALERTS new ones are claimed, in one batch.
   const known = new Set();

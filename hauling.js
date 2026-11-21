@@ -7,7 +7,11 @@ export const HULLS = {
   br:{name:'Blockade runner', cargo:10000, tank:0.4, evade:0.15, jump:35, why:'Covert-ops cloak and fast align: hard to catch at a gate.'},
   t1:{name:'T1 industrial', cargo:40000, tank:1, evade:1, jump:55, why:'Cheap, but slow and paper-thin.'},
   dst:{name:'Deep space transport', cargo:62500, tank:0.5, evade:0.6, jump:60, why:'Heavy tank and a warp-core bonus.'},
-  freighter:{name:'Freighter', cargo:1100000, tank:1.3, evade:1, jump:120, why:'Huge hold, very slow align: the classic gank target.'}
+  freighter:{name:'Freighter', cargo:1100000, tank:1.3, evade:1, jump:120, why:'Huge hold, very slow align: the classic gank target.'},
+  // A combat destroyer hauling a small load (a Coercer holds 375 m³), as the Sell plan flies it. Its buffer is about a T1
+  // industrial's, but a pair of cheap Catalysts kills it, so a fat hold is worth the gank more often: 1.2 × t1's tank
+  // factor. It aligns in about 4 s against an industrial's 10 or more, so it slips a gate camp more often: evade 0.6.
+  destroyer:{name:'Destroyer', cargo:400, tank:1.2, evade:0.6, jump:40, why:'Quick to align but thinly tanked: cheap to gank when the hold is worth it.'}
 };
 export function suggestHull(volume, value) {
   if (volume <= HULLS.br.cargo) return 'br';
