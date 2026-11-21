@@ -1,0 +1,106 @@
+name: Android
+
+# Builds and tests the Android app (android/) whenever it or the planner modules it bundles change. A v* tag with the
+# signing secrets also builds a signed release APK and attaches it to that tag's GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['android/**', '*.js', 'scripts/bundle-android.mjs', 'package.json', 'package-lock.json', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['android/**', '*.js', 'scripts/bundle-android.mjs', 'package.json', 'package-lock.json', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The app runs the root planners from a committed bundle; it must match the modules in this commit.
+      - run: node scripts/bundle-android.mjs --check
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+      - name: Build, unit tests and screenshot tests
+        working-directory: android
+        run: ./gradlew --no-configuration-cache :app:assembleDebug :app:testDebugUnitTest :app:verifyPaparazziDebug
+      - name: Keep the screenshot diffs when a test fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: paparazzi-failures
+          path: |
+            android/app/build/paparazzi/failures
+            android/app/build/reports/tests
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: echelon-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    # Only for v* tags, and only when the signing secrets exist (forks and fresh clones have none).
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: env.HAS_KEYSTORE == 'true'
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        if: env.HAS_KEYSTORE == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        if: env.HAS_KEYSTORE == 'true'
+      - name: Android SDK packages
+        if: env.HAS_KEYSTORE == 'true'
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+      - name: Signed release APK
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          export VERSION_NAME="${GITHUB_REF_NAME#v}" VERSION_CODE="$GITHUB_RUN_NUMBER"
+          ./gradlew --no-configuration-cache :app:assembleRelease
+          rm -f "$ANDROID_KEYSTORE_PATH"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/echelon-$GITHUB_REF_NAME.apk"
+      - name: Attach to the GitHub Release
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/echelon-$GITHUB_REF_NAME.apk" --clobber
+      - name: No signing secrets
+        if: env.HAS_KEYSTORE != 'true'
+        run: echo "ANDROID_KEYSTORE_BASE64 is not set, so no signed release APK was built."
