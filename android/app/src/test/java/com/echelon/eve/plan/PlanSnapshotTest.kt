@@ -50,6 +50,22 @@ object PlanFixtures {
         ),
         live = com.echelon.eve.plan.haul.HaulLiveSummary(23), killDays = 7,
     )
+    private fun belt(s: Sys, jumps: Int, isk: Double, ore: String, how: String, kills: Int = 0) = com.echelon.eve.plan.mine.Belt(s, jumps, 3, isk, kills, 140, lowsec = s.sec < 0.45,
+        ores = listOf(com.echelon.eve.plan.mine.OreAt(ore, isk / 1_000_000 * 70, how, "Jita IV - Moon 4 - Caldari Navy Assembly Plant")))
+    val mine = com.echelon.eve.plan.mine.MineResult(
+        ready = true,
+        me = com.echelon.eve.plan.mine.MinerPlan("Fiofka", true, com.echelon.eve.plan.mine.MineShip(32880, "Venture", current = true, rate = 202.4, hold = 5000.0),
+            sys(30000142, "Jita", 0.946, 10000002), listOf(belt(sys(30000133, "Hirtamon", 0.949, 10000002), 2, 1_246_501.0, "Scordite", "compressed"),
+                belt(sys(30000144, "Perimeter", 0.95, 10000002), 1, 1_102_000.0, "Veldspar", "compressed", kills = 2), belt(sys(30002813, "Tama", 0.3, 10000002), 2, 2_830_000.0, "Kernite", "raw"))),
+        mate = com.echelon.eve.plan.mine.MinerPlan("Decxus", true, com.echelon.eve.plan.mine.MineShip(32880, "Venture", rate = 180.0, hold = 5000.0), sys(30002813, "Tama", 0.3, 10000002)),
+        together = com.echelon.eve.plan.mine.Together("apart", sys(30002813, "Tama", 0.3, 10000002), 2),
+        ships = listOf(com.echelon.eve.plan.mine.MineShip(17476, "Covetor", flyable = false, rate = 613.0, hold = 9000.0, needs = "Mining Barge I", iskHour = 3_448_779.0),
+            com.echelon.eve.plan.mine.MineShip(32880, "Venture", current = true, rate = 202.4, hold = 5000.0, iskHour = 1_246_501.0)),
+        train = listOf(com.echelon.eve.plan.mine.MineTrain("Mining", 4, 3, "Miner II: +50% laser yield, and +5% per level")),
+        ores = listOf(com.echelon.eve.plan.mine.OreValue("Kernite", 385.4, "raw", 462.5, 195.3, 150.1)),
+        ledgers = com.echelon.eve.plan.mine.Ledgers(com.echelon.eve.plan.mine.Ledger("ok", 52_000.0, 4_800_000.0, 6, listOf(com.echelon.eve.plan.mine.LedgerSystem("Hirtamon", 40_000.0, 3_700_000.0, 4))),
+            com.echelon.eve.plan.mine.Ledger("no-permission")),
+    )
     val starts = listOf(30000144L to "Perimeter · here", 30000142L to "Jita", 30002187L to "Amarr", 30002659L to "Dodixie", 30002510L to "Rens", 30002053L to "Hek")
     val shortcuts = listOf(Shortcut("Thera", sys(30000210, "Sirppala", 0.83), 6, "large", 14.0, "ABC-123"), Shortcut("Turnur", sys(30002813, "Tama", 0.3, 10000002), 2, "medium", 3.0, lowsec = true))
 }
@@ -66,6 +82,10 @@ class PlanSnapshotTest {
         com.echelon.eve.plan.haul.HaulScreen(com.echelon.eve.plan.haul.HaulUi(com.echelon.eve.plan.haul.HaulForm(value = "500m", volume = "20000"), PlanFixtures.haul,
             liveNote = "Live: 23 kills in the last hour across 6 regions from zKillboard.", names = mapOf(24690L to "Catalyst"), canSend = true, pilotName = "Fiofka"),
             now, com.echelon.eve.plan.haul.HaulActions(), scroll = false)
+    }
+    @Test fun mine() = paparazzi.echelon {
+        com.echelon.eve.plan.mine.MineScreen(com.echelon.eve.plan.mine.MineUi(Pilot.Fiofka, com.echelon.eve.plan.mine.MineSettings(), PlanFixtures.starts, PlanFixtures.mine, open = 30000133, canSend = true),
+            com.echelon.eve.plan.mine.MineActions(), scroll = false)
     }
     @Test fun exploreNoBands() = paparazzi.echelon {
         ExploreScreen(ExploreUi(Pilot.Fiofka, ExploreSettings(bands = emptySet()), PlanFixtures.starts), now, ExploreActions(), canSend = true, scroll = false)

@@ -18,7 +18,7 @@ object PlanFeature : Feature {
             registry.register(destination, SubScreen(key, title, summary, icon, order) { Placeholder(title, summary) })
         registry.register(destination, SubScreen("explore", "Explore", "Where to scan for relic and data sites", EchelonIcons.Search, 10) { com.echelon.eve.plan.explore.ExploreRoute(it) })
         stub("industry", "Build", "Which blueprint to buy and build", 20)
-        stub("mining", "Mine", "What to mine and where", 30)
+        registry.register(destination, SubScreen("mining", "Mine", "What to mine and where", EchelonIcons.Plan, 30) { com.echelon.eve.plan.mine.MineRoute(it) })
         stub("trade", "Trade", "Trade and haul opportunities", 40, EchelonIcons.Swap)
         stub("sell", "Sell", "The best markets for a cargo", 50)
         registry.register(destination, SubScreen("haul", "Haul routes", "Safest, balanced and shortest routes", EchelonIcons.Route, 60) { com.echelon.eve.plan.haul.HaulRoute(it) })

@@ -53,6 +53,9 @@ class PlanEngine(private val c: AppContainer) {
         val stamp = "$version:${data.snapshot.meta?.updatedAt ?: 0}"
         if (stamp != metaStamp) {
             c.planners.callRaw("market.meta", "{\"meta\":${data.metaData},\"stamp\":${JsonPrimitive(stamp)}}")
+            // The scanned regions' order book (prices for Mine, Build, Trade and Sell), rebuilt with the same stamp.
+            val regions = PlanJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(com.echelon.eve.core.model.MarketRegion.serializer()), data.snapshot.regions)
+            c.planners.callRaw("market.book", "{\"regions\":$regions}")
             metaStamp = stamp
         }
         c.planners
