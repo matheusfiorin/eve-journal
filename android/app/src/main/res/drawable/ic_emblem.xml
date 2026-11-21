@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The console's emblem (icons/icon.svg): two pilots' chevrons in formation on a plotted arc. The 32-unit emblem sits
+     in the middle third of a 96-unit canvas, inside the splash and adaptive-icon safe circles. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="96" android:viewportHeight="96">
+    <group android:translateX="28" android:translateY="28" android:scaleX="1.25" android:scaleY="1.25">
+        <path android:pathData="M27,9.5A12.5,12.5 0,1 0,22 27" android:strokeColor="#3A4D6E" android:strokeWidth="1.4" android:strokeLineCap="round" />
+        <path android:pathData="M7,15 L13,7 L19,15 L13,12.5Z" android:fillColor="#F0BB5C" />
+        <path android:pathData="M14,23 L20,15 L26,23 L20,20.5Z" android:fillColor="#5CD3DE" />
+        <path android:pathData="M28.8,9.5a1.8,1.8 0,1 1,-3.6 0a1.8,1.8 0,1 1,3.6 0" android:fillColor="#A99BFF" />
+    </group>
+</vector>
