@@ -139,7 +139,7 @@ The room's coordination types (worker/README.md, "Coordination types") on top of
 
 ## The Fly feature (fly)
 
-- `FlyFeature` registers five screens: `timers`, `live`, `fit`, `skills`, `jobs`. Each has a stateless screen
+- `FlyFeature` registers `cockpit` first, then `wing`, `timers`, `live`, `fit`, `skills`, `jobs`. Each has a stateless screen
   (`fly/<name>/…Screen.kt`, screenshot-tested in `FlySnapshotTest`) and a small route in `FlyFeature.kt` that reads
   the container. `FlyLoader` (`FlyData.kt`) turns core data into screen state.
 - `container.fly` (`FlyServices`) holds `EveNames` (public ESI: `universe/names`, and type → group → category to tell
@@ -150,6 +150,17 @@ The room's coordination types (worker/README.md, "Coordination types") on top of
   starts while anything counts down: an ongoing notification with a countdown chronometer, an alert on the
   `timers_done` channel when each timer ends, and a hold on the wing room. The rules (pause, resume, restart, the
   board's order) are pure functions in `fly/timers/Timers.kt`, tested in `TimersTest`.
+- Timers are bound to a system: `TimerStore.start` stamps the flying pilot's current system (`meta.system`,
+  `meta.systemName`), and the screen (`TimersRoute`, views in `TimerViews.kt`) shows a Horizon strip (every end on one
+  time axis), a Jump radar (systems by jumps from here) and one card per system with ring countdowns, here first.
+  Notifications name the system ("Gas site in Tama").
+- Cockpit (`fly/cockpit`): the screen to keep open while playing — where you are (security warnings on entering
+  low/null), the next timer, the wingmate, and one-tap calls and timers. `CockpitLive` polls location; the same screen
+  runs as `CockpitActivity` (picture-in-picture / overlay) and the `CockpitWidget` home-screen widget. Both open the app
+  on a screen through `MainActivity.open(context, "Destination/key")` (`EXTRA_OPEN`, handled by
+  `EchelonShell(openOnStart)`).
+- Follow mode: sending or sharing an Explore loop or a haul route calls `wingServices.follow(route)`, so (with status
+  sharing on) the wingmate sees this pilot's destination and can set their own autopilot to it.
 - Fit and jobs reuse the web's `fit.js` and `jobs.js` through the bridge (`fit.groups`, `fit.eft`, `jobs.wing`). Encode
   ESI records for the bridge with defaults on (`EchelonJson` leaves them out, and jobs.js reads `status`).
 
