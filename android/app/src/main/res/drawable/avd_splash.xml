@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The splash: the formation assembles. The arc plots itself, Fiofka's dart slides into the lead, Decxus's into
+     echelon behind it, and the beacon lights. The vector's own values are the end state, so Android 10 and 11 (which
+     show the icon without animating it) get the finished emblem; each delayed part is held at its start value by a
+     zero-change animator first, so it never flashes in before its turn. The system skips the animation when
+     animations are off. Same geometry as ic_launcher_foreground and Brand.kt's Emblem. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector android:width="108dp" android:height="108dp" android:viewportWidth="96" android:viewportHeight="96">
+            <group android:translateX="25.6" android:translateY="25.6" android:scaleX="1.4" android:scaleY="1.4">
+                <path android:name="arc" android:pathData="M25,5.28A14,14 0,1 0,19.62,29.52" android:strokeColor="#5A6396" android:strokeWidth="1.3" android:strokeLineCap="round" />
+                <group android:name="lead">
+                    <path android:name="leadDart" android:pathData="M11,5.5L18,17.5L11,14.5L4,17.5Z" android:fillColor="#F0BB5C" />
+                </group>
+                <group android:name="wing">
+                    <path android:name="wingDart" android:pathData="M21,14.5L28,26.5L21,23.5L14,26.5Z" android:fillColor="#5CD3DE" />
+                </group>
+                <group android:name="beacon" android:pivotX="25" android:pivotY="5.28">
+                    <path android:pathData="M25,5.28m-3.4,0a3.4,3.4 0,1 1,6.8 0a3.4,3.4 0,1 1,-6.8 0" android:fillColor="#40FF7AC6" />
+                    <path android:pathData="M25,5.28m-1.9,0a1.9,1.9 0,1 1,3.8 0a1.9,1.9 0,1 1,-3.8 0" android:fillColor="#FF7AC6" />
+                </group>
+            </group>
+        </vector>
+    </aapt:attr>
+
+    <target android:name="arc">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:duration="500"
+                android:interpolator="@android:interpolator/fast_out_slow_in" />
+        </aapt:attr>
+    </target>
+    <target android:name="lead">
+        <aapt:attr name="android:animation">
+            <set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="translateX" android:valueFrom="-7" android:valueTo="-7" android:duration="120" />
+                    <objectAnimator android:propertyName="translateX" android:valueFrom="-7" android:valueTo="0" android:duration="480" android:interpolator="@android:interpolator/decelerate_cubic" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="7" android:valueTo="7" android:duration="120" />
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="7" android:valueTo="0" android:duration="480" android:interpolator="@android:interpolator/decelerate_cubic" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="leadDart">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="0" android:duration="120" />
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="1" android:duration="300" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="wing">
+        <aapt:attr name="android:animation">
+            <set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="translateX" android:valueFrom="-7" android:valueTo="-7" android:duration="260" />
+                    <objectAnimator android:propertyName="translateX" android:valueFrom="-7" android:valueTo="0" android:duration="480" android:interpolator="@android:interpolator/decelerate_cubic" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="7" android:valueTo="7" android:duration="260" />
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="7" android:valueTo="0" android:duration="480" android:interpolator="@android:interpolator/decelerate_cubic" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="wingDart">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="0" android:duration="260" />
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="1" android:duration="300" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="beacon">
+        <aapt:attr name="android:animation">
+            <set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="0" android:duration="620" />
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1" android:duration="280" android:interpolator="@android:interpolator/overshoot" />
+                </set>
+                <set android:ordering="sequentially">
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="0" android:duration="620" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1" android:duration="280" android:interpolator="@android:interpolator/overshoot" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

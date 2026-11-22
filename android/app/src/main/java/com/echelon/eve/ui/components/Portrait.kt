@@ -62,27 +62,3 @@ fun TypeIcon(typeId: Long, modifier: Modifier = Modifier, size: Dp = 32.dp, cont
     }
 }
 
-/**
- * The console's emblem (icons/icon.svg): Fiofka's and Decxus's chevrons in formation on a plotted arc, with the accent
- * beacon. [highlight] dims the other pilot's chevron, so the emblem doubles as a "who's flying" mark.
- */
-@Composable
-fun Emblem(modifier: Modifier = Modifier, size: Dp = 28.dp, highlight: PilotColors? = null) {
-    val c = Echelon.colors
-    val fio = PilotColors.Fiofka.color; val dec = PilotColors.Decxus.color
-    Canvas(modifier.size(size)) {
-        val k = this.size.minDimension / 32f
-        scale(k, k, pivot = Offset.Zero) {
-            drawPath(EmblemPaths.arc, c.lineStrong, style = Stroke(1.2f, cap = StrokeCap.Round))
-            drawPath(EmblemPaths.fiofka, if (highlight == null || highlight == PilotColors.Fiofka) fio else fio.copy(alpha = .35f))
-            drawPath(EmblemPaths.decxus, if (highlight == null || highlight == PilotColors.Decxus) dec else dec.copy(alpha = .35f))
-            drawCircle(c.accent, 1.4f, Offset(27f, 9.5f))
-        }
-    }
-}
-
-private object EmblemPaths {
-    val arc: Path = PathParser().parsePathString("M27 9.5A12.5 12.5 0 1 0 22 27").toPath()
-    val fiofka: Path = PathParser().parsePathString("M7 15 13 7l6 8-6-2.5Z").toPath()
-    val decxus: Path = PathParser().parsePathString("M14 23l6-8 6 8-6-2.5Z").toPath()
-}
