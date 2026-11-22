@@ -184,32 +184,74 @@ Backups are off for it (`data_extraction_rules.xml`).
 
 ## Design system API (ui)
 
+The identity is **Formation**: two darts flying in echelon (Fiofka leading in amber, Decxus stepped back in cyan)
+inside a plotted arc, with an Ion → Flare beacon. Its motif is the *step*: a 45° cut on the top-end corner of anything
+that leads somewhere, and three stepped bars (`EchelonStripes`) in front of headings. The DesignCatalog (and its
+`DesignCatalogPagesTest` goldens, a screen at a time) shows all of it.
+
 - `EchelonTheme(settings, pilot)` wraps everything (the shell does it). Read tokens through `Echelon`:
   `Echelon.colors.surface1`, `Echelon.type.num`, `Echelon.pilot.color`, `Echelon.reduceMotion`, `Echelon.backdrop`.
-  Spacing, radii, type sizes, durations and easings are `Spacing`, `Radii`, `TypeScale`, `Durations`, `Easings`.
+  Spacing, radii, type sizes, durations and easings are `Spacing` (`touch` 48 dp, `maxContent` 720 dp), `Radii`
+  (`cut` is the motif), `TypeScale`, `Durations` (`stagger`, `celebrate`), `Easings` (`emphasized` for arrivals).
   Material components get the same palette through the mapped `ColorScheme`.
-- Colours: plotter violet is the UI accent (`accent`); pilot colours are identity only (`PilotColors.Fiofka`
-  `#F0BB5C`, `PilotColors.Decxus` `#5CD3DE`, `PilotColors.of(id)`); `ok`/`warn`/`danger`/`info` are states; security
-  uses EVE's palette (`secColor`, `secText`, `SecurityBadge`).
-- Type: Michroma (display: `Echelon.type.hero`, `screenTitle`, headline slots), Barlow Semi Condensed (UI, every
-  body/title/label slot), Martian Mono at 87.5 % width for numbers (`Echelon.type.num`, `numLarge`, `numSmall`). All
-  three are OFL and bundled in `res/font` (licences in `assets/licenses`).
-- Components (`ui.components`): `EchelonCard`, `PrimaryPanel` (tick ruler and cut corner: one per screen),
-  `SectionHeader`, `Hairline`, `StatTile`/`StatRow`, `Tag`, `ChoiceChip`, `SecurityBadge`, `PilotBadge`, `StatusDot`,
-  `ListRow`, `KeyValueRow`, `ProgressBar`, `ProgressRing`, `SkeletonRows`/`Modifier.shimmer()`, `EmptyState`,
-  `ErrorState`, `Countdown`/`RollingText`/`rememberNow`, `Portrait`, `TypeIcon`, `EveImages`, `Emblem`,
-  `PrimaryButton`/`SecondaryButton`/`LinkButton`, `WingChip`, `GridBackground`, `HeroBackground`. `Tone` picks
-  neutral/accent/ok/warn/danger/info everywhere.
+- Colours: ink grounds with a violet cast (`bg` `#090C18`, `surface1..3`); **Ion** violet `accent` `#A58CFF` is the UI
+  accent; **Flare** `#FF7AC6` is brand-only (`colors.flare`, `colors.brand` = Ion → Flare: the beacon, celebrations,
+  a progress bar's fill, never a state). Pilot colours are identity only (`PilotColors.Fiofka` `#F0BB5C`,
+  `PilotColors.Decxus` `#5CD3DE`, `PilotColors.of(id)`); `ok`/`warn`/`danger`/`info` are states; security uses EVE's
+  palette (`secColor`, `secText`, `SecurityBadge`). Every text colour is WCAG AA on every surface, and the pilots stay
+  far apart in hue: `ColorContrastTest` checks both.
+- Type (variable fonts, OFL, in `res/font`, licences in `assets/licenses`): **Oxanium** for display
+  (`Echelon.type.hero`, `screenTitle`, `overline` for spaced capitals, Material's display/headline slots), **Saira** at
+  90 % width for the UI (every body/title/label slot), **JetBrains Mono** for figures (`Echelon.type.num`, `numLarge`,
+  `numSmall`; tabular, slashed zero). `Michroma`/`Barlow`/`MartianMono` remain as deprecated aliases.
+- Shapes: `formationShape(cut, radius)` (top-end corner cut, RTL-aware) for primary panels, hub cards, the primary
+  button and the tab pill; `cutCornerShape()` is its square-cornered form.
+- Brand (`ui.components`): `Emblem(size, highlight, animate)` (with `animate` the formation assembles: arc, leader,
+  wingman, beacon), `Wordmark`, `EchelonStripes`, `Dart` (the pilot marker in `PilotBadge`/`WingChip`). The launcher
+  icon (`ic_launcher_background`/`_foreground`/`_monochrome` for themed icons), `ic_emblem`, the notification
+  silhouette `ic_stat_echelon` and the splash (`avd_splash`: the same assembly, then a lift-and-fade hand-off in
+  `MainActivity`) share the emblem's geometry.
+- Components (`ui.components`): `EchelonCard` (`shape`, `onClickLabel`; sinks under the finger when clickable),
+  `PrimaryPanel` (tick ruler and lit cut edge: one per screen), `SectionHeader`, `Hairline`, `StatTile`/`StatRow`,
+  `Tag`, `ChoiceChip`, `SecurityBadge`, `PilotBadge`, `StatusDot` (`live` breathes), `ListRow`, `KeyValueRow`,
+  `ProgressBar` (brand fill; a sheen when it reaches 100 %), `ProgressRing`, `SkeletonRows`/`Modifier.shimmer()`,
+  `LoadingCrossfade(loading) { content }`, `EmptyState`, `ErrorState`, `Countdown` (bursts when it reaches zero;
+  `celebrate = false` to opt out)/`RollingText`/`rememberNow`, `Portrait`, `TypeIcon`, `EveImages`,
+  `PrimaryButton`/`SecondaryButton`/`LinkButton`, `WingChip`, `GridBackground` (dot grid and a glow of the flying
+  pilot's colour), `HeroBackground`, `EchelonRefreshBox` (pull-to-refresh with the Formation indicator),
+  `ContentWidth` (caps a column at `Spacing.maxContent`). `Tone` picks neutral/accent/ok/warn/danger/info everywhere.
+  In `nav`: `HubCard(title, summary, icon, onOpen, trailing = …)` lets a feature's live hub `card` keep the hub's look.
 - Formatting (`ui.format`): `compactNumber`, `format(value, Kind.Isk|Pct|Hours|Count)` (the web's `format()`), `isk()`
   (two decimals), `duration`, `left`, `clock` (countdowns), `ago`, `parseIsk`, `plural`, `secShown`, `secBand`,
   `secLabel`. `FormatTest` pins them to values printed by the web's own functions.
-- Motion (`ui.motion`): `Springs.nav/select/value`, `motionSpec(full, reduced)` (snap when reduced), `NavMotion`
-  (the NavHost transitions; predictive back scrubs the pop), `Modifier.sharedContainer(key)` (container transform
-  list → detail) and `Modifier.sharedHero(key)` (one element flying across), `AnimatedNumber`, `Starfield`,
-  `rememberHaptics()` (`select`, `tick`, `confirm`, `reject`, `heavy`, `gestureEnd`). Reduced motion comes from the
-  system animator scale (Remove animations) or the app setting; every animation honours it, and screenshots render
-  the end state.
-- Icons: `EchelonIcons` are the web's line icons as vectors; `material-icons-core` is available for anything else.
+- Icons: `EchelonIcons`, a 1.6-stroke line set on a 20-unit grid. The destinations have filled twins
+  (`PlanSelected`, `FlySelected`, `CorpSelected`) that the tab bar swaps to; also `Wing` (the darts), `Waypoint`,
+  `Gauge`, `Target`, `Bell`, `Sparkle`. `material-icons-core` is available for anything else.
+
+### Motion vocabulary (ui.motion)
+
+Motion answers an action or shows something is live; nothing else moves. Every piece honours reduced motion (the
+system's Remove animations, or the app's setting): no travel, at most a short fade. Screenshots run in inspection
+mode and render end states, so goldens never catch an animation mid-way.
+
+| Moment | API | What it does |
+|---|---|---|
+| A screen opens | `StaggerRoot(key)` + `Modifier.entrance(index?)` | Cards, panels, headers, stat tiles, rows, empty and error states rise 16 dp and fade in, 40 ms apart, for the first 0.7 s of a screen; once per visit. The shell wraps every hub, sub-screen and Settings. `NoEntrance { }` stops it below a point (a card's content enters with the card). |
+| Hub → screen | `sharedContainer(key)`, `sharedText(key)`, `sharedHero(key)` | The hub card becomes the screen (container transform) and its title flies into the back bar. `sharedHero` is for an element that looks the same in both places (a portrait). |
+| Push / pop / back gesture | `NavMotion` | Slide a fifth of the width on a spring with a fade; predictive back scrubs the pop. Tabs fade through with a slight zoom. |
+| Press, hover | `Modifier.pressScale(interactionSource)` | Sinks to 97 % on a stiff spring, lifts a hair on hover. Built into cards, rows, buttons, chips and the tab bar. |
+| Tab change | `BottomBar` | The Formation pill travels like a worm (leading edge first), the icon swaps to its filled twin and pops. |
+| Numbers | `AnimatedNumber`, `RollingText`, `Countdown` | Count up once; changed digits roll. |
+| Loading → content | `LoadingCrossfade`, `shimmer()` | A diagonal sheen over skeleton rows, then a cross-fade into content that staggers in. |
+| Refresh | `EchelonRefreshBox` | The disc drops with the pull, its arc plots to a ring (tick haptic at the threshold), then spins in the brand gradient. |
+| Done! | `Modifier.celebrate(fire, key)`, `CelebrationFrame` | A one-shot burst of darts and sparks in both pilots' colours with a ring and a confirm haptic, when `fire` turns true on screen (not when a screen opens already done). `Countdown` does it at zero; a goal reaching 100 % should use it too. |
+| Live | `Modifier.pulse(active, color)`, `StatusDot(live = true)` | A halo that breathes. |
+| Backdrop | `Starfield`/`HeroBackground` | Three parallax star depths, two wandering nebulae and, twice a minute and a half, a pair of streaks in echelon. One infinite transition; still when reduced. The hub hero parallaxes and fades as the list scrolls over it. |
+| Splash | `avd_splash`, `MainActivity` | The emblem assembles, then lifts and fades into the app. |
+
+Also: `Springs.nav/select/value/press/pop/enter`, `motionSpec(full, reduced)` (snap when reduced),
+`rememberHaptics()` (`select`, `tick`, `confirm`, `reject`, `heavy`, `gestureEnd`).
+
 
 ## Adding a screen
 
