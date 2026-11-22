@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by shell.state.collectAsStateWithLifecycle()
             CompositionLocalProvider(LocalAppContainer provides container) {
-                EchelonShell(state, shell.actions(connect = ::connect))
+                EchelonShell(state, shell.actions(connect = ::connect), openOnStart = openRoute.value, onOpened = { openRoute.value = null })
             }
         }
     }
@@ -55,6 +55,24 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handle(intent)
+    }
+
+    /** "Fly/cockpit" from a widget, tile or notification: the shell opens that sub-screen once. */
+    private val openRoute = androidx.compose.runtime.mutableStateOf<com.echelon.eve.nav.SubRoute?>(null)
+
+    private fun readOpen(intent: Intent?) {
+        val target = intent?.getStringExtra(EXTRA_OPEN) ?: return
+        val (d, key) = target.split('/', limit = 2).takeIf { it.size == 2 } ?: return
+        if (com.echelon.eve.nav.Destination.entries.none { it.name == d }) return
+        openRoute.value = com.echelon.eve.nav.SubRoute(d, key)
+        intent.removeExtra(EXTRA_OPEN)
+    }
+
+    companion object {
+        /** An extra naming a sub-screen to open, "Destination/key", e.g. "Fly/cockpit". */
+        const val EXTRA_OPEN = "com.echelon.eve.OPEN"
+        fun open(context: android.content.Context, target: String): Intent =
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_OPEN, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 
     override fun onResume() {
@@ -65,6 +83,7 @@ class MainActivity : ComponentActivity() {
 
     /** echelon://auth/callback?code=…&pilot=… from the Worker after EVE SSO. */
     private fun handle(intent: Intent?) {
+        readOpen(intent)
         val uri = intent?.data ?: return
         if (!container.auth.isCallback(uri)) return
         setIntent(Intent(intent).setData(null))

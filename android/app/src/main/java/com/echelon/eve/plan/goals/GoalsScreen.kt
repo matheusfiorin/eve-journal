@@ -46,6 +46,7 @@ import com.echelon.eve.ui.format.format
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Spacing
+import com.echelon.eve.ui.motion.celebrate
 
 data class GoalsUi(
     val goals: List<Goal>? = null, val problem: String? = null, val filter: String = "open", val fields: GoalFields = GoalFields(), val editing: String? = null,
@@ -102,7 +103,8 @@ private fun GoalCard(g: Goal, today: String, actions: GoalsActions) {
         dismissButton = { TextButton({ confirm = false }) { Text("Keep it") } },
         containerColor = c.surface2, titleContentColor = c.text, textContentColor = c.textMuted,
     )
-    EchelonCard(tone = if (g.done) Tone.Ok else Tone.Neutral) {
+    // A goal ticked done gets the shared celebration burst (ui.motion), once per goal.
+    EchelonCard(Modifier.celebrate(g.done, key = g.id), tone = if (g.done) Tone.Ok else Tone.Neutral) {
         Row(verticalAlignment = Alignment.Top) {
             Checkbox(g.done, { actions.done(g, it) }, colors = CheckboxDefaults.colors(checkedColor = c.ok))
             Column(Modifier.weight(1f).padding(top = Spacing.sm)) {

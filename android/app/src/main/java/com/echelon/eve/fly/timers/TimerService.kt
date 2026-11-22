@@ -127,7 +127,7 @@ object TimerNotifications {
 
     /** The ongoing notification: the next timer and its system ("Gas site in Tama") and a chronometer counting down to its end. */
     fun ongoing(context: Context, next: WingTimer?, running: Int, now: Long, systems: Map<Long, SolarSystem> = emptyMap()) = NotificationCompat.Builder(context, ONGOING)
-        .setSmallIcon(R.drawable.ic_emblem).setColor(0xFFA99BFF.toInt()).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
+        .setSmallIcon(R.drawable.ic_stat_echelon).setColor(0xFFA58CFF.toInt()).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
         .setCategory(NotificationCompat.CATEGORY_STOPWATCH).setContentIntent(open(context)).setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         .apply {
             if (next == null) setContentTitle("Timers").setContentText("Starting…")
@@ -166,7 +166,7 @@ object TimerNotifications {
     fun done(context: Context, t: WingTimer, mine: Boolean, systems: Map<Long, SolarSystem> = emptyMap()) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val title = doneTitle(t, mine, systems)
-        val n = NotificationCompat.Builder(context, DONE).setSmallIcon(R.drawable.ic_emblem).setColor(0xFFA99BFF.toInt())
+        val n = NotificationCompat.Builder(context, DONE).setSmallIcon(R.drawable.ic_stat_echelon).setColor(0xFFA58CFF.toInt())
             .setContentTitle(title).setContentText("Ran ${clock(t.durationMs)}").setAutoCancel(true).setContentIntent(open(context))
             .setCategory(NotificationCompat.CATEGORY_ALARM).setPriority(NotificationCompat.PRIORITY_HIGH).build()
         runCatching { NotificationManagerCompat.from(context).notify(t.id, DONE_ID, n) }

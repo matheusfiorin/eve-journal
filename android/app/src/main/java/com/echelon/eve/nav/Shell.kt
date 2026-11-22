@@ -85,6 +85,9 @@ fun EchelonShell(
     start: Any = PlanRoute,
     nav: NavHostController = rememberNavController(),
     zone: ZoneId = ZoneId.systemDefault(),
+    /** A sub-screen to open once ("Fly/cockpit"), from a widget, tile or notification; [onOpened] clears it. */
+    openOnStart: SubRoute? = null,
+    onOpened: () -> Unit = {},
 ) {
     EchelonTheme(state.theme, PilotColors.of(state.selected?.id)) {
         GridBackground(Modifier.fillMaxSize()) {
@@ -95,10 +98,12 @@ fun EchelonShell(
             val current = destinationOf(entry) ?: if (entry == null && !inSettings) Destination.entries.firstOrNull { it.route() == start } else null
             val motion = NavMotion(Echelon.reduceMotion)
             val open = { d: Destination, key: String, arg: String? -> nav.navigate(SubRoute(d.name, key, arg)) }
+            androidx.compose.runtime.LaunchedEffect(openOnStart) { openOnStart?.let { nav.navigate(it) { launchSingleTop = true }; onOpened() } }
             Scaffold(
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets(0),
-                topBar = { if (!inSettings) TopBar(state, actions, onSettings = { nav.navigate(SettingsRoute) { launchSingleTop = true } }, zone = zone) },
+                topBar = { if (!inSettings) TopBar(state, actions, onSettings = { nav.navigate(SettingsRoute) { launchSingleTop = true } }, zone = zone,
+                    wing = { com.echelon.eve.wing.WingStatusIndicator(onClick = { open(Destination.Fly, "wing", null) }) }) },
                 bottomBar = {
                     if (!inSettings) BottomBar(current, onSelect = { d ->
                         nav.navigate(d.route()) {

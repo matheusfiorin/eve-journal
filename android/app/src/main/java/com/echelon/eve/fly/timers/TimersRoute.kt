@@ -138,18 +138,14 @@ fun TimersCard(timers: Collection<WingTimer>, now: Long, systems: Map<Long, Sola
     val board = TimerBoard.of(timers, now)
     val next = board.next
     val c = Echelon.colors
-    EchelonCard(modifier.fillMaxWidth(), onClick = onOpen) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Icon(EchelonIcons.Timer, null, Modifier.size(24.dp), tint = c.accent)
-            Column(Modifier.weight(1f)) {
-                Text("Timers", style = MaterialTheme.typography.titleSmall, color = c.text)
-                Text(next?.let { "${it.title(systems)} · ${board.runningCount} running" } ?: "Gas sites, mining cycles, despawn and cyno",
-                    style = MaterialTheme.typography.bodySmall, color = c.textMuted, maxLines = 1)
-            }
-            if (next != null) Box(contentAlignment = Alignment.Center) {
+    // The hub's own card (nav.HubCard: formation corner, press feedback, entrance), with the next end as its trailing figure.
+    com.echelon.eve.nav.HubCard(
+        "Timers", next?.let { "${it.title(systems)} · ${board.runningCount} running" } ?: "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, onOpen, modifier,
+        trailing = if (next == null) null else ({
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 Countdown(next.endsAt, now = now, style = Echelon.type.num)
-            } else Icon(EchelonIcons.Chevron, null, Modifier.size(18.dp), tint = c.textFaint)
-            if (next != null) ProgressRing(1f - next.progress(now), size = 22.dp, stroke = 3.dp, color = ownerColor(next))
-        }
-    }
+                ProgressRing(1f - next.progress(now), size = 22.dp, stroke = 3.dp, color = ownerColor(next))
+            }
+        }),
+    )
 }

@@ -15,6 +15,7 @@ import com.echelon.eve.core.api.await
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.model.Skills
 import com.echelon.eve.nav.LocalAppContainer
+import com.echelon.eve.wing.wingServices
 import com.echelon.eve.nav.ScreenContext
 import com.echelon.eve.plan.PlanEngine
 import com.echelon.eve.plan.locationOf
@@ -121,11 +122,12 @@ fun ExploreRoute(ctx: ScreenContext) {
             open = { open = it },
             mark = { id -> scope.launch { c.plan.marks.mark(pilot, id) } },
             // Like the web (routes.js sendable): every system of a short loop, its stops when the route is over 40 jumps.
-            sendLoop = { result?.loop?.let { l -> send(if (l.route.size - 1 <= 40) l.route.drop(1) else l.stops.map { it.id } + settings.from) } },
+            sendLoop = { result?.loop?.let { l -> c.wingServices.follow(l.route); send(if (l.route.size - 1 <= 40) l.route.drop(1) else l.stops.map { it.id } + settings.from) } },
             sendTo = { id -> send(listOf(id)) },
             retry = { tries++ },
             share = {
                 result?.loop?.let { l ->
+                    c.wingServices.follow(l.route)
                     c.wingChannel.sharePlan(pilot, com.echelon.eve.core.wing.SharedPlan("explore", "Exploration loop from ${result?.start?.name ?: "here"}".take(80),
                         "${l.stops.size} systems, ${l.jumps} jumps, about ${l.minutes} min: ${l.stops.joinToString { it.name }}", l.route))
                     sent = "Shared with ${pilot.wingmate.displayName}."

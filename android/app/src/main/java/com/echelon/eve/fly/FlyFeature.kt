@@ -70,7 +70,7 @@ object FlyFeature : Feature {
         com.echelon.eve.fly.cockpit.CockpitWidget.watch(container.app, container.scope)
     }
     override fun install(registry: FeatureRegistry) {
-        registry.register(destination, SubScreen("cockpit", "Cockpit", "Where you are, the next timer and one-tap calls", EchelonIcons.Fly, 1, card = { ctx, onOpen -> CockpitCard(ctx, onOpen) }) { CockpitRoute(it) })
+        registry.register(destination, SubScreen("cockpit", "Cockpit", "Where you are, the next timer and one-tap calls", EchelonIcons.Gauge, 1, card = { ctx, onOpen -> CockpitCard(ctx, onOpen) }) { CockpitRoute(it) })
         registry.register(destination, SubScreen("wing", "Wing", "Calls, shared plans and who is online", EchelonIcons.Wing, 5) { com.echelon.eve.fly.wing.WingRoute(it) })
         registry.register(destination, SubScreen("timers", "Timers", "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, 10, card = { ctx, onOpen -> com.echelon.eve.fly.timers.TimersHubCard(ctx, onOpen) }) { com.echelon.eve.fly.timers.TimersRoute(it) })
         registry.register(destination, SubScreen("live", "Where I am", "Live location and ship from EVE", EchelonIcons.Route, 20) { LiveRoute(it) })

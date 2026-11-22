@@ -92,11 +92,12 @@ object WingNotifications {
 
     fun show(context: Context, text: PushText, tag: String) {
         // Android 13+ needs the notification permission; the Fly feature asks when the first timer starts, the Wing screen offers it too.
-        if (!allowed(context)) return
+        // Checked inline (not through allowed()) so lint sees the check guarding notify().
+        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         ensureChannel(context)
         val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(context, if (text.updates) UPDATES else CHANNEL).setSmallIcon(R.drawable.ic_emblem).setContentTitle(text.title).setContentText(text.body)
-            .setAutoCancel(true).setContentIntent(open).setCategory(if (text.updates) NotificationCompat.CATEGORY_STATUS else NotificationCompat.CATEGORY_MESSAGE).setColor(0xFFA99BFF.toInt()).build()
+        val n = NotificationCompat.Builder(context, if (text.updates) UPDATES else CHANNEL).setSmallIcon(R.drawable.ic_stat_echelon).setContentTitle(text.title).setContentText(text.body)
+            .setAutoCancel(true).setContentIntent(open).setCategory(if (text.updates) NotificationCompat.CATEGORY_STATUS else NotificationCompat.CATEGORY_MESSAGE).setColor(0xFFA58CFF.toInt()).build()
         runCatching { NotificationManagerCompat.from(context).notify(tag, 0, n) }
     }
 }

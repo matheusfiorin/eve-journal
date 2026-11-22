@@ -113,13 +113,14 @@ fun syncLine(sync: SyncState, zone: ZoneId = ZoneId.systemDefault()): SyncLine {
  * the middle, the flying pilot's colour.
  */
 @Composable
-fun TopBar(state: ShellState, actions: ShellActions, onSettings: () -> Unit, modifier: Modifier = Modifier, zone: ZoneId = ZoneId.systemDefault()) {
+fun TopBar(state: ShellState, actions: ShellActions, onSettings: () -> Unit, modifier: Modifier = Modifier, zone: ZoneId = ZoneId.systemDefault(), wing: (@Composable () -> Unit)? = null) {
     val c = Echelon.colors
     val pilot = Echelon.pilot.color
     Column(modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(c.bg, c.bg.copy(alpha = .9f)))).windowInsetsPadding(WindowInsets.statusBars)) {
         Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).height(60.dp).padding(start = Spacing.sm, end = Spacing.xs), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             PilotSwitcher(state, actions)
             Box(Modifier.weight(1f))
+            wing?.invoke()
             SyncIndicator(state, actions, zone)
             IconButton(onSettings) { Icon(EchelonIcons.Settings, "Settings", tint = c.textMuted) }
         }

@@ -16,6 +16,7 @@ import com.echelon.eve.core.esi.eveNames
 import com.echelon.eve.core.model.MarketData
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.nav.LocalAppContainer
+import com.echelon.eve.wing.wingServices
 import com.echelon.eve.nav.ScreenContext
 import com.echelon.eve.plan.locationOf
 import com.echelon.eve.plan.plan
@@ -141,6 +142,7 @@ fun HaulRoute(ctx: ScreenContext) {
         share = {
             val m = base.result?.modes?.get(base.mode)
             if (m != null && m.unreachable == null) {
+                c.wingServices.follow(m.route)
                 c.wingChannel.sharePlan(pilot, com.echelon.eve.core.wing.SharedPlan("haul", m.stops.joinToString(" → ") { it.name }.take(80),
                     "${m.jumps} jumps, ${risk(1 - m.survival)} risk, ${base.result.hull?.name ?: ""}".trim().trimEnd(','), m.route))
                 ui = base.copy(sent = "Shared with ${pilot.wingmate.displayName}.")
@@ -153,6 +155,8 @@ fun HaulRoute(ctx: ScreenContext) {
             val m = base.result?.modes?.get(base.mode) ?: return@HaulActions
             // routes.js sendable: every system of a route up to 40 jumps, otherwise just the stops.
             val ids = if (m.route.size - 1 <= 40) m.route.drop(1) else m.stops.map { it.id }.drop(1)
+            // Committing to the route makes it this pilot's destination for the wingmate's follow mode (when status sharing is on).
+            c.wingServices.follow(m.route)
             scope.launch {
                 ui = base.copy(sent = "Sending…")
                 ui = base.copy(sent = c.sendWaypoints(pilot, ids).fold({ "Autopilot set: ${plural(it, "waypoint")}." }, { it.message ?: "EVE did not take the route." }))

@@ -59,8 +59,8 @@ class CockpitActivity : ComponentActivity() {
                 EchelonTheme(theme, PilotColors.of(pilot?.id)) {
                     GridBackground(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                            CockpitBar(pilot, onOpenApp = ::openApp, onClose = ::finish)
-                            CockpitRoute(ScreenContext(pilot, null, open = { _, _, _ -> openApp() }, back = ::finish))
+                            CockpitBar(pilot, onOpenApp = { openApp("Fly/cockpit") }, onClose = ::finish)
+                            CockpitRoute(ScreenContext(pilot, null, open = { d, key, _ -> openApp("${d.name}/$key") }, back = ::finish))
                         }
                     }
                 }
@@ -68,8 +68,9 @@ class CockpitActivity : ComponentActivity() {
         }
     }
 
-    private fun openApp() {
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+    /** Opens the app on that sub-screen ("Fly/wing") rather than its first tab. */
+    private fun openApp(target: String) {
+        startActivity(MainActivity.open(this, target))
         finish()
     }
 

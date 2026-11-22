@@ -29,7 +29,7 @@ fun CockpitHubCard(me: Whereabouts?, next: WingTimer?, now: Long, onOpen: () -> 
     val c = Echelon.colors
     EchelonCard(modifier.fillMaxWidth(), tone = Tone.Accent, onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Icon(EchelonIcons.Fly, null, Modifier.size(28.dp), tint = c.accent)
+            Icon(EchelonIcons.Gauge, null, Modifier.size(28.dp), tint = c.accent)
             Column(Modifier.weight(1f)) {
                 Text("Cockpit", style = MaterialTheme.typography.titleMedium, color = c.text)
                 if (me?.systemName != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
