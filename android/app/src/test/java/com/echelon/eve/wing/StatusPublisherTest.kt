@@ -51,8 +51,9 @@ class StatusPublisherTest {
         Json.parseToJsonElement(nextStatus()).jsonObject.let { assertEquals(listOf("30000144", "false", "Badger", "idle"), listOf("system", "docked", "ship", "activity").map { k -> it.getValue(k).jsonPrimitive.content }) }
         settings.setActivity(WingStatus.HAULING)
         settings.follow(listOf(30000144, 30000142))
-        val followed = generateSequence { runCatching { nextStatus() }.getOrNull() }.map { Json.parseToJsonElement(it).jsonObject }.first { it["destination"] != null }
-        assertEquals("hauling", followed.getValue("activity").jsonPrimitive.content)
+        // combine() can emit an in-between status (the new route, the old activity) before both changes land; wait for the settled one.
+        val followed = generateSequence { runCatching { nextStatus() }.getOrNull() }.map { Json.parseToJsonElement(it).jsonObject }
+            .first { it["destination"] != null && it["activity"]?.jsonPrimitive?.content == "hauling" }
         assertEquals("30000142", followed.getValue("destination").jsonPrimitive.content)
         settings.setShareStatus(false)
         assertEquals("""{"share":false}""", generateSequence { runCatching { nextStatus() }.getOrNull() }.first { it.contains("share\":false") })
