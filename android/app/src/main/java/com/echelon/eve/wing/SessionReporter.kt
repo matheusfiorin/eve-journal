@@ -41,10 +41,11 @@ class SessionReporter(
     private val ledger: Flow<(Pilot) -> Ledger>,
 ) {
     private var sent: Triple<String, Long?, Long?>? = null
+    private data class Report(val session: WingSession?, val pilot: Pilot?, val ledger: Ledger?, val connected: Boolean)
 
     fun start(): Job = scope.launch {
-        combine(channel.session, pilot, ledger) { s, p, l -> Triple(s, p, p?.let(l)) }.distinctUntilChanged().collect { (s, p, l) ->
-            if (s == null || p == null || l == null || channel.status.value != WingChannel.Status.Connected) return@collect
+        combine(channel.session, pilot, ledger, channel.status) { s, p, l, st -> Report(s, p, p?.let(l), st == WingChannel.Status.Connected) }.distinctUntilChanged().collect { (s, p, l, connected) ->
+            if (s == null || p == null || l == null || !connected) return@collect
             val (isk, units) = contribution(settings, s, p, l) ?: return@collect
             val key = Triple("${s.id}:${p.id}", isk, units)
             if (key == sent) return@collect

@@ -48,7 +48,8 @@ class StatusPublisher(
             Choice(s == WingChannel.Status.Connected, share, activity, if (shareRoute) route else emptyList())
         }.combine(pilot) { c, p -> c to p }.distinctUntilChanged().collectLatest { (c, p) ->
             if (!c.connected || p == null) return@collectLatest
-            if (!c.share) { if (last?.first == p) { channel.publishStatus(p, null); last = null }; return@collectLatest }
+            // Not sharing: clear what the room still holds of this pilot (from this run, or an earlier one).
+            if (!c.share) { if (last?.first == p || p.id in channel.statuses.value) channel.publishStatus(p, null); last = null; return@collectLatest }
             while (true) { publish(p, c); delay(everyMs) }
         }
     }
