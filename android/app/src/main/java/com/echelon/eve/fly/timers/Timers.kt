@@ -29,11 +29,11 @@ const val HOUR = 60 * MIN
 /** The longest timer the app starts (a day): anything longer is a calendar entry, not a countdown. */
 const val MAX_TIMER = 24 * HOUR
 
-/** A new timer owned by [owner], running from [now]. A blank [label] takes the kind's title. */
-fun newTimer(id: String, kind: TimerKind, durationMs: Long, owner: Pilot, now: Long, label: String = "", shared: Boolean = true) = WingTimer(
+/** A new timer owned by [owner], running from [now], in [system] when given. A blank [label] takes the kind's title. */
+fun newTimer(id: String, kind: TimerKind, durationMs: Long, owner: Pilot, now: Long, label: String = "", shared: Boolean = true, system: TimerSystem? = null) = WingTimer(
     id = id, kind = kind.key, label = label.trim().ifEmpty { kind.title }, startedAt = now,
     durationMs = durationMs.coerceIn(SEC, MAX_TIMER), owner = owner.id, shared = shared,
-)
+).placed(system)
 
 /** Freezes the time left. Pausing a paused or finished timer changes nothing. */
 fun WingTimer.paused(now: Long): WingTimer = if (pausedAt != null || done(now)) this else copy(pausedAt = now)

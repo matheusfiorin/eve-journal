@@ -87,9 +87,35 @@ class TimersTest {
     @get:Rule val tmp = TemporaryFolder()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun store(scope: TestScope, room: FakeRoom, file: File, now: () -> Long = { t0 }, active: () -> Unit = {}): TimerStore {
+    private fun store(scope: TestScope, room: FakeRoom, file: File, now: () -> Long = { t0 }, active: () -> Unit = {}, locate: (Pilot) -> TimerSystem? = { null }): TimerStore {
         val d = UnconfinedTestDispatcher(scope.testScheduler)
-        return TimerStore(kotlinx.coroutines.CoroutineScope(scope.backgroundScope.coroutineContext + d), file, room, now, active, io = d)
+        return TimerStore(kotlinx.coroutines.CoroutineScope(scope.backgroundScope.coroutineContext + d), file, room, now, active, io = d, locate = locate)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun newTimersStartWhereTheOwnerIsUnlessToldOtherwise() = runTest {
+        val room = FakeRoom(); val file = File(tmp.root, "t.json")
+        val tama = TimerSystem(30002813, "Tama"); val jita = TimerSystem(30000142, "Jita")
+        val s = store(this, room, file, locate = { if (it == Pilot.Fiofka) tama else null })
+        // By default: the owner's synced location, and the same in the room.
+        val a = s.start(Pilot.Fiofka, TimerKind.Gas, 20 * MIN)
+        assertEquals(tama, a.system)
+        assertEquals(30002813L, room.upserts.last().systemId)
+        // A live read the screen made wins over the synced one; null in the store's eyes falls back again.
+        s.noteLocation(Pilot.Fiofka, jita)
+        assertEquals(jita, s.start(Pilot.Fiofka, TimerKind.Cyno, 5 * MIN).system)
+        s.noteLocation(Pilot.Fiofka, null)
+        assertEquals(tama, s.here(Pilot.Fiofka))
+        // An explicit system, or explicitly none; a pilot nowhere known gets none.
+        assertEquals(jita, s.start(Pilot.Fiofka, TimerDraft(TimerKind.Despawn, HOUR, system = jita)).system)
+        assertNull(s.start(Pilot.Fiofka, TimerKind.Generic, MIN, system = null).system)
+        assertNull(s.start(Pilot.Decxus, TimerKind.Generic, MIN).system)
+        // Moving keeps the timer and its other meta; it reaches the room; it survives a restart.
+        s.place(a.id, jita)
+        assertEquals(jita, s.timers.value.getValue(a.id).system)
+        assertEquals(a.id, room.upserts.last().id)
+        advanceUntilIdle()
+        assertEquals(jita, store(this, FakeRoom(), file).timers.value.getValue(a.id).system)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
