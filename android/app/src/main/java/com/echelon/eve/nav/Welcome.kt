@@ -51,6 +51,24 @@ import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Radii
 import com.echelon.eve.ui.theme.Spacing
+import com.echelon.eve.ui.theme.formationShape
+import com.echelon.eve.ui.components.Dart
+import com.echelon.eve.ui.components.EchelonStripes
+import com.echelon.eve.ui.motion.Springs
+import com.echelon.eve.ui.motion.entrance
+import com.echelon.eve.ui.motion.pressScale
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 
 /**
  * The first screen (the web's "who's flying" picker), and the sign-in screen: pick a pilot, then connect them with EVE
@@ -62,17 +80,33 @@ fun WelcomeScreen(state: ShellState, actions: ShellActions, initialChosen: Pilot
     val haptics = rememberHaptics()
     // A sign-in that finished while this screen is up takes the pilot straight in.
     LaunchedEffect(state.auth) { (state.auth as? AuthManager.State.Connected)?.let { actions.selectPilot(it.pilot) } }
+    val reduced = Echelon.reduceMotion
     HeroBackground(Modifier.fillMaxSize(), seed = 11) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(horizontal = Spacing.xxl, vertical = Spacing.xxxl),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
-            Emblem(size = 72.dp, highlight = chosen?.let { PilotColors.of(it.id) })
-            Text("Echelon", style = Echelon.type.hero, color = Echelon.colors.text)
-            AnimatedContent(chosen, transitionSpec = { (slideInHorizontally { it / 4 } + fadeIn()) togetherWith fadeOut() }, label = "welcome") { pilot ->
+        // Centred on the screen when it fits (a phone held upright), scrolling from the top when it does not.
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        val minHeight = maxHeight
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = minHeight).padding(horizontal = Spacing.xxl, vertical = Spacing.xxxl)
+            .wrapContentWidth().widthIn(max = 480.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.lg, Alignment.CenterVertically)) {
+            // The formation assembles once, the first time the app opens (the splash hands over to it).
+            Emblem(size = 88.dp, highlight = chosen?.let { PilotColors.of(it.id) }, animate = true)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text("ECHELON", style = Echelon.type.hero.copy(letterSpacing = .14.em, fontSize = 34.sp), color = Echelon.colors.text, modifier = Modifier.entrance(1))
+                Row(Modifier.entrance(2), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    EchelonStripes(height = 8.dp)
+                    Text("THE WING CONSOLE", style = Echelon.type.overline, color = Echelon.colors.textMuted)
+                }
+            }
+            AnimatedContent(chosen, transitionSpec = {
+                if (reduced) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                else (slideInHorizontally(Springs.nav()) { if (targetState != null) it / 4 else -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally(Springs.nav()) { if (targetState != null) -it / 6 else it / 6 } + fadeOut())
+            }, label = "welcome") { pilot ->
                 if (pilot == null) Picker(state) { p ->
                     haptics.select()
                     if (state.state(p).connected) actions.selectPilot(p) else chosen = p
                 } else Connect(state.state(pilot), state.auth, actions, onBack = { chosen = null })
             }
+        }
         }
     }
 }
@@ -83,16 +117,17 @@ private fun Picker(state: ShellState, onPick: (Pilot) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         Text("Who’s flying?", style = MaterialTheme.typography.titleLarge, color = c.text)
         Text("Every screen centres on this pilot, with the wingmate’s plans alongside.", style = MaterialTheme.typography.bodyMedium, color = c.textMuted, textAlign = TextAlign.Center)
-        state.pilots.forEach { p -> PilotChoice(p) { onPick(p.pilot) } }
+        state.pilots.forEachIndexed { i, p -> PilotChoice(p, Modifier.entrance(3 + i)) { onPick(p.pilot) } }
     }
 }
 
 @Composable
-private fun PilotChoice(p: PilotState, onClick: () -> Unit) {
+private fun PilotChoice(p: PilotState, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = Echelon.colors
     val colors = PilotColors.of(p.id)
-    val shape = RoundedCornerShape(Radii.panel)
-    Row(Modifier.fillMaxWidth().clip(shape).background(c.surface1.copy(alpha = .86f)).border(1.dp, colors.color.copy(alpha = .5f), shape).clickable(role = Role.Button, onClick = onClick).padding(Spacing.lg),
+    val shape = formationShape(Radii.cut, Radii.panel)
+    val interaction = remember { MutableInteractionSource() }
+    Row(modifier.pressScale(interaction).fillMaxWidth().clip(shape).background(Brush.horizontalGradient(listOf(colors.soft, c.surface1.copy(alpha = .9f)))).border(1.dp, colors.color.copy(alpha = .5f), shape).clickable(interaction, ripple(color = colors.color), role = Role.Button, onClick = onClick).padding(Spacing.lg),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         Portrait(p.id, colors, size = 64.dp, contentDescription = "Portrait of ${p.name}")
         Column(Modifier.weight(1f)) {
@@ -134,7 +169,7 @@ private fun Connect(p: PilotState, auth: AuthManager.State, actions: ShellAction
 private fun Bullet(text: String) {
     val c = Echelon.colors
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        Box(Modifier.padding(top = 7.dp).background(c.accent, RoundedCornerShape(1.dp)).padding(3.dp))
+        Dart(c.accent, Modifier.padding(top = 6.dp).size(8.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
     }
 }

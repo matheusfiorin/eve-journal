@@ -13,11 +13,11 @@ import kotlinx.serialization.Serializable
 // sub-screens with the registry; the shell lists them on the destination's hub and routes to them. Adding a screen
 // never touches the shell: write the composable, register it in your Feature, done. See ARCHITECTURE.md.
 
-/** The three bottom-bar destinations. */
-enum class Destination(val label: String, val icon: ImageVector, val blurb: String) {
-    Plan("Plan", EchelonIcons.Plan, "Decide what to do next"),
-    Fly("Fly", EchelonIcons.Fly, "Timers and help while you play"),
-    Corp("Corp", EchelonIcons.Corp, "Structures, wallet and assets"),
+/** The three bottom-bar destinations; [selectedIcon] is the filled twin the tab bar shows when selected. */
+enum class Destination(val label: String, val icon: ImageVector, val blurb: String, val selectedIcon: ImageVector = icon) {
+    Plan("Plan", EchelonIcons.Plan, "Decide what to do next", EchelonIcons.PlanSelected),
+    Fly("Fly", EchelonIcons.Fly, "Timers and help while you play", EchelonIcons.FlySelected),
+    Corp("Corp", EchelonIcons.Corp, "Structures, wallet and assets", EchelonIcons.CorpSelected),
 }
 
 // Type-safe routes (Navigation Compose with kotlinx.serialization).

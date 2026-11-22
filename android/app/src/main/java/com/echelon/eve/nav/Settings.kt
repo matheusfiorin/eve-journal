@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -28,7 +31,7 @@ import com.echelon.eve.core.data.PilotState
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.ui.components.ChoiceChip
 import com.echelon.eve.ui.components.EchelonCard
-import com.echelon.eve.ui.components.Emblem
+import com.echelon.eve.ui.components.Wordmark
 import com.echelon.eve.ui.components.Hairline
 import com.echelon.eve.ui.components.KeyValueRow
 import com.echelon.eve.ui.components.LinkButton
@@ -56,7 +59,7 @@ fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit,
     var confirm by remember { mutableStateOf<Pilot?>(null) }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         BackBar("Settings", onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = Spacing.gutter).padding(bottom = Spacing.xxl),
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.navigationBars).fillMaxWidth().wrapContentWidth().widthIn(max = Spacing.maxContent).padding(horizontal = Spacing.gutter).padding(bottom = Spacing.xxl),
             verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             SectionHeader("Pilots", subtitle = "Each pilot connects once. The backend keeps the EVE sign-in; this phone keeps only a session, locked with its keystore.")
             state.pilots.forEach { p -> PilotCard(p, state.selected == p.pilot, actions, zone, onDisconnect = { confirm = p.pilot }) }
@@ -79,14 +82,12 @@ fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit,
 
             SectionHeader("About")
             EchelonCard {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                    Emblem(size = 36.dp)
-                    Column { Text("Echelon", style = Echelon.type.screenTitle, color = c.text); Text("The wing console for Fiofka and Decxus", style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
-                }
+                Wordmark(size = 40.dp, tagline = "THE WING CONSOLE")
+                Text("For Fiofka and Decxus, flying in formation.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
                 KeyValueRow("Version", state.version.ifBlank { "—" })
                 KeyValueRow("Backend", state.backendHost.ifBlank { "—" })
                 Hairline()
-                Text("Fonts: Michroma, Barlow Semi Condensed and Martian Mono, under the SIL Open Font License.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+                Text("Fonts: Oxanium, Saira and JetBrains Mono, under the SIL Open Font License.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
                 Text("Data from EVE ESI. Not affiliated with CCP Games. © 2014 CCP hf. All rights reserved. “EVE”, “EVE Online”, “CCP”, and all related logos and images are trademarks or registered trademarks of CCP hf.", style = MaterialTheme.typography.bodySmall, color = c.textFaint)
             }
         }
