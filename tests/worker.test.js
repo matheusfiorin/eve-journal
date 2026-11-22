@@ -1630,7 +1630,7 @@ test('wing room: no push without the FCM secrets (nothing is fetched); with them
 });
 test('wing room: the REST paths of the room need the pilot header',async()=>{
  const {r}=room();assert.equal((await r.fetch(new Request('https://wing-room/state'))).status,403);
- const ok=await r.fetch(new Request('https://wing-room/state',{headers:{'X-Wing-Pilot':String(FIO)}}));assert.deepEqual(Object.keys(await ok.json()),['timers','items','presence']);
+ const ok=await r.fetch(new Request('https://wing-room/state',{headers:{'X-Wing-Pilot':String(FIO)}}));assert.deepEqual(Object.keys(await ok.json()),['timers','items','presence','statuses','session','sessions']);
  assert.equal((await r.fetch(new Request('https://wing-room/nope',{headers:{'X-Wing-Pilot':String(FIO)}}))).status,404);
 });
 // The Worker's side: the ticket, the socket hand-over, the REST fallback and the device token.
