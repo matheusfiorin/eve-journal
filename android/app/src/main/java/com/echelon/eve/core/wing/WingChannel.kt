@@ -31,8 +31,8 @@ class Backoff(private val baseMs: Long = 1_000, private val maxMs: Long = 60_000
     fun reset() { attempt = 0 }
 }
 
-/** Something received from the wingmate, with who sent it and when, for the UI's feed and chips. */
-data class WingEvent<T>(val from: Pilot?, val at: Long, val value: T, val id: String)
+/** Something received from the wingmate, with who sent it and when, for the UI's feed and chips; [acks] are the answers to it. */
+data class WingEvent<T>(val from: Pilot?, val at: Long, val value: T, val id: String, val acks: Map<Long, WingAck> = emptyMap())
 
 /**
  * The live link to the wing room: an OkHttp WebSocket to GET /api/wing/socket with the flying pilot's session as a
@@ -76,6 +76,18 @@ class WingChannel(
     val pings: StateFlow<List<WingEvent<WingPing>>> = _pings.asStateFlow()
     private val _plans = MutableStateFlow<List<WingEvent<SharedPlan>>>(emptyList())
     val plans: StateFlow<List<WingEvent<SharedPlan>>> = _plans.asStateFlow()
+    private val _statuses = MutableStateFlow<Map<Long, WingStatus>>(emptyMap())
+    /** Each pilot's live status by pilot id (only pilots who share it). This phone's own is what it last sent. */
+    val statuses: StateFlow<Map<Long, WingStatus>> = _statuses.asStateFlow()
+    private val _session = MutableStateFlow<WingSession?>(null)
+    /** The session the two pilots are flying, or null. */
+    val session: StateFlow<WingSession?> = _session.asStateFlow()
+    private val _history = MutableStateFlow<List<WingSession>>(emptyList())
+    /** Ended sessions with their totals, newest first (the room keeps the last ten). */
+    val sessionHistory: StateFlow<List<WingSession>> = _history.asStateFlow()
+    private val _pending = MutableStateFlow(0)
+    /** How many messages wait in the outbox for the room: the sync indicator's "queued". */
+    val pending: StateFlow<Int> = _pending.asStateFlow()
     private val _incoming = MutableSharedFlow<WingMessage>(extraBufferCapacity = 64)
     /** Live messages as they arrive (not the snapshot): for haptics and notifications on a wingmate's ping. */
     val incoming: SharedFlow<WingMessage> = _incoming.asSharedFlow()
@@ -105,12 +117,28 @@ class WingChannel(
     fun removeTimer(timerId: String, from: Pilot) = send(WingMessage.TimerRemove(newId(), from.id, clock(), timerId)).also { _timers.update { it - timerId } }
     fun ping(from: Pilot, ping: WingPing) = send(WingMessage.Ping(newId(), from.id, clock(), ping))
     fun sharePlan(from: Pilot, plan: SharedPlan) = send(WingMessage.PlanShare(newId(), from.id, clock(), plan))
+    /** Shares this pilot's live status (null stops sharing it). Only the latest one waits in the outbox. */
+    fun publishStatus(from: Pilot, status: WingStatus?): Boolean {
+        _statuses.update { if (status == null) it - from.id else it + (from.id to status.copy(pilot = from.id, name = from.displayName, at = clock())) }
+        return send(WingMessage.StatusUpdate(newId(), from.id, clock(), status))
+    }
+    /** Answers the wingmate's ping or plan [ref] with a [WingAck] kind. Applied here at once. */
+    fun ack(from: Pilot, ref: String, kind: String): Boolean = send(WingMessage.Ack(newId(), from.id, clock(), ref, kind)).also { applyAck(from.id, ref, kind, clock()) }
+    fun startSession(from: Pilot, plan: SessionPlan) = send(WingMessage.SessionStart(newId(), from.id, clock(), plan))
+    /** This pilot's own totals in the running session; only the latest report waits in the outbox. */
+    fun reportContribution(from: Pilot, isk: Long? = null, units: Long? = null) = send(WingMessage.SessionContrib(newId(), from.id, clock(), isk, units))
+    fun endSession(from: Pilot, sessionId: String? = _session.value?.id) = send(WingMessage.SessionEnd(newId(), from.id, clock(), sessionId))
 
     /** Sends now if connected, else queues. Returns true when it went out immediately. */
     fun send(message: WingMessage): Boolean {
         val ws = synchronized(lock) { socket.takeIf { _status.value == Status.Connected } }
         if (ws != null && ws.send(WingCodec.encode(message))) return true
-        synchronized(lock) { outbox.addLast(message); while (outbox.size > KEEP) outbox.removeFirst() }
+        synchronized(lock) {
+            // A newer status or contribution makes a queued one pointless.
+            if (message is WingMessage.StatusUpdate || message is WingMessage.SessionContrib) outbox.removeAll { it::class == message::class }
+            outbox.addLast(message); while (outbox.size > KEEP) outbox.removeFirst()
+            _pending.value = outbox.size
+        }
         ensure()
         return false
     }
@@ -193,7 +221,7 @@ class WingChannel(
             if (socket !== ws || _status.value == Status.Connected) return
             stateWait?.cancel(); stateWait = null
             _status.value = Status.Connected
-            outbox.toList().also { outbox.clear() }
+            outbox.toList().also { outbox.clear(); _pending.value = 0 }
         }
         for (m in queued) { if (m is WingMessage.TimerUpsert) applyTimer(m.timer); if (m is WingMessage.TimerRemove) _timers.update { it - m.timerId }; ws.send(WingCodec.encode(m)) }
     }
@@ -206,16 +234,39 @@ class WingChannel(
                 // Timers more than a day past their end are the room's to expire; drop any it still sent.
                 _timers.value = m.timers.filter { it.pausedAt != null || now - it.endsAt < DAY }.associateBy { it.id }
                 _presence.value = m.presence.associateBy { it.pilot }
-                _pings.value = m.items.filterIsInstance<WingMessage.Ping>().map { WingEvent(it.pilot, it.at, it.ping, it.id) }.sortedByDescending { it.at }.take(KEEP)
-                _plans.value = m.items.filterIsInstance<WingMessage.PlanShare>().map { WingEvent(it.pilot, it.at, it.plan, it.id) }.sortedByDescending { it.at }.take(KEEP)
+                _pings.value = m.items.filterIsInstance<WingMessage.Ping>().map { WingEvent(it.pilot, it.at, it.ping, it.id, it.acks) }.sortedByDescending { it.at }.take(KEEP)
+                _plans.value = m.items.filterIsInstance<WingMessage.PlanShare>().map { WingEvent(it.pilot, it.at, it.plan, it.id, it.acks) }.sortedByDescending { it.at }.take(KEEP)
+                _statuses.value = m.statuses.filter { it.pilot != 0L }.associateBy { it.pilot }
+                _session.value = m.session?.takeIf { it.active }
+                _history.value = m.sessions.sortedByDescending { it.startedAt }
             }
+            is WingMessage.StatusUpdate -> _statuses.update { if (m.status == null) it - m.from else it + (m.from to m.status.copy(pilot = m.from)) }
+            is WingMessage.Ack -> applyAck(m.from, m.ref, m.kind, m.at)
+            is WingMessage.SessionEvent -> when (m.phase) {
+                "end" -> {
+                    _history.update { (listOf(m.session) + it.filter { s -> s.id != m.session.id }).sortedByDescending { s -> s.startedAt }.take(10) }
+                    _session.update { if (it?.id == m.session.id) null else it }
+                }
+                // A late update for a session that already ended (or a start after a newer one) changes nothing.
+                else -> _session.update { cur -> if (_history.value.any { it.id == m.session.id } || (cur != null && cur.id != m.session.id && cur.startedAt > m.session.startedAt)) cur else m.session }
+            }
+            is WingMessage.SessionStart, is WingMessage.SessionContrib, is WingMessage.SessionEnd -> {}
             is WingMessage.TimerUpsert -> applyTimer(m.timer)
             is WingMessage.TimerRemove -> _timers.update { it - m.timerId }
-            is WingMessage.Ping -> _pings.update { (listOf(WingEvent(m.pilot, m.at, m.ping, m.id)) + it.filter { e -> e.id != m.id }).take(KEEP) }
-            is WingMessage.PlanShare -> _plans.update { (listOf(WingEvent(m.pilot, m.at, m.plan, m.id)) + it.filter { e -> e.id != m.id }).take(KEEP) }
+            is WingMessage.Ping -> _pings.update { (listOf(WingEvent(m.pilot, m.at, m.ping, m.id, m.acks)) + it.filter { e -> e.id != m.id }).take(KEEP) }
+            is WingMessage.PlanShare -> _plans.update { (listOf(WingEvent(m.pilot, m.at, m.plan, m.id, m.acks)) + it.filter { e -> e.id != m.id }).take(KEEP) }
             is WingMessage.PresenceUpdate -> if (m.list != null) _presence.value = m.list.associateBy { it.pilot } else _presence.update { it + (m.from to Presence(m.from, m.online, m.timers, m.at)) }
             is WingMessage.Error -> {}
         }
+    }
+
+    /** An answer replaces an earlier one, but a "seen" never replaces "on it" or "can't" (as the room keeps them). */
+    private fun applyAck(pilot: Long, ref: String, kind: String, at: Long) {
+        fun <T> List<WingEvent<T>>.with() = map { e ->
+            val had = e.acks[pilot]
+            if (e.id != ref || (had != null && (had.kind == kind || kind == WingAck.SEEN))) e else e.copy(acks = e.acks + (pilot to WingAck(kind, at)))
+        }
+        _pings.update { it.with() }; _plans.update { it.with() }
     }
 
     private fun applyTimer(t: WingTimer) = _timers.update { if (t.shared) it + (t.id to t) else it - t.id }

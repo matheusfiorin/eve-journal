@@ -116,7 +116,26 @@ pilot). It connects while held, folds the room's messages into StateFlows, and r
   notification on the `wing` channel. Without the file the build is unchanged and Firebase never initialises.
   `PushRegistrar` registers the token (`POST /api/push/register {token}`) for each connected pilot whenever the
   flying pilot or a session changes. Android 13+ needs `POST_NOTIFICATIONS` at run time: the Fly feature asks for it
-  when the first timer starts (it needs it for the ongoing timer notification anyway).
+  when the first timer starts (it needs it for the ongoing timer notification anyway), and the Wing screen offers it.
+
+### Flying together (com.echelon.eve.wing)
+
+The room's coordination types (worker/README.md, "Coordination types") on top of the channel:
+
+- Channel state: `statuses` (each pilot's live status by id), `session` (the running one) and `sessionHistory` (ended,
+  with totals), `pending` (outbox size). Send: `publishStatus(pilot, WingStatus?)`, `ack(pilot, ref, WingAck.ONIT)`,
+  `startSession(pilot, SessionPlan(activity, goal, where))`, `reportContribution(pilot, isk, units)`, `endSession(pilot)`.
+  Answers arrive on each `WingEvent.acks`. `jumpsBetween(systems, a, b)` (core/wing/WingGeo.kt) is a gate BFS over
+  `market.state.value.data?.systems`.
+- `container.wingServices` (`WingServices`, started from `EchelonApp.onCreate`): `settings` (opt-in live status,
+  activity, followed route; SharedPreferences `wing`), `StatusPublisher` (GET /api/live, or the snapshot, once a minute
+  while sharing and connected), `SessionReporter` (wallet change and mining-ledger units since the session started on
+  this phone), `WingNotifier` (wingmate calls on `wing`, answers / sessions / "in your system" on `wing_updates`, only
+  while the app is in the background and something holds the socket; with no socket the room pushes through FCM).
+- For other features: `wingServices.follow(route)` shares the route the pilot is about to fly (follow mode; the Wing
+  screen does it when "Set my autopilot" is used), `wingServices.startSession(plan)`, `wingServices.jumpsToWingmate()`.
+- Top bar: `WingStatusIndicator(onClick = { open Fly → wing })` (wing/WingIndicator.kt) reads the container itself and
+  draws nothing without one; `WingIndicator(WingIndicatorState(...))` is the stateless form for screenshots.
 
 ## The Fly feature (fly)
 
