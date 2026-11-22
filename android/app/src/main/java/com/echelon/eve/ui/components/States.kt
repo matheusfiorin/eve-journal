@@ -1,24 +1,33 @@
 package com.echelon.eve.ui.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -28,7 +37,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -37,39 +48,86 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.echelon.eve.ui.EchelonIcons
+import com.echelon.eve.ui.motion.StaggerRoot
+import com.echelon.eve.ui.motion.entrance
+import com.echelon.eve.ui.theme.Durations
+import com.echelon.eve.ui.theme.Easings
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.Radii
 import com.echelon.eve.ui.theme.Spacing
+import com.echelon.eve.ui.theme.formationShape
+import kotlin.math.PI
+import kotlin.math.sin
 
-/** The skeleton shimmer (.skel): a band of surface-3 sweeping across surface-2. Reduced motion holds it still. */
+/**
+ * The skeleton shimmer: a band of light sweeping diagonally across surface-2, faintly tinted with the accent. Reduced
+ * motion (and screenshots) hold it still.
+ */
 fun Modifier.shimmer(): Modifier = composed {
     val c = Echelon.colors
-    val reduced = Echelon.reduceMotion
-    val x = if (reduced) .5f else rememberInfiniteTransition(label = "shimmer").animateFloat(-1f, 2f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart), label = "sweep").value
+    val still = Echelon.reduceMotion || LocalInspectionMode.current
+    val x = if (still) -1f else rememberInfiniteTransition(label = "shimmer").animateFloat(-1f, 2f, infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart), label = "sweep").value
+    val band = c.surface3.copy(alpha = 1f)
+    val tint = c.accent.copy(alpha = .06f)
     drawBehind {
         val w = size.width
         drawRect(c.surface2)
-        if (!reduced) drawRect(Brush.linearGradient(listOf(c.surface2, c.surface3, c.surface2), start = Offset(w * x - w * .2f, 0f), end = Offset(w * x + w * .2f, 0f)))
+        if (x > -1f) drawRect(Brush.linearGradient(listOf(c.surface2, band, tint, c.surface2), start = Offset(w * x - w * .25f, 0f), end = Offset(w * x + w * .25f, size.height * 2)))
     }
 }
 
-/** A block of skeleton rows while a list loads (widths step down like the web's .skel-rows). */
+/** A block of skeleton rows while a list loads: a leading square and two text bars per row, widths stepping down. */
 @Composable
 fun SkeletonRows(modifier: Modifier = Modifier, rows: Int = 4, height: Dp = 40.dp, label: String? = "Loading…") {
     Column(modifier.semantics { contentDescription = label ?: "Loading" }, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         if (label != null) Text(label, style = Echelon.type.label, color = Echelon.colors.textMuted)
-        val widths = listOf(1f, 1f, .92f, .84f, .7f)
-        repeat(rows) { i -> Box(Modifier.fillMaxWidth(widths[i % widths.size]).height(height).clip(RoundedCornerShape(Radii.control)).shimmer()) }
+        val widths = listOf(1f, .92f, .84f, .7f, .96f)
+        repeat(rows) { i ->
+            Row(Modifier.fillMaxWidth().height(height), horizontalArrangement = Arrangement.spacedBy(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                if (height >= 32.dp) Box(Modifier.size(height).clip(RoundedCornerShape(Radii.control)).shimmer())
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val bar = if (height >= 32.dp) 12.dp else height
+                    Box(Modifier.fillMaxWidth(widths[i % widths.size]).height(bar).clip(RoundedCornerShape(Radii.chip)).shimmer())
+                    if (height >= 32.dp) Box(Modifier.fillMaxWidth(widths[i % widths.size] * .55f).height(10.dp).clip(RoundedCornerShape(Radii.chip)).shimmer())
+                }
+            }
+        }
     }
 }
 
-/** Nothing to show (.empty): a dashed box with a line of plain copy and an optional action. */
+/**
+ * Skeleton → content: shows [skeleton] while [loading], then cross-fades to [content], whose cards and headers then
+ * play their staggered entrance (a fresh [StaggerRoot]). Reduced motion swaps without fading; screenshots show the
+ * state they are given.
+ */
+@Composable
+fun LoadingCrossfade(loading: Boolean, modifier: Modifier = Modifier, skeleton: @Composable () -> Unit = { SkeletonRows() }, content: @Composable () -> Unit) {
+    val reduced = Echelon.reduceMotion
+    AnimatedContent(loading, modifier, transitionSpec = {
+        if (reduced) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+        else fadeIn(tween(Durations.medium, delayMillis = 80, easing = Easings.out)) togetherWith fadeOut(tween(Durations.short))
+    }, label = "loading") { isLoading ->
+        if (isLoading) skeleton() else StaggerRoot("loaded") { content() }
+    }
+}
+
+/**
+ * Nothing to show: a dashed box, the icon on a small Formation tile that floats gently (still with reduced motion and
+ * in screenshots), a title, a line of plain copy and an optional action.
+ */
 @Composable
 fun EmptyState(message: String, modifier: Modifier = Modifier, title: String? = null, icon: ImageVector? = null, action: (@Composable () -> Unit)? = null) {
     val c = Echelon.colors
-    Column(modifier.fillMaxWidth().dashedBorder().padding(horizontal = Spacing.lg, vertical = Spacing.xxl),
+    Column(modifier.entrance().fillMaxWidth().dashedBorder().padding(horizontal = Spacing.lg, vertical = Spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        if (icon != null) Icon(icon, null, tint = c.textFaint)
+        if (icon != null) {
+            val still = Echelon.reduceMotion || LocalInspectionMode.current
+            val t: State<Float> = if (still) remember { mutableFloatStateOf(0f) } else rememberInfiniteTransition(label = "float").animateFloat(0f, 1f, infiniteRepeatable(tween(3200, easing = LinearEasing)), label = "bob")
+            val shape = formationShape(cut = 8.dp, radius = Radii.control)
+            Box(Modifier.graphicsLayer { translationY = sin(t.value * 2 * PI.toFloat()) * 3.dp.toPx() }.size(44.dp).clip(shape).background(c.accentSoft).border(1.dp, c.accentLine, shape), contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(22.dp), tint = c.accentStrong)
+            }
+        }
         if (title != null) Text(title, style = MaterialTheme.typography.titleSmall, color = c.text, textAlign = TextAlign.Center)
         Text(message, style = MaterialTheme.typography.bodyMedium, color = c.textMuted, textAlign = TextAlign.Center)
         action?.invoke()
@@ -77,16 +135,19 @@ fun EmptyState(message: String, modifier: Modifier = Modifier, title: String? = 
 }
 
 /**
- * Something failed (.state--error). The words and the fix differ by cause, like the web's sync line: an expired sign-in
- * offers Reconnect, an outage offers Retry and says how old the data on screen is.
+ * Something failed. The words and the fix differ by cause, like the web's sync line: an expired sign-in offers
+ * Reconnect, an outage offers Retry and says how old the data on screen is. A bar in the tone runs down the start edge.
  */
 @Composable
 fun ErrorState(title: String, message: String, modifier: Modifier = Modifier, tone: Tone = Tone.Danger, action: (@Composable () -> Unit)? = null) {
     val c = Echelon.colors
     val shape = RoundedCornerShape(Radii.panel)
-    Column(modifier.fillMaxWidth().clip(shape).background(tone.soft()).border(1.dp, tone.color().copy(alpha = .4f), shape).padding(Spacing.xl).semantics { liveRegion = LiveRegionMode.Polite },
+    val bar = tone.color()
+    Column(modifier.entrance().fillMaxWidth().clip(shape).background(tone.soft()).border(1.dp, tone.color().copy(alpha = .4f), shape)
+        .drawBehind { drawRect(bar, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+        .padding(Spacing.xl).semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
             Icon(EchelonIcons.Alert, null, tint = tone.color())
             Text(title, style = MaterialTheme.typography.titleSmall, color = c.text)
         }

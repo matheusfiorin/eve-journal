@@ -32,6 +32,12 @@ object Springs {
     fun <T> select(): FiniteAnimationSpec<T> = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
     /** Numbers and progress: smooth, no overshoot. */
     fun <T> value(): FiniteAnimationSpec<T> = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow)
+    /** Press feedback: stiff and quick, a touch of bounce on release. */
+    fun <T> press(): FiniteAnimationSpec<T> = spring(dampingRatio = .6f, stiffness = Spring.StiffnessHigh)
+    /** Something arriving that should feel alive (a tab icon popping, a badge appearing): a visible bounce. */
+    fun <T> pop(): FiniteAnimationSpec<T> = spring(dampingRatio = .45f, stiffness = Spring.StiffnessMediumLow)
+    /** Entrances: settles without overshoot, a little slower than nav. */
+    fun <T> enter(): FiniteAnimationSpec<T> = spring(dampingRatio = .82f, stiffness = 320f)
 }
 
 /** Picks the reduced spec when the user asked for less motion. */
@@ -62,7 +68,7 @@ class NavMotion(private val reduced: Boolean) {
     }
     /** Switching bottom-bar destinations: a fade through with a slight zoom, no direction (the tabs are peers). */
     val tabEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        if (reduced) fadeIn(fade(Durations.quick)) else fadeIn(fade(Durations.medium)) + scaleIn(spring(stiffness = 600f), initialScale = .98f)
+        if (reduced) fadeIn(fade(Durations.quick)) else fadeIn(tween(Durations.medium, delayMillis = 60, easing = Easings.emphasized)) + scaleIn(spring(stiffness = 600f), initialScale = .97f)
     }
     val tabExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = { fadeOut(fade(Durations.quick)) }
 }

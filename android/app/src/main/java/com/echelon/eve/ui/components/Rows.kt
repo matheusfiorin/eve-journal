@@ -19,6 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echelon.eve.ui.EchelonIcons
+import com.echelon.eve.ui.motion.entrance
+import com.echelon.eve.ui.motion.pressScale
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.Spacing
 
@@ -38,8 +43,10 @@ fun ListRow(
     onClick: (() -> Unit)? = null,
 ) {
     val c = Echelon.colors
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        modifier.entrance().fillMaxWidth().defaultMinSize(minHeight = 56.dp)
+            .then(if (onClick != null) Modifier.pressScale(interaction, .985f).clickable(interaction, ripple(color = c.accent), onClick = onClick) else Modifier)
             .padding(horizontal = Spacing.md, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md), verticalAlignment = Alignment.CenterVertically,
     ) {

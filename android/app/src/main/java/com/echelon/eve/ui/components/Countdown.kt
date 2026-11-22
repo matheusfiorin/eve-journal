@@ -25,6 +25,7 @@ import androidx.compose.ui.text.TextStyle
 import com.echelon.eve.ui.format.clock
 import com.echelon.eve.ui.format.duration
 import com.echelon.eve.ui.theme.Echelon
+import com.echelon.eve.ui.motion.celebrate as celebrateBurst
 import kotlinx.coroutines.delay
 
 /** The wall clock, ticking once a second while composed. Tests and previews pass a fixed [now]. */
@@ -50,6 +51,8 @@ fun Countdown(
     warnUnderMillis: Long = 60_000,
     doneLabel: String = "Done",
     style: TextStyle = Echelon.type.numLarge,
+    /** Plays the celebration burst (and a confirm haptic) when it reaches zero on screen. */
+    celebrate: Boolean = true,
 ) {
     val t = rememberNow(now)
     val remaining = endsAt - t
@@ -64,8 +67,9 @@ fun Countdown(
             if (label != null) Text(label, style = Echelon.type.label, color = c.textMuted)
         }
     }
-    if (total != null && total > 0) ProgressRing(1f - remaining.coerceIn(0, total).toFloat() / total, modifier, size = androidx.compose.ui.unit.Dp(120f), color = if (tone == Tone.Neutral) c.accent else tone.color()) { body() }
-    else Column(modifier, verticalArrangement = Arrangement.Center) { body() }
+    val m = if (celebrate) modifier.celebrateBurst(remaining <= 0, key = endsAt) else modifier
+    if (total != null && total > 0) ProgressRing(1f - remaining.coerceIn(0, total).toFloat() / total, m, size = androidx.compose.ui.unit.Dp(120f), color = if (tone == Tone.Neutral) c.accent else tone.color()) { body() }
+    else Column(m, verticalArrangement = Arrangement.Center) { body() }
 }
 
 /** Text whose characters roll vertically when they change (only the changed ones move). Reduced motion swaps in place. */

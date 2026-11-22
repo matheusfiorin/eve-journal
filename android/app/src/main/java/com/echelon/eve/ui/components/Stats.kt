@@ -12,6 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import com.echelon.eve.ui.motion.entrance
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,10 +41,14 @@ fun StatTile(
 ) {
     val c = Echelon.colors
     val shape = RoundedCornerShape(Radii.control)
-    Column(modifier.clip(shape).background(c.surface1).border(1.dp, c.line, shape).padding(horizontal = Spacing.md, vertical = 10.dp).semantics(mergeDescendants = true) {},
+    val color = if (tone == Tone.Neutral) c.text else tone.color()
+    val mark = if (tone == Tone.Neutral) c.accent else tone.color()
+    Column(modifier.entrance().clip(shape).background(c.surface1).border(1.dp, c.line, shape)
+        // The readout's mark: a short stepped bar on the top edge in the tile's tone.
+        .drawBehind { val h = 2.dp.toPx(); drawRect(mark, Offset(Spacing.md.toPx(), 0f), Size(14.dp.toPx(), h)); drawRect(mark.copy(alpha = .45f), Offset(Spacing.md.toPx() + 17.dp.toPx(), 0f), Size(5.dp.toPx(), h)) }
+        .padding(horizontal = Spacing.md, vertical = 10.dp).semantics(mergeDescendants = true) {},
         verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(label, style = Echelon.type.label, color = c.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        val color = if (tone == Tone.Neutral) c.text else tone.color()
         if (display != null) Text(display, style = Echelon.type.numLarge, color = color, maxLines = 1)
         else AnimatedNumber(value, kind = kind, style = Echelon.type.numLarge, color = color)
         if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = c.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
