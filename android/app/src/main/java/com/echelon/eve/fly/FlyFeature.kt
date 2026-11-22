@@ -72,7 +72,7 @@ object FlyFeature : Feature {
     override fun install(registry: FeatureRegistry) {
         registry.register(destination, SubScreen("cockpit", "Cockpit", "Where you are, the next timer and one-tap calls", EchelonIcons.Fly, 1, card = { ctx, onOpen -> CockpitCard(ctx, onOpen) }) { CockpitRoute(it) })
         registry.register(destination, SubScreen("wing", "Wing", "Calls, shared plans and who is online", EchelonIcons.Wing, 5) { com.echelon.eve.fly.wing.WingRoute(it) })
-        registry.register(destination, SubScreen("timers", "Timers", "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, 10, card = { ctx, onOpen -> TimersCard(ctx, onOpen) }) { TimersRoute(it) })
+        registry.register(destination, SubScreen("timers", "Timers", "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, 10, card = { ctx, onOpen -> com.echelon.eve.fly.timers.TimersHubCard(ctx, onOpen) }) { com.echelon.eve.fly.timers.TimersRoute(it) })
         registry.register(destination, SubScreen("live", "Where I am", "Live location and ship from EVE", EchelonIcons.Route, 20) { LiveRoute(it) })
         registry.register(destination, SubScreen("fit", "Current fit", "Copy as EFT", EchelonIcons.Fly, 30) { FitRoute(it) })
         registry.register(destination, SubScreen("skills", "Skill queue", "What is training and when it ends", EchelonIcons.Pilot, 40) { SkillsRoute(it) })
@@ -80,31 +80,6 @@ object FlyFeature : Feature {
     }
 }
 
-@Composable
-private fun TimersRoute(ctx: ScreenContext) {
-    val container = LocalAppContainer.current
-    val now = rememberNow()
-    if (container == null) { TimersScreen(ctx.pilot, emptyList(), now, TimerActions()); return }
-    val store = container.fly.timers
-    val timers by store.timers.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    // Android 13+: the ongoing countdown and the alert at zero need the notification permission; ask on the first start.
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (!granted) Toast.makeText(context, "Timers still run, but without notifications you won’t hear when one ends.", Toast.LENGTH_LONG).show()
-    }
-    val actions = remember(store, ctx.pilot) {
-        TimerActions(
-            start = { kind, length, label, shared ->
-                val pilot = ctx.pilot ?: return@TimerActions
-                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
-                store.start(pilot, kind, length, label, shared)
-            },
-            pause = store::pause, resume = store::resume, restart = store::restart, share = store::setShared, remove = store::remove,
-            clearFinished = { ctx.pilot?.let(store::clearFinished) },
-        )
-    }
-    TimersScreen(ctx.pilot, timers.values, now, actions)
-}
 
 /** The cockpit's hub card: where the flying pilot was last read and the next timer, large enough to read at a glance. */
 @Composable
@@ -117,29 +92,6 @@ private fun CockpitCard(ctx: ScreenContext, onOpen: () -> Unit) {
     CockpitHubCard(me, TimerBoard.of(timers, now).next, now, onOpen)
 }
 
-/** The hub card: the next timer counting down, or how to start one. */
-@Composable
-private fun TimersCard(ctx: ScreenContext, onOpen: () -> Unit) {
-    val container = LocalAppContainer.current
-    val now = rememberNow()
-    val timers = container?.fly?.timers?.timers?.collectAsStateWithLifecycle()?.value?.values.orEmpty()
-    val board = TimerBoard.of(timers, now)
-    val c = Echelon.colors
-    // The hub's default card (nav.HubCard), with the next timer counting down in place of the chevron while one runs.
-    EchelonCard(Modifier.fillMaxWidth(), onClick = onOpen) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Icon(EchelonIcons.Timer, null, Modifier.size(24.dp), tint = c.accent)
-            Column(Modifier.weight(1f)) {
-                Text("Timers", style = MaterialTheme.typography.titleSmall, color = c.text)
-                Text(board.next?.let { "${it.label} · ${board.runningCount} running" } ?: "Gas sites, mining cycles, despawn and cyno",
-                    style = MaterialTheme.typography.bodySmall, color = c.textMuted, maxLines = 1)
-            }
-            val next = board.next
-            if (next != null) Countdown(next.endsAt, now = now, style = Echelon.type.num)
-            else Icon(EchelonIcons.Chevron, null, Modifier.size(18.dp), tint = c.textFaint)
-        }
-    }
-}
 
 @Composable
 private fun LiveRoute(ctx: ScreenContext) {
