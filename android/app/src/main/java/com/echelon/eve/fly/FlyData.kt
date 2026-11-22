@@ -94,7 +94,7 @@ class FlyLoader(private val c: AppContainer) {
         return Whereabouts(
             pilot, systemName = sys?.name ?: systemId?.let { names.name(it) }, sec = sys?.sec, region = sys?.let { c.market.state.value.data?.regionName(it.region) },
             dockedAt = station?.let { names.name(it) ?: "a station" } ?: structure?.let { "a structure" },
-            shipType = type, shipTypeName = type?.let { names.name(it) }, shipName = shipName ?: ship?.shipName,
+            shipType = type, shipTypeName = type?.let { names.name(it) }, shipName = shipName ?: ship?.shipName, systemId = systemId,
         )
     }
 
@@ -123,7 +123,7 @@ class FlyLoader(private val c: AppContainer) {
             LiveUi(me = me, wingmate = matePlace, wingmateNote = mateNote)
         } catch (e: ApiError) {
             val msg = if (e is ApiError.Http && e.status == 429) "EVE’s live location can be read a few times a minute. Try again in a moment." else e.message ?: "The backend did not answer."
-            LiveUi(problem = msg, wingmate = matePlace, wingmateNote = mateNote)
+            LiveUi(problem = msg, wingmate = matePlace, wingmateNote = mateNote, rateLimited = e is ApiError.Http && e.status == 429)
         }
     }
 

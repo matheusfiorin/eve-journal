@@ -25,7 +25,12 @@ import com.echelon.eve.ui.components.SkeletonRows
 import com.echelon.eve.ui.components.StatusDot
 import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.components.TypeIcon
+import com.echelon.eve.ui.format.SecBand
 import com.echelon.eve.ui.format.ago
+import com.echelon.eve.ui.format.clock
+import com.echelon.eve.ui.format.secBand
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.Spacing
 
@@ -45,6 +50,8 @@ data class Whereabouts(
     val lastSeen: Long? = null,
     /** When this was read (epoch ms). */
     val at: Long? = null,
+    /** The solar system's id (for a route to it and to tell a jump from a refresh). */
+    val systemId: Long? = null,
 )
 
 /** The screen's state: the flying pilot read live, and what the wingmate shares. */
@@ -55,10 +62,12 @@ data class LiveUi(
     val wingmate: Whereabouts? = null,
     /** Why the wingmate's position is not shown (not sharing, level too low). */
     val wingmateNote: String? = null,
+    /** The backend answered 429: /api/live is limited to a few reads a minute, so the next read waits longer. */
+    val rateLimited: Boolean = false,
 )
 
 @Composable
-fun LiveScreen(pilot: Pilot?, ui: LiveUi, now: Long, onRefresh: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true) = FlyPage(modifier, scroll) {
+fun LiveScreen(pilot: Pilot?, ui: LiveUi, now: Long, onRefresh: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true, nextAt: Long? = null) = FlyPage(modifier, scroll) {
     if (pilot == null) { EmptyState("Choose who is flying at the top of the screen.", title = "No pilot flying", icon = EchelonIcons.Route); return@FlyPage }
     when {
         ui.me != null -> Place(ui.me, now, primary = true)
@@ -67,6 +76,8 @@ fun LiveScreen(pilot: Pilot?, ui: LiveUi, now: Long, onRefresh: () -> Unit, modi
     }
     if (ui.me != null && ui.problem != null) Text(ui.problem, style = MaterialTheme.typography.bodySmall, color = Echelon.colors.warn)
     SecondaryButton(if (ui.loading) "Reading…" else "Read again", onRefresh, Modifier.fillMaxWidth(), enabled = !ui.loading)
+    // Read again on its own about once a minute while open (GET /api/live allows a few reads a minute).
+    if (nextAt != null && nextAt > now) Text("Reads again by itself in ${clock(nextAt - now)}", style = MaterialTheme.typography.bodySmall, color = Echelon.colors.textFaint)
     SectionHeader(pilot.wingmate.displayName, subtitle = "From the wing’s last sync")
     when {
         ui.wingmate != null -> Place(ui.wingmate, now, primary = false)
@@ -79,10 +90,14 @@ private fun Place(w: Whereabouts, now: Long, primary: Boolean) {
     val c = Echelon.colors
     val body: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            if (w.sec != null) SecurityBadge(w.sec)
-            Text(w.systemName ?: "Unknown system", style = if (primary) Echelon.type.screenTitle else MaterialTheme.typography.titleLarge, color = c.text)
+            if (w.sec != null) SecurityBadge(w.sec, outlined = primary)
+            Text(w.systemName ?: "Unknown system", style = if (primary) Echelon.type.screenTitle.copy(fontSize = 26.sp, lineHeight = 32.sp) else MaterialTheme.typography.titleLarge, color = c.text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (w.region != null) Text(w.region, style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
+        // The band in words, amber or red outside high-sec: the one fact that changes how you fly.
+        val band = w.sec?.let(::secBand)
+        val where = listOfNotNull(band?.label, w.region).joinToString(" · ")
+        if (where.isNotEmpty()) Text(where, style = MaterialTheme.typography.bodyMedium, color = when (band) { SecBand.Low -> c.warn; SecBand.Null -> c.danger; else -> c.textMuted })
         Text(w.dockedAt?.let { "Docked at $it" } ?: "In space", style = MaterialTheme.typography.titleSmall, color = c.text)
         if (w.shipType != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
             TypeIcon(w.shipType, size = 40.dp, contentDescription = w.shipTypeName)

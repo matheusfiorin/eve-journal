@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The cockpit home-screen widget (fly.cockpit.CockpitWidget): the next timer counting down, where the pilot is, and
+     two big buttons (next mining cycle, open the cockpit). RemoteViews only: no Glance dependency. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cockpit_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/cockpit_widget_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/cockpit_widget_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/cockpit_widget_idle"
+            android:textColor="#E7EDF7"
+            android:textSize="15sp" />
+
+        <Chronometer
+            android:id="@+id/cockpit_widget_clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#E7EDF7"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/cockpit_widget_static"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#9AAAC4"
+            android:textSize="22sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/cockpit_widget_where"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#9AAAC4"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:minHeight="48dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/cockpit_widget_cycle"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/cockpit_widget_button"
+            android:gravity="center"
+            android:maxLines="2"
+            android:minHeight="48dp"
+            android:text="@string/cockpit_widget_cycle"
+            android:textColor="#E7EDF7"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/cockpit_widget_open"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/cockpit_widget_button_quiet"
+            android:gravity="center"
+            android:minHeight="48dp"
+            android:text="@string/cockpit_widget_open"
+            android:textColor="#E7EDF7"
+            android:textSize="15sp" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cockpit_widget_name">Cockpit</string>
+    <string name="cockpit_widget_description">The next timer, where you are, and the next mining cycle in one tap.</string>
+    <string name="cockpit_widget_idle">No timer running</string>
+    <string name="cockpit_widget_cycle">Next mining cycle</string>
+    <string name="cockpit_widget_open">Cockpit</string>
+    <string name="cockpit_tile_label">Mining cycle</string>
+    <string name="cockpit_activity_label">Cockpit</string>
+</resources>

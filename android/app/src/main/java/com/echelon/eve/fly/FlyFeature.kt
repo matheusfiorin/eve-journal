@@ -18,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +33,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.echelon.eve.core.model.Pilot
+import com.echelon.eve.fly.cockpit.CockpitHubCard
+import com.echelon.eve.fly.cockpit.CockpitRoute
+import com.echelon.eve.fly.cockpit.PollLive
 import com.echelon.eve.fly.fit.FitScreen
 import com.echelon.eve.fly.fit.FitUi
 import com.echelon.eve.fly.jobs.JobsScreen
@@ -62,14 +64,19 @@ import com.echelon.eve.ui.theme.Spacing
 object FlyFeature : Feature {
     override val destination = Destination.Fly
     /** Timers outlive the process: the store reads them back and restarts the service while one still counts down. */
-    override fun start(container: com.echelon.eve.AppContainer) { container.fly.timers }
+    override fun start(container: com.echelon.eve.AppContainer) {
+        container.fly.timers
+        // The home-screen widget follows the timers and the last place for the life of the process.
+        com.echelon.eve.fly.cockpit.CockpitWidget.watch(container.app, container.scope)
+    }
     override fun install(registry: FeatureRegistry) {
+        registry.register(destination, SubScreen("cockpit", "Cockpit", "Where you are, the next timer and one-tap calls", EchelonIcons.Fly, 1, card = { ctx, onOpen -> CockpitCard(ctx, onOpen) }) { CockpitRoute(it) })
         registry.register(destination, SubScreen("wing", "Wing", "Calls, shared plans and who is online", EchelonIcons.Wing, 5) { com.echelon.eve.fly.wing.WingRoute(it) })
         registry.register(destination, SubScreen("timers", "Timers", "Gas sites, mining cycles, despawn and cyno", EchelonIcons.Timer, 10, card = { ctx, onOpen -> TimersCard(ctx, onOpen) }) { TimersRoute(it) })
         registry.register(destination, SubScreen("live", "Where I am", "Live location and ship from EVE", EchelonIcons.Route, 20) { LiveRoute(it) })
         registry.register(destination, SubScreen("fit", "Current fit", "Copy as EFT", EchelonIcons.Fly, 30) { FitRoute(it) })
         registry.register(destination, SubScreen("skills", "Skill queue", "What is training and when it ends", EchelonIcons.Pilot, 40) { SkillsRoute(it) })
-        registry.register(destination, SubScreen("jobs", "Jobs ready", "Industry jobs to deliver", EchelonIcons.Check, 50) { JobsRoute(it) })
+        registry.register(destination, SubScreen("jobs", "Jobs ready", "Industry jobs to deliver", EchelonIcons.Check, 35) { JobsRoute(it) })
     }
 }
 
@@ -99,6 +106,17 @@ private fun TimersRoute(ctx: ScreenContext) {
     TimersScreen(ctx.pilot, timers.values, now, actions)
 }
 
+/** The cockpit's hub card: where the flying pilot was last read and the next timer, large enough to read at a glance. */
+@Composable
+private fun CockpitCard(ctx: ScreenContext, onOpen: () -> Unit) {
+    val container = LocalAppContainer.current
+    val now = rememberNow()
+    val timers = container?.fly?.timers?.timers?.collectAsStateWithLifecycle()?.value?.values.orEmpty()
+    val live = container?.fly?.cockpit?.state?.collectAsStateWithLifecycle()?.value
+    val me = live?.ui?.me?.takeIf { live.pilot == ctx.pilot }
+    CockpitHubCard(me, TimerBoard.of(timers, now).next, now, onOpen)
+}
+
 /** The hub card: the next timer counting down, or how to start one. */
 @Composable
 private fun TimersCard(ctx: ScreenContext, onOpen: () -> Unit) {
@@ -126,18 +144,14 @@ private fun TimersCard(ctx: ScreenContext, onOpen: () -> Unit) {
 @Composable
 private fun LiveRoute(ctx: ScreenContext) {
     val container = LocalAppContainer.current
-    val now = rememberNow(periodMillis = 30_000)
-    var ui by remember(ctx.pilot) { mutableStateOf(LiveUi(loading = container != null)) }
-    var reads by remember { mutableIntStateOf(0) }
-    LaunchedEffect(ctx.pilot, reads) {
-        val pilot = ctx.pilot ?: return@LaunchedEffect
-        container ?: return@LaunchedEffect
-        ui = ui.copy(loading = true)
-        val got = FlyLoader(container).live(pilot)
-        // A failed read keeps the last place on screen, with the problem under it.
-        ui = if (got.me == null && ui.me != null) got.copy(me = ui.me) else got
-    }
-    LiveScreen(ctx.pilot, ui, now, onRefresh = { reads++ })
+    val now = rememberNow(periodMillis = 1_000)
+    if (container == null) { LiveScreen(ctx.pilot, LiveUi(), now, onRefresh = {}); return }
+    // The cockpit's schedule: one read a minute or so while this is open, shared with the cockpit (no double reads).
+    val live = container.fly.cockpit
+    PollLive(live, ctx.pilot)
+    val state by live.state.collectAsStateWithLifecycle()
+    val ui = if (state.pilot == ctx.pilot) state.ui.copy(loading = state.reading && state.ui.me == null) else LiveUi(loading = true)
+    LiveScreen(ctx.pilot, ui, now, onRefresh = live::refresh, nextAt = state.nextAt.takeIf { state.pilot == ctx.pilot && !state.reading })
 }
 
 @Composable

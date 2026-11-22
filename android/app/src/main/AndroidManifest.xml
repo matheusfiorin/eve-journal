@@ -44,6 +44,44 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-started countdown timers for a game session, shown in an ongoing notification with an alert when each ends." />
         </service>
+        <!-- The cockpit on its own (fly.cockpit.CockpitActivity): opened by the home-screen widget, and by a long press on
+             the Quick Settings tile (QS_TILE_PREFERENCES). Not exported beyond that intent. -->
+        <activity
+            android:name=".fly.cockpit.CockpitActivity"
+            android:exported="true"
+            android:label="@string/cockpit_activity_label"
+            android:theme="@style/Theme.Echelon"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+        <!-- Cockpit home-screen widget: next timer, last place, next mining cycle in one tap. -->
+        <receiver
+            android:name=".fly.cockpit.CockpitWidget"
+            android:exported="false"
+            android:label="@string/cockpit_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/cockpit_widget_info" />
+        </receiver>
+        <!-- Quick Settings tile "Mining cycle": restart (or start) the flying pilot's mining timer from the shade. -->
+        <service
+            android:name=".fly.cockpit.CockpitTile"
+            android:exported="true"
+            android:icon="@drawable/cockpit_tile_icon"
+            android:label="@string/cockpit_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
         <!-- Wing pushes (optional Firebase): a wingmate's timer or ping while the app is closed. -->
         <service
             android:name=".core.push.EchelonMessagingService"

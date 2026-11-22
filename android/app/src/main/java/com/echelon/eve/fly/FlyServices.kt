@@ -10,6 +10,8 @@ import java.util.WeakHashMap
 class FlyServices(val container: AppContainer) {
     val names: EveNames get() = container.eveNames
     val timers = TimerStore(container)
+    /** GET /api/live on a schedule while the cockpit or Where I am is open (one schedule for both). */
+    val cockpit = com.echelon.eve.fly.cockpit.CockpitLive({ FlyLoader(container).live(it) })
 
     companion object {
         private val all = WeakHashMap<AppContainer, FlyServices>()
