@@ -53,6 +53,20 @@ fun Modifier.sharedContainer(key: Any): Modifier = composed {
     }
 }
 
+/**
+ * Text that changes style on the way (a hub card's title becoming the screen title): the bounds fly across and the two
+ * texts cross-fade, each scaled to the bounds instead of re-wrapping.
+ */
+fun Modifier.sharedText(key: Any): Modifier = composed {
+    val shared = LocalSharedTransitionScope.current
+    val nav = LocalNavAnimatedScope.current
+    if (shared == null || nav == null || LocalReduceMotion.current) this
+    else with(shared) {
+        this@composed.sharedBounds(rememberSharedContentState(key), nav, boundsTransform = boundsSpring,
+            resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(androidx.compose.ui.layout.ContentScale.FillHeight, androidx.compose.ui.Alignment.CenterStart))
+    }
+}
+
 /** One element that flies from one screen to the next unchanged (a portrait, an icon, a title). */
 fun Modifier.sharedHero(key: Any): Modifier = composed {
     val shared = LocalSharedTransitionScope.current

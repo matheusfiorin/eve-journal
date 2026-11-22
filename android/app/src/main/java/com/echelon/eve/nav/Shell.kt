@@ -44,6 +44,13 @@ import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.motion.NavMotion
 import com.echelon.eve.ui.motion.ProvideNavScope
 import com.echelon.eve.ui.motion.SharedElementsRoot
+import com.echelon.eve.ui.motion.StaggerRoot
+import com.echelon.eve.ui.motion.Springs
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
 import com.echelon.eve.ui.motion.rememberHaptics
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.EchelonTheme
@@ -103,7 +110,7 @@ fun EchelonShell(
                 },
             ) { padding ->
                 SharedElementsRoot {
-                    NavHost(nav, startDestination = start, enterTransition = motion.enter, exitTransition = motion.exit, popEnterTransition = motion.popEnter, popExitTransition = motion.popExit) {
+                    NavHost(nav, startDestination = start, modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)), enterTransition = motion.enter, exitTransition = motion.exit, popEnterTransition = motion.popEnter, popExitTransition = motion.popExit) {
                         Destination.entries.forEach { d ->
                             val hub: @Composable androidx.compose.animation.AnimatedContentScope.(NavBackStackEntry) -> Unit = {
                                 ProvideNavScope(this) { DestinationHub(d, state, actions, registry, open, padding) }
@@ -119,7 +126,7 @@ fun EchelonShell(
                             val d = runCatching { Destination.valueOf(r.destination) }.getOrDefault(Destination.Plan)
                             ProvideNavScope(this) { SubScreenHost(d, registry.find(d, r.key), ScreenContext(state.selected, r.arg, open) { nav.popBackStack() }, padding) }
                         }
-                        composable<SettingsRoute> { ProvideNavScope(this) { SettingsScreen(state, actions, onBack = { nav.popBackStack() }) } }
+                        composable<SettingsRoute> { ProvideNavScope(this) { StaggerRoot("settings") { SettingsScreen(state, actions, onBack = { nav.popBackStack() }) } } }
                         registry.features.forEach { it.graph(this, nav) }
                     }
                 }
@@ -139,7 +146,7 @@ fun AuthBanner(auth: AuthManager.State, actions: ShellActions, modifier: Modifie
     LaunchedEffect(auth) {
         when (auth) { is AuthManager.State.Connected -> { haptics.confirm(); delay(3000); actions.dismissAuth() }; is AuthManager.State.Failed -> haptics.reject(); else -> {} }
     }
-    AnimatedVisibility(auth !is AuthManager.State.Idle, modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = Spacing.gutter, end = Spacing.gutter, bottom = 80.dp), enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+    AnimatedVisibility(auth !is AuthManager.State.Idle, modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = Spacing.gutter, end = Spacing.gutter, bottom = 84.dp).widthIn(max = Spacing.maxContent), enter = if (Echelon.reduceMotion) fadeIn(tween(0)) else slideInVertically(Springs.select()) { it } + fadeIn(), exit = if (Echelon.reduceMotion) fadeOut(tween(0)) else slideOutVertically(Springs.nav()) { it } + fadeOut()) {
         val c = Echelon.colors
         val tone = when (auth) { is AuthManager.State.Failed -> Tone.Danger; is AuthManager.State.Connected -> Tone.Ok; else -> Tone.Neutral }
         EchelonCard(Modifier.fillMaxWidth(), tone = tone) {

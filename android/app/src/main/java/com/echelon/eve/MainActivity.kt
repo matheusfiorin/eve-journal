@@ -34,6 +34,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         splash.setKeepOnScreenCondition { !shell.state.value.ready }
+        // The hand-off: the assembled formation lifts and grows a little while the splash fades into the app. View
+        // animators follow the system animation scale (instant when animations are off); the app's own "Reduce
+        // motion" setting removes the splash at once.
+        splash.setOnExitAnimationListener { provider ->
+            if (shell.state.value.theme.motion == com.echelon.eve.ui.theme.MotionPref.Reduced) { provider.remove(); return@setOnExitAnimationListener }
+            val ease = android.view.animation.PathInterpolator(.05f, .7f, .1f, 1f)
+            runCatching { provider.iconView.animate().scaleX(1.18f).scaleY(1.18f).translationY(-provider.iconView.height * .06f).setInterpolator(ease).setDuration(320).start() }
+            provider.view.animate().alpha(0f).setStartDelay(80).setDuration(280).setInterpolator(ease).withEndAction { provider.remove() }.start()
+        }
         if (savedInstanceState == null) handle(intent)
         setContent {
             val state by shell.state.collectAsStateWithLifecycle()
@@ -68,7 +77,7 @@ class MainActivity : ComponentActivity() {
     private fun connect(pilot: Pilot) {
         lifecycleScope.launch {
             val url = container.auth.start(pilot)
-            val colors = CustomTabColorSchemeParams.Builder().setToolbarColor(0xFF0C1424.toInt()).setNavigationBarColor(0xFF0C1424.toInt()).build()
+            val colors = CustomTabColorSchemeParams.Builder().setToolbarColor(0xFF090C18.toInt()).setNavigationBarColor(0xFF090C18.toInt()).build()
             CustomTabsIntent.Builder().setDefaultColorSchemeParams(colors).setColorScheme(CustomTabsIntent.COLOR_SCHEME_DARK).setShowTitle(true).build()
                 .launchUrl(this@MainActivity, url.toUri())
         }

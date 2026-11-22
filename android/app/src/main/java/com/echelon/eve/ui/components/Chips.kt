@@ -19,8 +19,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -31,6 +32,12 @@ import com.echelon.eve.ui.format.secColor
 import com.echelon.eve.ui.format.secLabel
 import com.echelon.eve.ui.format.secText
 import com.echelon.eve.ui.motion.Springs
+import com.echelon.eve.ui.motion.pressScale
+import com.echelon.eve.ui.motion.pulse
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.indication
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
 import com.echelon.eve.ui.motion.motionSpec
 import com.echelon.eve.ui.motion.rememberHaptics
 import com.echelon.eve.ui.theme.Echelon
@@ -68,8 +75,9 @@ fun ChoiceChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: M
     val fill by animateColorAsState(if (selected) c.accentSoft else c.surface2, motionSpec(Springs.select()), label = "chip fill")
     val edge by animateColorAsState(if (selected) c.accent else c.lineStrong, motionSpec(Springs.select()), label = "chip edge")
     val shape = RoundedCornerShape(Radii.control)
-    Box(modifier.defaultMinSize(minHeight = Spacing.touch).selectable(selected, role = Role.Tab, onClick = { haptics.select(); onClick() }), contentAlignment = Alignment.Center) {
-        Box(Modifier.height(32.dp).clip(shape).background(fill).border(1.dp, edge, shape).padding(horizontal = Spacing.md), contentAlignment = Alignment.Center) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(modifier.defaultMinSize(minHeight = Spacing.touch).selectable(selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = { haptics.select(); onClick() }), contentAlignment = Alignment.Center) {
+        Box(Modifier.pressScale(interaction, .94f).height(32.dp).clip(shape).background(fill).border(1.dp, edge, shape).indication(interaction, ripple(color = c.accent)).padding(horizontal = Spacing.md), contentAlignment = Alignment.Center) {
             Text(text, style = androidx.compose.material3.MaterialTheme.typography.labelMedium, color = if (selected) c.text else c.textMuted, maxLines = 1)
         }
     }
@@ -96,14 +104,23 @@ fun PilotBadge(name: String, pilot: PilotColors, modifier: Modifier = Modifier) 
     val shape = RoundedCornerShape(99.dp)
     Row(modifier.height(24.dp).clip(shape).background(pilot.soft).border(1.dp, pilot.color.copy(alpha = .4f), shape).padding(start = 8.dp, end = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).rotate(45f).background(pilot.color))
+        Dart(pilot.color, Modifier.size(8.dp))
         Text(name, style = Echelon.type.label, color = pilot.color, maxLines = 1)
     }
 }
 
-/** A status dot; [live] adds the ok glow (the web's beacon). */
+/** The formation's dart (the emblem's chevron), pointing up: a pilot marker in badges and chips. */
+@Composable
+fun Dart(color: Color, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val w = size.width; val h = size.height
+        drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(w / 2, 0f); lineTo(w, h); lineTo(w / 2, h * .74f); lineTo(0f, h); close() }, color)
+    }
+}
+
+/** A status dot; [live] adds a halo that breathes (the beacon), still in screenshots and with reduced motion. */
 @Composable
 fun StatusDot(tone: Tone, modifier: Modifier = Modifier, live: Boolean = false) {
     val color = if (tone == Tone.Neutral) Echelon.colors.textFaint else tone.color()
-    Box(modifier.size(8.dp).then(if (live) Modifier.shadow(6.dp, CircleShape, ambientColor = color, spotColor = color) else Modifier).clip(CircleShape).background(color))
+    Box(modifier.size(8.dp).pulse(live, color).clip(CircleShape).background(color))
 }

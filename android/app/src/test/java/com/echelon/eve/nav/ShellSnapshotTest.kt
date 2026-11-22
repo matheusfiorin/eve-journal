@@ -37,6 +37,18 @@ class ShellSnapshotTest {
     @Test fun subScreen() = paparazzi.echelon { EchelonShell(s, ShellActions(), start = SubRoute(Destination.Fly.name, "timers"), zone = ShellFixtures.zone) }
 }
 
+/** Landscape and tablet sanity: hub cards, Welcome and the tab bar keep a readable width instead of stretching. */
+class ShellLargeScreenSnapshotTest {
+    @get:Rule val paparazzi = app.cash.paparazzi.Paparazzi(
+        deviceConfig = app.cash.paparazzi.DeviceConfig.PIXEL_C,
+        theme = "android:Theme.Material.NoActionBar",
+        maxPercentDifference = 0.1,
+    )
+
+    @Test fun tablet() = paparazzi.echelon { EchelonShell(ShellFixtures.state, ShellActions(), start = PlanRoute, zone = ShellFixtures.zone) }
+    @Test fun tabletWelcome() = paparazzi.echelon { WelcomeScreen(ShellState(selected = null), ShellActions()) }
+}
+
 class SettingsSnapshotTest {
     @get:Rule val paparazzi = echelonPaparazzi()
     @Test fun settings() = paparazzi.echelon { SettingsScreen(ShellFixtures.state, ShellActions(), onBack = {}, zone = ShellFixtures.zone) }

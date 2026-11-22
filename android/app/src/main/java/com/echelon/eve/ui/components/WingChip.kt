@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echelon.eve.ui.format.ago
@@ -30,7 +29,7 @@ fun WingChip(pilotName: String, pilot: PilotColors, action: String, at: Long, no
     val shape = RoundedCornerShape(99.dp)
     Row(modifier.height(24.dp).clip(shape).background(pilot.soft).border(1.dp, pilot.color.copy(alpha = .4f), shape).padding(start = 8.dp, end = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).rotate(45f).background(pilot.color))
+        Dart(pilot.color, Modifier.size(8.dp))
         Text("$pilotName $action ${ago(at, now)}", style = Echelon.type.label, color = Echelon.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
