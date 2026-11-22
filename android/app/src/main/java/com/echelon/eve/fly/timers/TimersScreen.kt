@@ -1,5 +1,12 @@
 package com.echelon.eve.fly.timers
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -11,21 +18,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,28 +48,27 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echelon.eve.core.model.Pilot
+import com.echelon.eve.core.model.SolarSystem
 import com.echelon.eve.core.wing.WingTimer
+import com.echelon.eve.nav.LocalAppContainer
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.ChoiceChip
-import com.echelon.eve.ui.components.Countdown
-import com.echelon.eve.ui.components.EchelonCard
 import com.echelon.eve.ui.components.EmptyState
 import com.echelon.eve.ui.components.LinkButton
 import com.echelon.eve.ui.components.PrimaryButton
 import com.echelon.eve.ui.components.PrimaryPanel
-import com.echelon.eve.ui.components.ProgressBar
 import com.echelon.eve.ui.components.SectionHeader
-import com.echelon.eve.ui.components.Tag
-import com.echelon.eve.ui.components.Tone
-import com.echelon.eve.ui.components.WingChip
 import com.echelon.eve.ui.format.clock
 import com.echelon.eve.ui.format.duration
 import com.echelon.eve.ui.format.plural
+import com.echelon.eve.ui.format.secColor
+import com.echelon.eve.ui.format.secLabel
 import com.echelon.eve.ui.theme.Echelon
-import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Spacing
+import kotlinx.coroutines.launch
 
 /** What the Timers screen can do; the route wires these to [TimerStore]. */
 class TimerActions(
@@ -66,15 +79,67 @@ class TimerActions(
     val share: (String, Boolean) -> Unit = { _, _ -> },
     val remove: (String) -> Unit = {},
     val clearFinished: () -> Unit = {},
-)
+    /** Starts a timer in the system the form chose. Without it, [start] runs and the store places it where you are. */
+    val startIn: ((TimerDraft) -> Unit)? = null,
+    /** Moves a timer to another system (null: none). */
+    val place: (String, TimerSystem?) -> Unit = { _, _ -> },
+) {
+    /** Starts [draft], in its system when the route can take one. */
+    fun startDraft(draft: TimerDraft) = startIn?.invoke(draft) ?: start(draft.kind, draft.durationMs, draft.label, draft.shared)
+}
 
 /**
- * The Timers screen: start a timer (kind, length, label, shared or not), then the running ones with the soonest end
- * first, the wingmate's marked with their chip, and the finished ones under them. Stateless apart from the form.
+ * Where the timers are: the gate map's [systems] (names, security, gate links), the flying pilot's system ([here]) and
+ * the wingmate's ([wingmateAt]), and [regionName] for the cards. Everything is optional: without the map the board
+ * still groups by the names stored on the timers.
  */
-@OptIn(ExperimentalLayoutApi::class)
+class TimerMap(
+    val systems: Map<Long, SolarSystem> = emptyMap(),
+    val here: Long? = null,
+    val wingmateAt: Long? = null,
+    val regionName: (Long) -> String? = { null },
+) {
+    val hereSystem: TimerSystem? get() = here?.let { TimerSystem(it, systems[it]?.name.orEmpty()) }
+
+    companion object {
+        val Empty = TimerMap()
+    }
+}
+
+/** The sheet over the board: start a timer in a system, or move one. */
+private sealed interface Sheet {
+    data class Add(val system: TimerSystem?) : Sheet
+    data class Move(val timer: WingTimer) : Sheet
+}
+
+/**
+ * The Timers screen, laid out by place instead of as a list: the start panel, the horizon (every running timer on one
+ * time axis), the jump radar (the systems with timers around you), then a card per system with a ring per timer, your
+ * current system pinned first. The wingmate's timers wear their colour. Stateless apart from the form and selection.
+ */
 @Composable
-fun TimersScreen(pilot: Pilot?, timers: Collection<WingTimer>, now: Long, actions: TimerActions, modifier: Modifier = Modifier, scroll: Boolean = true) {
+fun TimersScreen(
+    pilot: Pilot?,
+    timers: Collection<WingTimer>,
+    now: Long,
+    actions: TimerActions,
+    modifier: Modifier = Modifier,
+    scroll: Boolean = true,
+    map: TimerMap? = null,
+    formOpen: Boolean? = null,
+    selected: String? = null,
+) {
+    // In the app with no map given, the screen finds the places itself (the gate map, where both pilots are) and starts
+    // timers in the system the form picked; previews and tests pass a map, or get the plain board.
+    val container = LocalAppContainer.current
+    if (map == null && container != null && pilot != null) {
+        val app = rememberAppTimers(container, pilot, actions)
+        TimersBoard(pilot, timers, now, app.second, modifier, scroll, app.first, formOpen, selected)
+    } else TimersBoard(pilot, timers, now, actions, modifier, scroll, map ?: TimerMap.Empty, formOpen, selected)
+}
+
+@Composable
+private fun TimersBoard(pilot: Pilot?, timers: Collection<WingTimer>, now: Long, actions: TimerActions, modifier: Modifier, scroll: Boolean, map: TimerMap, formOpen: Boolean?, selected: String?) {
     Column(
         modifier.fillMaxSize().then(if (scroll) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(Spacing.gutter).navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg),
@@ -83,96 +148,200 @@ fun TimersScreen(pilot: Pilot?, timers: Collection<WingTimer>, now: Long, action
             EmptyState("Choose who is flying at the top of the screen, then start a timer.", title = "No pilot flying", icon = EchelonIcons.Timer)
             return@Column
         }
-        NewTimer(pilot, actions)
-        val board = TimerBoard.of(timers, now)
-        if (board.active.isEmpty() && board.finished.isEmpty()) {
-            EmptyState("Timers you start show here, and so do the ones ${pilot.wingmate.displayName} shares.", title = "No timers yet", icon = EchelonIcons.Timer)
+        val jumps = remember(map.systems, map.here) { jumpsFrom(map.here, map.systems) }
+        val groups = SystemBoard.of(timers, now, map.here, map.wingmateAt, map.systems, jumps)
+        var sheet by remember { mutableStateOf<Sheet?>(null) }
+        var picked by rememberSaveable(selected) { mutableStateOf(selected) }
+        val scope = rememberCoroutineScope()
+        val requesters = remember { HashMap<String, BringIntoViewRequester>() }
+
+        StartPanel(pilot, map, jumps, groups, open = formOpen ?: timers.isEmpty(), actions)
+        if (timers.isEmpty() && map.here == null) {
+            EmptyState("Timers you start show here by system, and so do the ones ${pilot.wingmate.displayName} shares.", title = "No timers yet", icon = EchelonIcons.Timer)
         }
-        if (board.active.isNotEmpty()) {
-            SectionHeader("Running", subtitle = plural(board.active.size, "timer"))
-            board.active.forEach { TimerCard(it, pilot, now, actions) }
+        if (timers.any { !it.done(now) }) HorizonStrip(timers, now, map.systems)
+        val nodes = radarNodes(groups, map.systems, map.wingmateAt, jumps)
+        if (map.here != null && nodes.isNotEmpty()) JumpRadar(groups.firstOrNull { it.here }, nodes, now, pilot.wingmate, onPick = { id ->
+            scope.launch { requesters[id.toString()]?.bringIntoView() }
+        })
+        if (groups.isNotEmpty()) {
+            val placed = groups.count { it.systemId != null && it.timers.isNotEmpty() }
+            SectionHeader(
+                "By system", subtitle = if (timers.isEmpty()) "Nothing counting down" else "${plural(timers.size, "timer")} in ${plural(placed.coerceAtLeast(1), "system")}",
+                action = if (timers.any { it.done(now) && it.ownedBy(pilot) }) ({ LinkButton("Clear finished", actions.clearFinished) }) else null,
+            )
         }
-        if (board.finished.isNotEmpty()) {
-            SectionHeader("Finished", action = if (board.finished.any { it.ownedBy(pilot) }) ({ LinkButton("Clear mine", actions.clearFinished) }) else null)
-            board.finished.forEach { TimerCard(it, pilot, now, actions) }
+        groups.forEach { g ->
+            key(g.key) {
+                val req = remember { BringIntoViewRequester() }.also { requesters[g.key] = it }
+                SystemCard(
+                    g, pilot, now, g.systemId?.let { map.systems[it]?.sec }, g.systemId?.let { map.systems[it] }?.let { map.regionName(it.region) }, actions,
+                    onAdd = g.systemId?.let { id -> { sheet = Sheet.Add(TimerSystem(id, g.name.orEmpty())) } },
+                    onMove = { sheet = Sheet.Move(it) },
+                    modifier = Modifier.animatePlacement().bringIntoViewRequester(req),
+                    selected = picked, onSelect = { picked = it }, systems = map.systems,
+                )
+            }
         }
         Spacer(Modifier.size(Spacing.lg))
+
+        sheet?.let { s ->
+            ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Echelon.colors.surface1) {
+                Column(Modifier.padding(horizontal = Spacing.gutter).padding(bottom = Spacing.xxl), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    when (s) {
+                        is Sheet.Add -> TimerForm(pilot, map, jumps, groups, s.system, onStart = { actions.startDraft(it); sheet = null })
+                        is Sheet.Move -> MoveTimer(s.timer, map, jumps, groups, onPick = { actions.place(s.timer.id, it); sheet = null })
+                    }
+                }
+            }
+        }
     }
 }
 
+/** The top panel: closed, one line to start a timer where you are; open, the whole form. */
+@Composable
+private fun StartPanel(pilot: Pilot, map: TimerMap, jumps: Map<Long, Int>, groups: List<SystemGroup>, open: Boolean, actions: TimerActions) {
+    val c = Echelon.colors
+    var expanded by rememberSaveable(open) { mutableStateOf(open) }
+    PrimaryPanel(Modifier.fillMaxWidth().animateContentSize()) {
+        AnimatedContent(expanded, transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) }, label = "start panel") { full ->
+            if (full) Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                TimerForm(pilot, map, jumps, groups, null, onStart = { actions.startDraft(it) }, onClose = { expanded = false })
+            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Column(Modifier.weight(1f)) {
+                    Text("New timer", style = Echelon.type.screenTitle, color = c.text)
+                    Text(map.hereSystem?.name?.takeIf { it.isNotBlank() }?.let { "Starts in $it, where you are" } ?: "Gas site, mining cycle, despawn or cyno", style = MaterialTheme.typography.bodySmall, color = c.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton({ expanded = true }, Modifier.semantics { contentDescription = "Start a timer" }) { Icon(EchelonIcons.Plus, null, tint = c.accentStrong) }
+            }
+        }
+    }
+}
+
+/**
+ * The creation form, built around the place: the headline reads what will start ("Gas site in Tama · 20:00"), then the
+ * kind, its preset lengths, a label, the system (where you are by default; type to pick another, with suggestions
+ * nearest first) and whether the wingmate sees it.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NewTimer(pilot: Pilot, actions: TimerActions) {
+internal fun TimerForm(
+    pilot: Pilot,
+    map: TimerMap,
+    jumps: Map<Long, Int>,
+    groups: List<SystemGroup>,
+    initial: TimerSystem?,
+    onStart: (TimerDraft) -> Unit,
+    onClose: (() -> Unit)? = null,
+    query: String? = null,
+) {
     val c = Echelon.colors
     var kindKey by rememberSaveable { mutableStateOf(TimerKind.Gas.key) }
     val kind = TimerKind.of(kindKey)
     var length by rememberSaveable(kindKey) { mutableLongStateOf(kind.defaultMs) }
     var label by rememberSaveable { mutableStateOf("") }
     var shared by rememberSaveable { mutableStateOf(true) }
-    PrimaryPanel {
-        Text("New timer", style = Echelon.type.screenTitle, color = c.text)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            TimerKind.entries.forEach { k -> ChoiceChip(k.title, selected = k == kind, onClick = { kindKey = k.key }) }
+    // The system follows where you are until it is picked; then it stays.
+    var touched by rememberSaveable { mutableStateOf(query != null) }
+    var chosenId by rememberSaveable { mutableStateOf(query?.let { systemNamed(it, map.systems)?.id }) }
+    var text by rememberSaveable { mutableStateOf(query ?: "") }
+    val auto = initial ?: map.hereSystem
+    val system: TimerSystem? = if (touched) chosenId?.let { id -> TimerSystem(id, map.systems[id]?.name ?: text.trim()) } else auto
+    val shownText = if (touched) text else auto?.name.orEmpty()
+    fun pick(s: TimerSystem?) { touched = true; chosenId = s?.id; text = s?.name.orEmpty() }
+
+    Row(verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(draftTitle(kind, label, system), style = Echelon.type.screenTitle, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(clock(length) + (system?.id?.let { jumpsText(jumps[it]) }?.let { " · $it" } ?: ""), style = Echelon.type.num, color = c.accentStrong)
         }
-        Text(kind.hint, style = MaterialTheme.typography.bodySmall, color = c.textMuted)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            val step = stepFor(length)
-            IconButton(onClick = { length = (length - step).coerceAtLeast(SEC * 10) }, Modifier.semantics { contentDescription = "Shorter" }) { Text("−", style = Echelon.type.numLarge, color = c.text) }
-            Text(clock(length), style = Echelon.type.numLarge, color = c.text, modifier = Modifier.weight(1f).semantics { contentDescription = "Length ${duration(length / 1000.0)}" })
-            IconButton(onClick = { length = (length + step).coerceAtMost(MAX_TIMER) }, Modifier.semantics { contentDescription = "Longer" }) { Icon(EchelonIcons.Plus, null, tint = c.text) }
+        if (onClose != null) IconButton(onClose, Modifier.semantics { contentDescription = "Close the form" }) { Icon(EchelonIcons.Close, null, tint = c.textMuted) }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        TimerKind.entries.forEach { k -> ChoiceChip(k.title, selected = k == kind, onClick = { kindKey = k.key }) }
+    }
+    Text(kind.hint, style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        val step = stepFor(length)
+        IconButton(onClick = { length = (length - step).coerceAtLeast(SEC * 10) }, Modifier.semantics { contentDescription = "Shorter" }) { Text("−", style = Echelon.type.numLarge, color = c.text) }
+        Text(clock(length), style = Echelon.type.numLarge, color = c.text, modifier = Modifier.weight(1f).semantics { contentDescription = "Length ${duration(length / 1000.0)}" })
+        IconButton(onClick = { length = (length + step).coerceAtMost(MAX_TIMER) }, Modifier.semantics { contentDescription = "Longer" }) { Icon(EchelonIcons.Plus, null, tint = c.text) }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        kind.presets.forEach { p -> ChoiceChip(short(p), selected = p == length, onClick = { length = p }) }
+    }
+    val fieldColors = OutlinedTextFieldDefaults.colors(focusedBorderColor = c.accent, unfocusedBorderColor = c.line, focusedTextColor = c.text, unfocusedTextColor = c.text)
+    OutlinedTextField(
+        value = label, onValueChange = { label = it.take(60) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        label = { Text("Label") }, placeholder = { Text(kind.title) },
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next), colors = fieldColors,
+    )
+    SystemPicker(shownText, system, map, jumps, groups, pilot, onText = { t -> touched = true; text = t; chosenId = systemNamed(t, map.systems)?.id }, onPick = ::pick)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Share with ${pilot.wingmate.displayName}", style = MaterialTheme.typography.titleSmall, color = c.text)
+            Text(if (shared) "They see it on their board and get told when it ends" else "Only on your devices", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            kind.presets.forEach { p -> ChoiceChip(short(p), selected = p == length, onClick = { length = p }) }
-        }
-        OutlinedTextField(
-            value = label, onValueChange = { label = it.take(60) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            label = { Text("Label") }, placeholder = { Text(kind.title) },
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = c.accent, unfocusedBorderColor = c.line, focusedTextColor = c.text, unfocusedTextColor = c.text),
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Share with ${pilot.wingmate.displayName}", style = MaterialTheme.typography.titleSmall, color = c.text)
-                Text(if (shared) "They see it count down and get told when it ends" else "Only on your devices", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+        Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
+    }
+    PrimaryButton("Start ${duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
+        onStart(TimerDraft(kind, length, label, shared, system)); label = ""
+    }, modifier = Modifier.fillMaxWidth())
+}
+
+/**
+ * The system field: the name with its security light, and under it chips to pick from. Empty or settled, the chips are
+ * the places that matter (here, the wingmate's system, the systems already on the board); while typing, the matching
+ * names nearest first.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SystemPicker(text: String, system: TimerSystem?, map: TimerMap, jumps: Map<Long, Int>, groups: List<SystemGroup>, pilot: Pilot, onText: (String) -> Unit, onPick: (TimerSystem?) -> Unit) {
+    val c = Echelon.colors
+    val known = system?.id?.let { map.systems[it] }
+    OutlinedTextField(
+        value = text, onValueChange = { onText(it.take(40)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        label = { Text("System") }, placeholder = { Text("No system") },
+        leadingIcon = known?.let { s -> { Canvas(Modifier.size(12.dp)) { drawCircle(secColor(s.sec)) } } },
+        trailingIcon = if (text.isNotEmpty()) ({ IconButton({ onPick(null) }, Modifier.semantics { contentDescription = "No system" }) { Icon(EchelonIcons.Close, null, tint = c.textMuted) } }) else null,
+        supportingText = {
+            val line = when {
+                known != null -> listOfNotNull(secLabel(known.sec), map.regionName(known.region), jumpsText(jumps[known.id])).joinToString(" · ")
+                text.isNotBlank() && map.systems.isNotEmpty() -> "No system by that name: pick one below."
+                text.isBlank() -> "The timer starts without a system."
+                else -> null
             }
-            Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
+            if (line != null) Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = c.accent, unfocusedBorderColor = c.line, focusedTextColor = c.text, unfocusedTextColor = c.text),
+    )
+    val typing = text.isNotBlank() && known?.name?.equals(text.trim(), ignoreCase = true) != true
+    val options: List<Pair<String, TimerSystem>> = if (typing) suggestSystems(text, map.systems, jumps, limit = 5).map { s ->
+        listOfNotNull(s.name, secLabel(s.sec), jumpsText(jumps[s.id])).joinToString(" · ") to TimerSystem.of(s)
+    } else buildList {
+        map.hereSystem?.takeIf { it.name.isNotBlank() }?.let { add("Here · ${it.name}" to it) }
+        map.wingmateAt?.takeIf { it != map.here }?.let { id -> map.systems[id]?.let { add("${pilot.wingmate.displayName} · ${it.name}" to TimerSystem.of(it)) } }
+        groups.filter { it.systemId != null && it.systemId != map.here && it.systemId != map.wingmateAt && it.timers.isNotEmpty() }.take(3).forEach { g ->
+            add((g.name ?: "System ${g.systemId}") to TimerSystem(g.systemId!!, g.name.orEmpty()))
         }
-        PrimaryButton("Start ${duration(length / 1000.0)}", onClick = { actions.start(kind, length, label, shared); label = "" }, modifier = Modifier.fillMaxWidth())
+    }
+    if (options.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        options.forEach { (name, s) -> ChoiceChip(name, selected = !typing && system?.id == s.id, onClick = { onPick(s) }) }
     }
 }
 
+/** The sheet for moving a timer to another system. */
 @Composable
-private fun TimerCard(t: WingTimer, pilot: Pilot, now: Long, actions: TimerActions) {
+private fun MoveTimer(t: WingTimer, map: TimerMap, jumps: Map<Long, Int>, groups: List<SystemGroup>, onPick: (TimerSystem?) -> Unit) {
     val c = Echelon.colors
-    val mine = t.ownedBy(pilot)
-    val done = t.done(now)
-    val owner = Pilot.of(t.owner)
-    EchelonCard(tone = if (done) Tone.Ok else Tone.Neutral) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Text(t.label, style = MaterialTheme.typography.titleMedium, color = c.text, maxLines = 1)
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    Tag(TimerKind.of(t.kind).title)
-                    if (t.pausedAt != null) Tag("Paused", tone = Tone.Warn)
-                    if (mine && !t.shared) Tag("Private")
-                }
-            }
-            if (t.pausedAt != null) Text(clock(t.remaining(now)), style = Echelon.type.numLarge, color = c.textMuted)
-            else Countdown(t.endsAt, now = now, warnUnderMillis = if (t.durationMs > 5 * MIN) MIN else 10 * SEC)
-        }
-        ProgressBar(t.progress(now), Modifier.fillMaxWidth().padding(top = Spacing.sm), color = if (done) c.ok else PilotColors.of(t.owner).color)
-        if (!mine && owner != null) WingChip(owner.displayName, PilotColors.of(owner.id), "started it", t.startedAt, now, Modifier.padding(top = Spacing.sm))
-        if (mine) Row(Modifier.padding(top = Spacing.xs), horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            when {
-                done -> LinkButton("Again", { actions.restart(t.id) })
-                t.pausedAt != null -> LinkButton("Resume", { actions.resume(t.id) })
-                else -> LinkButton("Pause", { actions.pause(t.id) })
-            }
-            if (!done) LinkButton("Restart", { actions.restart(t.id) })
-            LinkButton(if (t.shared) "Stop sharing" else "Share", { actions.share(t.id, !t.shared) }, tone = Tone.Neutral)
-            LinkButton("Remove", { actions.remove(t.id) }, tone = Tone.Danger)
-        }
-    }
+    var text by rememberSaveable(t.id) { mutableStateOf(t.systemNameIn(map.systems).orEmpty()) }
+    val chosen = systemNamed(text, map.systems)?.let(TimerSystem::of)
+    Text("Move ${t.label}", style = Echelon.type.screenTitle, color = c.text)
+    Text("Now ${t.systemNameIn(map.systems)?.let { "in $it" } ?: "in no system"}.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+    val pilot = Pilot.of(t.owner) ?: return
+    SystemPicker(text, chosen, map, jumps, groups, pilot, onText = { text = it }, onPick = { s -> text = s?.name.orEmpty() })
+    PrimaryButton(chosen?.let { "Move to ${it.name}" } ?: if (text.isBlank()) "Take it out of any system" else "Pick a system", onClick = { onPick(chosen) }, modifier = Modifier.fillMaxWidth(), enabled = chosen != null || text.isBlank())
 }
 
 /** The −/+ step: 10 s under 2 min, a minute under 15 min, then 5 minutes. */

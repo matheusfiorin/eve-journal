@@ -32,6 +32,8 @@ class TimerStore internal constructor(
     private val clock: () -> Long = System::currentTimeMillis,
     private val onActive: () -> Unit = {},
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Where a pilot is now, from their synced snapshot or the wing summary: new timers start there by default. */
+    private val locate: (Pilot) -> TimerSystem? = { null },
 ) {
     /** What the store needs from the wing room: its timers, and the two sends. */
     interface Room {
@@ -44,7 +46,16 @@ class TimerStore internal constructor(
         override val timers = c.wingChannel.timers
         override fun upsert(timer: WingTimer) { c.wingChannel.upsertTimer(timer) }
         override fun remove(id: String, owner: Pilot) { c.wingChannel.removeTimer(id, owner) }
-    }, onActive = { TimerService.ensure(c.app) })
+    }, onActive = { TimerService.ensure(c.app) }, locate = { p -> TimerLocator(c).systemOf(p) })
+
+    /** The last live location the app read for each pilot (GET /api/live), fresher than the synced snapshot. */
+    private val seen = java.util.concurrent.ConcurrentHashMap<Pilot, TimerSystem>()
+
+    /** Tells the store where [pilot] is now (the Timers screen reads it live); new timers default to it. */
+    fun noteLocation(pilot: Pilot, system: TimerSystem?) { if (system == null) seen.remove(pilot) else seen[pilot] = system }
+
+    /** Where [pilot] is as far as this phone knows: the live read first, then the synced snapshot or the wing summary. */
+    fun here(pilot: Pilot): TimerSystem? = seen[pilot] ?: locate(pilot)
 
     private val local = MutableStateFlow(load())
 
@@ -59,15 +70,23 @@ class TimerStore internal constructor(
 
     fun board(now: Long = clock()): TimerBoard = TimerBoard.of(timers.value.values, now)
 
-    /** Starts a timer for [owner]; a shared one also goes to the wing room. Returns it. */
-    fun start(owner: Pilot, kind: TimerKind, durationMs: Long, label: String = "", shared: Boolean = true): WingTimer =
-        newTimer(UUID.randomUUID().toString(), kind, durationMs, owner, clock(), label, shared).also { put(it) }
+    /**
+     * Starts a timer for [owner] in [system] (by default where [owner] is now; null for no system); a shared one also
+     * goes to the wing room. Returns it.
+     */
+    fun start(owner: Pilot, kind: TimerKind, durationMs: Long, label: String = "", shared: Boolean = true, system: TimerSystem? = here(owner)): WingTimer =
+        newTimer(UUID.randomUUID().toString(), kind, durationMs, owner, clock(), label, shared, system).also { put(it) }
+
+    /** Starts what the creation form describes. */
+    fun start(owner: Pilot, draft: TimerDraft): WingTimer = start(owner, draft.kind, draft.durationMs, draft.label, draft.shared, draft.system)
 
     fun pause(id: String) = change(id) { it.paused(clock()) }
     fun resume(id: String) = change(id) { it.resumed(clock()) }
     fun restart(id: String) = change(id) { it.restarted(clock()) }
     /** Shares a private timer with the wing, or takes a shared one back (the room tells the wingmate it is gone). */
     fun setShared(id: String, shared: Boolean) = change(id) { it.copy(shared = shared) }
+    /** Moves a timer to another system (null: no system). */
+    fun place(id: String, system: TimerSystem?) = change(id) { it.placed(system) }
 
     /** Removes one of this phone's pilots' timers here and, if it was shared, in the room. */
     fun remove(id: String) {
