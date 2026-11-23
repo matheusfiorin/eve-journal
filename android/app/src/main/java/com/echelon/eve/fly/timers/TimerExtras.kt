@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -171,8 +172,10 @@ fun SuggestionCard(suggestion: Suggestion?, mining: MiningUi?, onStart: () -> Un
 internal fun SuggestionBody(s: Suggestion, mining: MiningUi?, onStart: () -> Unit, onDismiss: () -> Unit) {
     val c = Echelon.colors
     val reduced = Echelon.reduceMotion
-    val pulse by rememberInfiniteTransition(label = "suggestion pulse").animateFloat(0.35f, 0.9f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "pulse")
-    val edge = c.accentStrong.copy(alpha = if (reduced) .7f else pulse)
+    // The edge pulses in the draw phase only, so the card doesn't recompose on every frame.
+    val pulse: androidx.compose.runtime.State<Float> = if (reduced) androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(.7f) }
+        else rememberInfiniteTransition(label = "suggestion pulse").animateFloat(0.35f, 0.9f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "pulse")
+    val edgeColor = c.accentStrong
     val shape = RoundedCornerShape(Radii.panel)
     val (title, detail, action) = when (s) {
         is Suggestion.Wormhole -> Triple(
@@ -187,7 +190,11 @@ internal fun SuggestionBody(s: Suggestion, mining: MiningUi?, onStart: () -> Uni
         )
     }
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(c.accentSoft).border(1.5.dp, edge, shape).padding(Spacing.lg).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = "$action. $title. $detail" },
+        Modifier.fillMaxWidth().clip(shape).background(c.accentSoft).drawWithContent {
+            drawContent()
+            val sw = 1.5.dp.toPx(); val r = Radii.panel.toPx()
+            drawRoundRect(edgeColor.copy(alpha = pulse.value), topLeft = androidx.compose.ui.geometry.Offset(sw / 2, sw / 2), size = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw), cornerRadius = androidx.compose.ui.geometry.CornerRadius(r - sw / 2), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+        }.padding(Spacing.lg).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = "$action. $title. $detail" },
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {

@@ -1,0 +1,4 @@
+# Baseline profile for Echelon: everything in the app's own package is compiled ahead of time at install.
+# (A broad rule is fine for an app this size; Compose, Navigation and Coil ship their own profiles.)
+HSPLcom/echelon/eve/**->**(**)**
+Lcom/echelon/eve/**;
