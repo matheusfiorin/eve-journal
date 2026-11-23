@@ -1112,6 +1112,9 @@ async function handle(request,env,ctx,fetchImpl){
  try{result=await route(request,env,ctx,fetchImpl);}catch(error){result=response({error:error instanceof ServiceError?error.message:'Backend request failed. Try again later.'},error instanceof ServiceError?error.status:500,error.retryAfter?{'Retry-After':String(error.retryAfter)}:{});if(!(error instanceof ServiceError))log({e:'error',what:'unhandled'});}
  // Append Vary rather than replace it: /api/market varies by Authorization too, and a cached signed-in copy must not
  // be reused once the session is gone. Preflights are cached for two hours instead of preceding every request.
+ // A WebSocket handshake (101 from the wing room) must reach the runtime as it is: rebuilding it drops its webSocket,
+ // and the Workers runtime refuses a 101 Response without one, so the app saw a 500 instead of the upgrade.
+ if(result.status===101||result.webSocket)return result;
  const headers=new Headers(result.headers);for(const [key,value]of Object.entries(cors))key==='Vary'?headers.append(key,value):headers.set(key,value);
  return new Response(result.body,{status:result.status,headers});
 }

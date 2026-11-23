@@ -1684,3 +1684,12 @@ test('the deploy config binds the wing room as a SQLite Durable Object and the W
  assert.match(deploy,/durable_objects:\{bindings:\[\{name:'WING_ROOM',class_name:'WingRoom'\}\]\}/);assert.match(deploy,/migrations:\[\{tag:'v1',new_sqlite_classes:\['WingRoom'\]\}\]/);
  assert.equal(typeof (await import('../worker/index.js')).WingRoom,'function');
 });
+test('the wing room\'s 101 upgrade reaches the runtime untouched (rebuilding a 101 Response throws: the 500 the app saw)',async()=>{
+ const {app}=wingRoomApp(),{bearer}=await connect(app);
+ // What the Workers runtime returns from a WebSocket handshake: status 101 and a webSocket. A Response can't carry 101
+ // outside Workers, so a plain object stands in; the Worker must return it as it is, not rebuild it.
+ const socket={accept(){}},upgrade={status:101,webSocket:socket,headers:new Headers(),body:null};
+ app.env.WING_ROOM={idFromName:n=>n,get:()=>({fetch:async()=>upgrade})};
+ const res=await app.request('/api/wing/socket',{headers:{Upgrade:'websocket',Authorization:`Bearer ${bearer}`,Origin:'https://matheusfiorin.github.io'}});
+ assert.equal(res,upgrade,'the handshake is passed through');assert.equal(res.webSocket,socket);
+});
