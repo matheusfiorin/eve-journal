@@ -10,6 +10,11 @@ on:
   pull_request:
     paths: ['android/**', '*.js', 'scripts/bundle-android.mjs', 'package.json', 'package-lock.json', '.github/workflows/android.yml']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish a GitHub Release with the signed APK, e.g. 0.1.0 (creates tag v0.1.0 on this commit). Empty: just build.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -78,7 +83,7 @@ jobs:
 
   release:
     # Only for v* tags, and only when the signing secrets exist (forks and fresh clones have none).
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -86,6 +91,8 @@ jobs:
       contents: write
     env:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      # A v* tag push names the release; a manual run with a version creates that tag on the run's commit.
+      TAG: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: env.HAS_KEYSTORE == 'true'
@@ -116,17 +123,17 @@ jobs:
         run: |
           export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
-          export VERSION_NAME="${GITHUB_REF_NAME#v}" VERSION_CODE="$GITHUB_RUN_NUMBER"
+          export VERSION_NAME="${TAG#v}" VERSION_CODE="$GITHUB_RUN_NUMBER"
           ./gradlew --no-configuration-cache :app:assembleRelease
           rm -f "$ANDROID_KEYSTORE_PATH"
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/echelon-$GITHUB_REF_NAME.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/echelon-$TAG.apk"
       - name: Attach to the GitHub Release
         if: env.HAS_KEYSTORE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/echelon-$GITHUB_REF_NAME.apk" --clobber
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --target "$GITHUB_SHA" --title "Echelon $TAG" --generate-notes
+          gh release upload "$TAG" "$RUNNER_TEMP/echelon-$TAG.apk" --clobber
       - name: No signing secrets
         if: env.HAS_KEYSTORE != 'true'
         run: echo "ANDROID_KEYSTORE_BASE64 is not set, so no signed release APK was built."
