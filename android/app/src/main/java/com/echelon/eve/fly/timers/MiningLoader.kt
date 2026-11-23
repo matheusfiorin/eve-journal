@@ -113,8 +113,8 @@ fun fitModules(items: JsonArray): FitModules {
 /** What the start sheet and the cockpit show for a pilot's mining: the profile, or why there is none. */
 data class MiningUi(val profile: MiningProfile? = null, val note: String? = null, val loading: Boolean = false)
 
-class MiningLoader(private val c: AppContainer, private val cache: DogmaCache) {
-    constructor(c: AppContainer) : this(c, DogmaCache({ id -> c.eveNames.get("universe/types/$id") }, File(c.app.filesDir, "dogma-types.json")))
+class MiningLoader(private val c: AppContainer, private val fitter: MiningFitter) {
+    constructor(c: AppContainer) : this(c, MiningFitter(DogmaCache({ id -> c.eveNames.get("universe/types/$id") }, File(c.app.filesDir, "dogma-types.json"))))
 
     private val _state = MutableStateFlow<Map<Pilot, MiningUi>>(emptyMap())
     /** The last profile read per pilot. */
@@ -138,9 +138,12 @@ class MiningLoader(private val c: AppContainer, private val cache: DogmaCache) {
         }
         val skills: Skills? = state.private?.skills ?: state.public?.skills ?: mate?.skills
         val levels = skills?.skills?.associate { it.skillId to it.activeLevel }.orEmpty()
-        return profile(fit, shipType, levels)
+        return fitter.profile(fit, shipType, levels)
     }
+}
 
+/** A fit's rows and a pilot's skill levels to a [MiningUi], through the types' dogma. */
+class MiningFitter(private val cache: DogmaCache) {
     suspend fun profile(fit: RawFit, shipType: Long, levels: Map<Long, Int>): MiningUi {
         val mods = fitModules(fit.items)
         val types = cache.getAll(listOf(shipType) + mods.high.keys + mods.low.keys + Dogma.SKILLS)

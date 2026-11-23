@@ -7,4 +7,10 @@
     <string name="cockpit_widget_open">Cockpit</string>
     <string name="cockpit_tile_label">Mining cycle</string>
     <string name="cockpit_activity_label">Cockpit</string>
+    <string name="gas_tile_label">Gas timer</string>
+    <string name="shortcut_gas_short">Gas timer</string>
+    <string name="shortcut_gas_long">Start or stop the gas timer</string>
+    <string name="shortcut_mining_short">Mining cycle</string>
+    <string name="shortcut_mining_long">Start the next mining cycle</string>
+    <string name="shortcut_cockpit_long">Open the cockpit</string>
 </resources>
