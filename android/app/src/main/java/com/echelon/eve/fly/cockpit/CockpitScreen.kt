@@ -41,7 +41,14 @@ import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.wing.WingPing
 import com.echelon.eve.core.wing.WingTimer
 import com.echelon.eve.fly.live.Whereabouts
+import com.echelon.eve.fly.timers.MiningProfile
+import com.echelon.eve.fly.timers.MiningUi
+import com.echelon.eve.fly.timers.SuggestionCard
 import com.echelon.eve.fly.timers.TimerBoard
+import com.echelon.eve.fly.timers.fitLine
+import com.echelon.eve.fly.timers.ringHeat
+import androidx.compose.ui.graphics.lerp
+import com.echelon.eve.fly.timers.miningLine
 import com.echelon.eve.fly.timers.progress
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.ChoiceChip
@@ -99,6 +106,9 @@ data class CockpitUi(
     /** The last action's answer ("Sent to Decxus.", "Autopilot set: 4 waypoints."). */
     val status: String? = null,
     val sound: Boolean = true,
+    /** A timer worth offering now, and what the fit says about mining (for the line under the next timer). */
+    val suggestion: Suggestion? = null,
+    val mining: MiningUi? = null,
 )
 
 class CockpitActions(
@@ -110,6 +120,8 @@ class CockpitActions(
     val openTimers: () -> Unit = {},
     val openWing: () -> Unit = {},
     val sound: (Boolean) -> Unit = {},
+    val startSuggestion: () -> Unit = {},
+    val dismissSuggestion: () -> Unit = {},
 )
 
 /** The calls the cockpit offers, in the wing feed's words. */
@@ -147,8 +159,9 @@ fun CockpitScreen(ui: CockpitUi, now: Long, actions: CockpitActions, modifier: M
 @Composable
 private fun ColumnScope.Info(ui: CockpitUi, now: Long, actions: CockpitActions, withMate: Boolean, compact: Boolean = false) {
     ui.banner?.let { Banner(it) }
+    SuggestionCard(ui.suggestion, ui.mining, actions.startSuggestion, actions.dismissSuggestion)
     Place(ui, now, actions, compact)
-    NextTimer(ui.timers, ui.pilot, now, actions.openTimers, compact)
+    NextTimer(ui.timers, ui.pilot, now, actions.openTimers, compact, ui.mining?.profile)
     if (withMate) ui.mate?.let { Mate(it, now, actions.openWing) }
 }
 
@@ -243,7 +256,7 @@ private fun SecBlock(sec: Double) {
 
 /** The next timer to end, large, with its progress; tap for the timer board. */
 @Composable
-private fun NextTimer(timers: List<WingTimer>, pilot: Pilot?, now: Long, onOpen: () -> Unit, compact: Boolean = false) {
+private fun NextTimer(timers: List<WingTimer>, pilot: Pilot?, now: Long, onOpen: () -> Unit, compact: Boolean = false, mining: MiningProfile? = null) {
     val c = Echelon.colors
     val board = TimerBoard.of(timers, now)
     val next = board.next
@@ -267,7 +280,12 @@ private fun NextTimer(timers: List<WingTimer>, pilot: Pilot?, now: Long, onOpen:
             }
             Countdown(next.endsAt, now = now, style = Echelon.type.numLarge.copy(fontSize = 40.sp, lineHeight = 44.sp))
         }
-        ProgressBar(next.progress(now), Modifier.fillMaxWidth(), color = if (owner != null && owner != pilot) PilotColors.of(owner.id).color else c.accent, height = 8.dp)
+        // The bar warms towards amber as the closest warning nears and goes red at the end, like the rings on the board.
+        val heat = ringHeat(next, now)
+        val base = if (owner != null && owner != pilot) PilotColors.of(owner.id).color else c.accent
+        ProgressBar(next.progress(now), Modifier.fillMaxWidth(), color = lerp(lerp(base, c.warn, heat.warn), c.danger, heat.last), height = 8.dp)
+        // What the fit says: "Cycle 1:38 · hold full in 14 min" (the timer's own figures, else the flying pilot's fit now).
+        (next.fitLine() ?: mining?.let(::miningLine))?.let { Text(it, style = Echelon.type.num.copy(fontSize = 15.sp), color = c.textMuted, maxLines = 2) }
     }
 }
 

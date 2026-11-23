@@ -73,6 +73,42 @@ val WingTimer.site: String? get() = (meta[TimerMeta.SITE] as? JsonPrimitive)?.co
 
 fun WingTimer.withSite(site: String?): WingTimer = copy(meta = JsonObject(if (site == null) meta - TimerMeta.SITE else meta + (TimerMeta.SITE to JsonPrimitive(site))))
 
+/** What a mining timer was worked out from: "Cycle 0:26 · hold full in 53 min · repeats · Venture: 2× Gas Cloud Scoop I"; null for other timers. */
+fun WingTimer.fitLine(): String? {
+    val cycle = cycleMs; val hold = holdFullMs
+    val fit = (meta[TimerMeta.FIT] as? JsonPrimitive)?.contentOrNull
+    if (cycle == null && hold == null && !repeats) return null
+    val first = listOfNotNull(cycle?.let { "Cycle ${cycleClock(it)}" }, hold?.let { "hold full in ${holdText(it)}" }).joinToString(" · ")
+    return listOfNotNull(first.ifEmpty { null }, "repeats".takeIf { repeats }, fit).joinToString(" · ")
+}
+
+// ---- the ring's colour ----
+
+/**
+ * How far a countdown ring has turned from its calm colour towards amber ([warn], 0 to 1) and then red ([last], 0 to 1).
+ * Amber builds over the 30 seconds before the closest warning point and holds after it; red takes over in the last 20
+ * seconds. A timer with no warning points stays calm (it has no point to approach), except in the last 10 seconds of a Sleeper timer.
+ */
+data class RingHeat(val warn: Float, val last: Float) {
+    companion object { val Calm = RingHeat(0f, 0f) }
+}
+
+const val APPROACH_MS = 30 * SEC
+const val FINAL_MS = 20 * SEC
+
+fun ringHeat(t: WingTimer, now: Long): RingHeat {
+    if (t.pausedAt != null || t.done(now)) return RingHeat.Calm
+    val left = t.remaining(now)
+    val point = t.warnings.minOrNull()
+    val sleeper = TimerKind.of(t.kind) == TimerKind.Sleeper
+    val warn = if (point == null) 0f else ((point + APPROACH_MS - left).toFloat() / APPROACH_MS).coerceIn(0f, 1f)
+    val last = if (point == null && !sleeper) 0f else ((FINAL_MS - left).toFloat() / FINAL_MS).coerceIn(0f, 1f)
+    return RingHeat(warn, last)
+}
+
+/** How many of [t]'s warning points have gone by at [now] (the ring pulses each time this grows). */
+fun warningsPassed(t: WingTimer, now: Long): Int = if (t.pausedAt != null) 0 else t.warnings.count { t.remaining(now) <= it }
+
 // ---- the alerts ----
 
 enum class AlertKind { Warn, End }
