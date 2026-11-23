@@ -99,4 +99,4 @@ data class QuickTimer(val kind: TimerKind, val durationMs: Long, val reuse: Wing
 }
 
 /** The cockpit's quick timers, in button order. */
-val QUICK_KINDS = listOf(TimerKind.Mining, TimerKind.Gas)
+val QUICK_KINDS = listOf(TimerKind.Mining, TimerKind.Sleeper)

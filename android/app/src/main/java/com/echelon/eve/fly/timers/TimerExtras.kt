@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.echelon.eve.fly.cockpit.Suggestion
 import com.echelon.eve.fly.cockpit.wormholeLine
 import com.echelon.eve.ui.EchelonIcons
@@ -100,7 +101,7 @@ fun MiningPanel(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             Icon(EchelonIcons.Gauge, null, Modifier.size(18.dp), tint = c.accentStrong)
             Column(Modifier.weight(1f)) {
-                Text(miningLine(p), style = Echelon.type.num.copy(fontSize = MaterialTheme.typography.titleMedium.fontSize), color = c.text, maxLines = 2)
+                Text(miningLine(p), style = Echelon.type.num.copy(fontSize = 15.sp), color = c.text, maxLines = 2)
                 Text("${p.shipName} · ${p.summary} · ${"%.0f".format(p.yieldPerCycle)} m3 a cycle, ${"%.0f".format(p.holdM3)} m3 ${p.holdName}", style = MaterialTheme.typography.bodySmall, color = c.textMuted, maxLines = 2)
             }
             if (forKind == TimerKind.Mining) LinkButton("Use ${cycleClock(p.cycleMs)}", onUse)

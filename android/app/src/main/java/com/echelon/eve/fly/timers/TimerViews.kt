@@ -388,7 +388,8 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
     val heatNow = ringHeat(t, now)
     val warnMix by animateFloatAsState(heatNow.warn, motionSpec(Springs.value()), label = "ring warn")
     val lastMix by animateFloatAsState(heatNow.last, motionSpec(Springs.value()), label = "ring last")
-    val tinted = lerp(lerp(owner, c.warn, warnMix), c.danger, lastMix)
+    // Past the warning the ring leans towards red as well, so an amber pilot's ring still changes.
+    val tinted = lerp(lerp(owner, c.warn, warnMix), c.danger, maxOf(lastMix, warnMix * .6f))
     val col by animateColorAsState(when { done -> if (warnTimer) c.danger else c.ok; paused -> c.textFaint; else -> tinted }, motionSpec(tween(300)), label = "ring colour")
     val select by animateFloatAsState(if (selected) 1f else 0f, motionSpec(Springs.select()), label = "ring select")
     // The burst: only when this ring sees the timer reach zero (not when it is first drawn already finished).

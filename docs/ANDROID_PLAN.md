@@ -34,14 +34,14 @@ Deploys work again: the Cloudflare token was replaced, and the deploys for #3 an
 | Corp: an overview screen with health rings | Partly done; check it in #5's hub |
 | Corp: **local low-fuel and reinforced alerts (WorkManager)** | **Missing.** Only the Worker's Discord alerts exist. |
 | Fly: shared timers, foreground service with a countdown notification | Done (#3), placed by system in #5 |
-| Fly: **gas sleeper timer with researched timing and a T−2 min warning** | **Missing.** The gas preset is a generic 20 min with no warning alert and no cited source. |
-| Fly: **mining cycle and hold-full from the fit and skills** | **Missing.** The mining preset is a fixed 3 min. |
-| Fly: **exact alarms for the warning and end**, distinct alert channels | **Missing.** Alerts rely on the running service; there's no AlarmManager fallback if it is killed. |
-| Fly: wormhole-entry suggestion ("Start sleeper timer") | **Missing.** The Cockpit warns on entering low-sec or null-sec only. |
+| Fly: **gas sleeper timer with researched timing and a T−2 min warning** | Done (finish wave): researched 15 min default (15 to 20 min after the first warp-in), T-2 min warning in the timer meta, known-space gas kept separate. See `android/FLY_TIMERS.md`. |
+| Fly: **mining cycle and hold-full from the fit and skills** | Done (finish wave): ESI dogma plus skills and hull bonuses, unit-tested against the Venture fit; in the start sheet and the Cockpit. |
+| Fly: **exact alarms for the warning and end**, distinct alert channels | Done (finish wave): AlarmManager exact alarms with a receiver, boot reschedule, rationale card; one channel and vibration pattern per alert kind. |
+| Fly: wormhole-entry suggestion ("Start sleeper timer") | Done (finish wave): animated one-tap card in Cockpit and Timers; undocking in a mining hull suggests the mining timer. |
 | Fly: live system and ship, pings, the wing screen | Done (#3–#5) |
-| Fly: Quick Settings tile, home widget | Done in #5 (the tile restarts the mining timer, not the gas timer) |
-| Fly: app shortcut | Missing |
-| Fly: ProgressStyle notification (Android 16) | Missing (nice to have) |
+| Fly: Quick Settings tile, home widget | Done in #5; a second "Gas timer" tile (start, or show and stop) added in the finish wave |
+| Fly: app shortcut | Done (finish wave): Gas timer, Mining cycle, Cockpit |
+| Fly: ProgressStyle notification (Android 16) | Done (finish wave), guarded to API 36 |
 | Picture-in-picture Cockpit | **Not built**, though PR #5's description says "picture-in-picture overlay". `CockpitActivity` is an ordinary standalone screen. |
 | Background push (FCM) | Code present. Needs a Firebase project and the Worker secrets. |
 | Opus review of the whole app | Done before #4 ("fixes from a full review"); #5's ~6,400 new lines have no independent review yet |

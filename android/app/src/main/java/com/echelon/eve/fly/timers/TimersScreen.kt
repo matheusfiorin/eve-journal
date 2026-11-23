@@ -251,11 +251,12 @@ internal fun TimerForm(
     onStart: (TimerDraft) -> Unit,
     onClose: (() -> Unit)? = null,
     query: String? = null,
+    initialKind: TimerKind? = null,
 ) {
     val c = Echelon.colors
     // Wormhole gas is what the timer is for: known space starts on the plain gas timer (no Sleepers there).
     val start0 = initial ?: map.hereSystem
-    var kindKey by rememberSaveable { mutableStateOf(if (start0 != null && !GasSleepers.isJSpace(start0.id) && map.systems.containsKey(start0.id)) TimerKind.Gas.key else TimerKind.Sleeper.key) }
+    var kindKey by rememberSaveable { mutableStateOf(initialKind?.key ?: if (start0 != null && !GasSleepers.isJSpace(start0.id) && map.systems.containsKey(start0.id)) TimerKind.Gas.key else TimerKind.Sleeper.key) }
     val kind = TimerKind.of(kindKey)
     val profile = map.mining?.profile
     var length by rememberSaveable(kindKey) { mutableLongStateOf(if (kind == TimerKind.Mining && profile != null) profile.cycleMs.coerceAtLeast(10 * SEC) else kind.defaultMs) }
@@ -312,7 +313,7 @@ internal fun TimerForm(
         }
         Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
     }
-    PrimaryButton("Start ${duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
+    PrimaryButton("Start ${if (length < 2 * MIN) clock(length) else duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
         val fits = profile != null && (kind == TimerKind.Mining || ((kind == TimerKind.Sleeper || kind == TimerKind.Gas) && profile.kind == Harvest.Gas))
         onStart(TimerDraft(kind, length, label, shared, system, warnings = warn, repeat = repeat && kind == TimerKind.Mining,
             cycleMs = profile?.cycleMs.takeIf { fits }, holdFullMs = profile?.holdFullMs.takeIf { fits }, fit = profile?.let { "${it.shipName}: ${it.summary}" }.takeIf { fits }))

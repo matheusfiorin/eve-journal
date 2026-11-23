@@ -1,6 +1,7 @@
 package com.echelon.eve.fly.timers
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -93,6 +94,7 @@ object TimerNotifications {
 
     private fun allowed(context: Context) = !(Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
 
+    @SuppressLint("MissingPermission") // allowed() checks POST_NOTIFICATIONS
     fun update(context: Context, next: WingTimer, running: Int, now: Long, systems: Map<Long, SolarSystem> = emptyMap()) {
         if (!allowed(context)) return
         runCatching { NotificationManagerCompat.from(context).notify(TimerService.ONGOING_ID, ongoing(context, next, running, now, systems)) }
@@ -103,6 +105,7 @@ object TimerNotifications {
      * so the service and the exact alarm both posting the same alert makes one buzz and one notification.
      * [who] names the wingmate whose timer it is, when it is not yours.
      */
+    @SuppressLint("MissingPermission") // allowed() checks POST_NOTIFICATIONS
     fun alert(context: Context, a: TimerAlert, who: String? = null) {
         if (!allowed(context)) return
         ensureChannels(context)
