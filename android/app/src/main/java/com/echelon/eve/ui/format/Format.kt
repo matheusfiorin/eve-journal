@@ -40,6 +40,9 @@ fun format(value: Double?, kind: Kind = Kind.Count): String {
     }
 }
 
+/** compactNumber without a pointless ".0": "12M", "14.8M", "750k". */
+fun iskShort(value: Double): String = compactNumber(value).replace(Regex("\\.0(?=[kMBT]|$)"), "")
+
 /** A full amount with two decimals, as the web's isk(): "12,500,000.25 ISK". */
 fun isk(value: Double, locale: Locale = Locale.getDefault()): String =
     NumberFormat.getNumberInstance(locale).apply { minimumFractionDigits = 2; maximumFractionDigits = 2 }.format(value) + " ISK"

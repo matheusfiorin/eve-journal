@@ -143,6 +143,13 @@ class WingChannel(
     fun startSession(from: Pilot, plan: SessionPlan) = send(WingMessage.SessionStart(newId(), from.id, clock(), plan))
     /** This pilot's own totals in the running session; only the latest report waits in the outbox. */
     fun reportContribution(from: Pilot, isk: Long? = null, units: Long? = null) = send(WingMessage.SessionContrib(newId(), from.id, clock(), isk, units))
+    /**
+     * This pilot's operation (gas site) in the running session, upserted by [GasOp.id]. Applied here at once so the card does not wait for
+     * the room; only the latest report of one op waits in the outbox.
+     */
+    fun reportOp(from: Pilot, op: GasOp): Boolean = send(WingMessage.SessionOp(newId(), from.id, clock(), op.copy(by = from.id))).also { applyOp(op.copy(by = from.id)) }
+    /** Adds [amount] ISK (negative corrects) to the running session with an optional [note]. The room's answer carries it back. */
+    fun addIsk(from: Pilot, amount: Long, note: String = ""): Boolean = send(WingMessage.SessionAddIsk(newId(), from.id, clock(), amount, note))
     fun endSession(from: Pilot, sessionId: String? = _session.value?.id) = send(WingMessage.SessionEnd(newId(), from.id, clock(), sessionId))
 
     /** Sends now if connected, else queues. Returns true when it went out immediately. */
@@ -152,6 +159,7 @@ class WingChannel(
         synchronized(lock) {
             // A newer status or contribution makes a queued one pointless.
             if (message is WingMessage.StatusUpdate || message is WingMessage.SessionContrib) outbox.removeAll { it::class == message::class }
+            if (message is WingMessage.SessionOp) outbox.removeAll { it is WingMessage.SessionOp && it.op.id == message.op.id }
             outbox.addLast(message); while (outbox.size > KEEP) outbox.removeFirst()
             _pending.value = outbox.size
         }
@@ -273,7 +281,7 @@ class WingChannel(
                 // A late update for a session that already ended (or a start after a newer one) changes nothing.
                 else -> _session.update { cur -> if (_history.value.any { it.id == m.session.id } || (cur != null && cur.id != m.session.id && cur.startedAt > m.session.startedAt)) cur else m.session }
             }
-            is WingMessage.SessionStart, is WingMessage.SessionContrib, is WingMessage.SessionEnd -> {}
+            is WingMessage.SessionStart, is WingMessage.SessionContrib, is WingMessage.SessionEnd, is WingMessage.SessionOp, is WingMessage.SessionAddIsk -> {}
             is WingMessage.TimerUpsert -> applyTimer(m.timer)
             is WingMessage.TimerRemove -> _timers.update { it - m.timerId }
             is WingMessage.Ping -> _pings.update { (listOf(WingEvent(m.pilot, m.at, m.ping, m.id, m.acks)) + it.filter { e -> e.id != m.id }).take(KEEP) }
@@ -292,6 +300,16 @@ class WingChannel(
         _pings.update { it.with() }; _plans.update { it.with() }
     }
 
+    /** Folds this pilot's own op into the running session before the room's answer lands (which then replaces it with the room's sums). */
+    private fun applyOp(op: GasOp) = _session.update { s ->
+        if (s == null || (s.ops.size >= MAX_OPS && s.ops.none { it.id == op.id })) s
+        else {
+            val ops = if (s.ops.any { it.id == op.id }) s.ops.map { if (it.id == op.id) op else it } else s.ops + op
+            val mine = s.of(op.by).copy(mined = ops.filter { it.by == op.by }.sumOf { it.value })
+            s.copy(ops = ops, contrib = s.contrib + (op.by.toString() to mine))
+        }
+    }
+
     private fun applyTimer(t: WingTimer) = _timers.update { if (t.shared) it + (t.id to t) else it - t.id }
 
     private fun newId() = UUID.randomUUID().toString()
@@ -300,6 +318,8 @@ class WingChannel(
         const val FOREGROUND = "foreground"
         const val TIMER_SERVICE = "timer-service"
         const val KEEP = 50
+        /** The room keeps at most this many operations per session. */
+        const val MAX_OPS = 60
         private const val DAY = 86_400_000L
         private const val STATE_WAIT_MS = 3_000L
         const val HEARTBEAT_MS = 25_000L

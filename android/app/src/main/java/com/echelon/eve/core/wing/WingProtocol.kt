@@ -82,12 +82,42 @@ data class WingAck(val kind: String, val at: Long = 0) {
     companion object { const val SEEN = "seen"; const val ONIT = "onit"; const val CANT = "cant" }
 }
 
-/** One pilot's part of a session: timers started and systems visited (counted by the room), ISK and units (reported by the app). */
+/**
+ * One pilot's part of a session: timers started and systems visited (counted by the room), the wallet ISK and mining-ledger units
+ * (reported by the app), and the room's sums of this pilot's operations ([mined]) and hand-added ISK ([added]).
+ */
 @Serializable
-data class Contribution(val timers: Int = 0, val isk: Long = 0, val units: Long = 0, val systems: List<Long> = emptyList())
+data class Contribution(val timers: Int = 0, val isk: Long = 0, val units: Long = 0, val systems: List<Long> = emptyList(), val mined: Long = 0, val added: Long = 0)
 
+/**
+ * The session's totals: [isk] is the wallet change, [mined] the gas the operations made, [added] the ISK added by hand and
+ * [value] = [mined] + [added], the number measured against the goal.
+ */
 @Serializable
-data class SessionTotals(val isk: Long = 0, val units: Long = 0, val timers: Int = 0, val systems: Int = 0)
+data class SessionTotals(val isk: Long = 0, val units: Long = 0, val timers: Int = 0, val systems: Int = 0, val mined: Long = 0, val added: Long = 0, val value: Long = 0)
+
+/**
+ * One operation of a session: a timer's worth of work at one site (op id = timer id). The owner's app reports its estimate of
+ * [units] of gas [gas] (type id), their volume [m3] and [value] (ISK) so far; [endedAt] is set once the timer ended or stopped.
+ */
+@Serializable
+data class GasOp(
+    val id: String,
+    val by: Long = 0,
+    val timer: String? = null,
+    val gas: Long,
+    val startedAt: Long,
+    val endedAt: Long? = null,
+    val units: Long = 0,
+    val m3: Double = 0.0,
+    val value: Long = 0,
+) {
+    val live: Boolean get() = endedAt == null
+}
+
+/** ISK a pilot added to the session by hand; [amount] can be negative (a correction). */
+@Serializable
+data class SessionAdd(val id: String, val by: Long = 0, val amount: Long, val note: String = "", val at: Long = 0)
 
 /** What a pilot asks for when starting a session together. */
 @Serializable
@@ -104,6 +134,9 @@ data class WingSession(
     val startedBy: Long = 0,
     val startedAt: Long = 0,
     val contrib: Map<String, Contribution> = emptyMap(),
+    /** The operations (one per gas timer) and the ISK added by hand, both kept by the room (absent from rooms that predate them). */
+    val ops: List<GasOp> = emptyList(),
+    val adds: List<SessionAdd> = emptyList(),
     val endedAt: Long? = null,
     val endedBy: Long? = null,
     val totals: SessionTotals? = null,
@@ -111,7 +144,12 @@ data class WingSession(
     val active: Boolean get() = endedAt == null
     fun of(pilot: Long): Contribution = contrib[pilot.toString()] ?: Contribution()
     /** The room's totals once ended; while running, the same sums over what is known. */
-    val sum: SessionTotals get() = totals ?: contrib.values.let { c -> SessionTotals(c.sumOf { it.isk }, c.sumOf { it.units }, c.sumOf { it.timers }, c.flatMap { it.systems }.toSet().size) }
+    val sum: SessionTotals get() = totals ?: contrib.values.let { c ->
+        val mined = ops.sumOf { it.value }; val added = adds.sumOf { it.amount }
+        SessionTotals(c.sumOf { it.isk }, c.sumOf { it.units }, c.sumOf { it.timers }, c.flatMap { it.systems }.toSet().size, mined, added, mined + added)
+    }
+    /** The operations in the order they started, with the pilot's number ("Site 3"). */
+    val sites: List<GasOp> get() = ops.sortedBy { it.startedAt }
 }
 
 /** Whether a pilot has the app open, and how many timers they are running. */
@@ -136,6 +174,10 @@ sealed interface WingMessage {
     data class SessionStart(override val id: String, override val from: Long, override val at: Long, val plan: SessionPlan) : WingMessage
     /** Outgoing: this pilot's own totals in the running session (they replace the last report). */
     data class SessionContrib(override val id: String, override val from: Long, override val at: Long, val isk: Long? = null, val units: Long? = null) : WingMessage
+    /** Outgoing: this pilot's operation (a gas site) in the running session; the room upserts it by id and tells both phones. */
+    data class SessionOp(override val id: String, override val from: Long, override val at: Long, val op: GasOp) : WingMessage
+    /** Outgoing: ISK this pilot adds to the running session by hand (negative corrects one). The message id makes a resend harmless. */
+    data class SessionAddIsk(override val id: String, override val from: Long, override val at: Long, val amount: Long, val note: String = "") : WingMessage
     /** Outgoing: end the running session ([sessionId], when given, must be it). */
     data class SessionEnd(override val id: String, override val from: Long, override val at: Long, val sessionId: String? = null) : WingMessage
     /** Incoming: the room's session.start, session.update or session.end ([phase] start, update or end). */
@@ -175,6 +217,11 @@ object WingCodec {
             is WingMessage.Ack -> { put("ref", m.ref); put("kind", m.kind) }
             is WingMessage.SessionStart -> put("session", json.encodeToJsonElement(SessionPlan.serializer(), m.plan))
             is WingMessage.SessionContrib -> put("contrib", buildJsonObject { m.isk?.let { put("isk", it) }; m.units?.let { put("units", it) } })
+            is WingMessage.SessionOp -> put("op", buildJsonObject {
+                val o = m.op; put("id", o.id); o.timer?.let { put("timer", it) }; put("gas", o.gas); put("startedAt", o.startedAt); o.endedAt?.let { put("endedAt", it) }
+                put("units", o.units); put("m3", o.m3); put("value", o.value)
+            })
+            is WingMessage.SessionAddIsk -> { put("amount", m.amount); if (m.note.isNotBlank()) put("note", m.note.trim().take(80)) }
             is WingMessage.SessionEnd -> m.sessionId?.let { put("session", buildJsonObject { put("id", it) }) }
             is WingMessage.State, is WingMessage.Error, is WingMessage.SessionEvent -> {}
         }
@@ -184,7 +231,7 @@ object WingCodec {
         is WingMessage.TimerUpsert -> "timer.upsert"; is WingMessage.TimerRemove -> "timer.remove"; is WingMessage.PlanShare -> "plan.share"
         is WingMessage.Ping -> "ping"; is WingMessage.PresenceUpdate -> "presence"; is WingMessage.State -> "state"; is WingMessage.Error -> "error"
         is WingMessage.StatusUpdate -> "status"; is WingMessage.Ack -> "ack"; is WingMessage.SessionStart -> "session.start"
-        is WingMessage.SessionContrib -> "session.contrib"; is WingMessage.SessionEnd -> "session.end"; is WingMessage.SessionEvent -> "session.${m.phase}"
+        is WingMessage.SessionContrib -> "session.contrib"; is WingMessage.SessionOp -> "session.op"; is WingMessage.SessionAddIsk -> "session.add"; is WingMessage.SessionEnd -> "session.end"; is WingMessage.SessionEvent -> "session.${m.phase}"
     }
 
     /** Decodes one incoming frame; null for anything this app doesn't understand (an unknown type, a bad shape). */

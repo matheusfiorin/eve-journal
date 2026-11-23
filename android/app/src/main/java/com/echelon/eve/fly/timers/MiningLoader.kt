@@ -37,7 +37,7 @@ fun parseDogmaType(o: JsonObject): DogmaType? {
         val aid = (a["attribute_id"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
         aid to ((a["value"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null)
     }.toMap()
-    return DogmaType(id, name, (o["group_id"] as? JsonPrimitive)?.longOrNull ?: 0, (o["capacity"] as? JsonPrimitive)?.doubleOrNull ?: 0.0, attrs)
+    return DogmaType(id, name, (o["group_id"] as? JsonPrimitive)?.longOrNull ?: 0, (o["capacity"] as? JsonPrimitive)?.doubleOrNull ?: 0.0, attrs, (o["volume"] as? JsonPrimitive)?.doubleOrNull ?: 0.0)
 }
 
 /** Types by id: in memory, then in a file (a type's dogma changes only with a patch, so a month is plenty), then ESI. */
@@ -81,14 +81,15 @@ class DogmaCache(private val fetch: suspend (Long) -> JsonObject?, private val f
     }
 
     private fun encode(t: DogmaType) = buildJsonObject {
-        put("id", t.id); put("n", t.name); put("g", t.groupId); put("c", t.capacity)
+        put("id", t.id); put("n", t.name); put("g", t.groupId); put("c", t.capacity); put("v", t.volume)
         put("a", buildJsonObject { t.attrs.forEach { (k, v) -> put(k.toString(), v) } })
     }
 
     private fun decode(o: JsonObject): DogmaType? {
         val id = (o["id"] as? JsonPrimitive)?.longOrNull ?: return null
         val attrs = (o["a"] as? JsonObject)?.mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to ((v as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null) } }?.toMap().orEmpty()
-        return DogmaType(id, (o["n"] as? JsonPrimitive)?.contentOrNull ?: return null, (o["g"] as? JsonPrimitive)?.longOrNull ?: 0, (o["c"] as? JsonPrimitive)?.doubleOrNull ?: 0.0, attrs)
+        // A type saved before volumes were kept has no "v": it is read again from ESI rather than guessed.
+        return DogmaType(id, (o["n"] as? JsonPrimitive)?.contentOrNull ?: return null, (o["g"] as? JsonPrimitive)?.longOrNull ?: 0, (o["c"] as? JsonPrimitive)?.doubleOrNull ?: 0.0, attrs, (o["v"] as? JsonPrimitive)?.doubleOrNull ?: return null)
     }
 
     companion object { const val MONTH = 30L * 24 * 3_600_000 }
@@ -115,6 +116,9 @@ data class MiningUi(val profile: MiningProfile? = null, val note: String? = null
 
 class MiningLoader(private val c: AppContainer, private val fitter: MiningFitter) {
     constructor(c: AppContainer) : this(c, MiningFitter(DogmaCache({ id -> c.eveNames.get("universe/types/$id") }, File(c.app.filesDir, "dogma-types.json"))))
+
+    /** The types cache (dogma and unit volumes), shared so the gas estimate reads volumes without a second copy of the file. */
+    val types: DogmaCache get() = fitter.cache
 
     private val _state = MutableStateFlow<Map<Pilot, MiningUi>>(emptyMap())
     /** The last profile read per pilot. */
@@ -143,7 +147,7 @@ class MiningLoader(private val c: AppContainer, private val fitter: MiningFitter
 }
 
 /** A fit's rows and a pilot's skill levels to a [MiningUi], through the types' dogma. */
-class MiningFitter(private val cache: DogmaCache) {
+class MiningFitter(val cache: DogmaCache) {
     suspend fun profile(fit: RawFit, shipType: Long, levels: Map<Long, Int>): MiningUi {
         val mods = fitModules(fit.items)
         val types = cache.getAll(listOf(shipType) + mods.high.keys + mods.low.keys + Dogma.SKILLS)

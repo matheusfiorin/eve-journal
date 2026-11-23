@@ -73,7 +73,7 @@ class WingCompatTest {
         assertEquals(2, (OldCodec.decode(frame("presence")) as OldMessage.PresenceUpdate).list!!.size)
         assertEquals("Jita to Amarr", (OldCodec.decode(frame("plan.share")) as OldMessage.PlanShare).plan.title)
         // ...and the ones added later are skipped without a crash, as an app that never heard of them must.
-        for (later in listOf("status", "status_clear", "ack", "session.start", "session.update", "session.end")) assertNull(later, OldCodec.decode(frame(later)))
+        for (later in listOf("status", "status_clear", "ack", "session.start", "session.update", "session.update_op", "session.update_add", "session.end")) assertNull(later, OldCodec.decode(frame(later)))
         assertTrue("the room's refusal of a type is harmless", OldCodec.decode(frame("error")) is OldMessage.Error)
         // Snapshots taken during and after a session read alike.
         assertEquals(2, (OldCodec.decode(frame("state_after")) as OldMessage.State).items.size)
@@ -98,6 +98,43 @@ class WingCompatTest {
         ch.apply(WingCodec.decode(frame("session.end"))!!)
         assertNull(ch.session.value); assertEquals(1, ch.sessionHistory.value.size)
         assertEquals(50_000_000L, ch.sessionHistory.value.single().goal)
+    }
+
+    @Test fun theCurrentAppReadsOperationsAndAddsAndTheRoomsSums() {
+        val ch = channel()
+        ch.apply(WingCodec.decode(frame("state_rich"))!!)
+        ch.apply(WingCodec.decode(frame("session.update_add"))!!)
+        val s = ch.session.value!!
+        assertEquals(listOf("gas2"), s.ops.map { it.id }); assertEquals(30375L, s.ops.single().gas); assertEquals(410L, s.ops.single().units); assertEquals(41.0, s.ops.single().m3, 0.0)
+        assertEquals(FIO, s.ops.single().by); assertTrue(s.ops.single().live)
+        assertEquals(listOf(12_000_000L), s.adds.map { it.amount }); assertEquals("Sold the paste", s.adds.single().note); assertEquals(DEC, s.adds.single().by)
+        assertEquals(14_800_000L, s.of(FIO).mined); assertEquals(12_000_000L, s.of(DEC).added)
+        assertEquals(SessionTotals(1_200_000, 3_400, 0, 0, 14_800_000, 12_000_000, 26_800_000), s.sum)
+        // A snapshot after the session ended carries the room's own totals, value included.
+        val ended = WingCodec.decode(frame("session.end")) as WingMessage.SessionEvent
+        assertEquals(ended.session.totals!!.mined + ended.session.totals!!.added, ended.session.totals!!.value)
+        assertEquals(ended.session.totals, ended.session.sum)
+    }
+
+    @Test fun theCurrentAppWritesTheOpAndTheAddTheWayTheRoomReadsThem() {
+        fun frame(m: WingMessage) = Json.parseToJsonElement(WingCodec.encode(m)).jsonObject
+        val op = frame(WingMessage.SessionOp("c1", FIO, NOW, GasOp("gas2", FIO, "gas2", 30375, NOW, null, 410, 41.0, 14_800_000)))
+        assertEquals("session.op", op.getValue("type").jsonPrimitive.content)
+        assertEquals(setOf("id", "timer", "gas", "startedAt", "units", "m3", "value"), op.getValue("op").jsonObject.keys)
+        assertEquals("the room sets the owner, so the app does not send one", false, "by" in op.getValue("op").jsonObject)
+        val ended = frame(WingMessage.SessionOp("c2", FIO, NOW, GasOp("gas2", FIO, null, 30375, NOW, NOW + 1, 410, 41.0, 14_800_000)))
+        assertEquals(setOf("id", "gas", "startedAt", "endedAt", "units", "m3", "value"), ended.getValue("op").jsonObject.keys)
+        val add = frame(WingMessage.SessionAddIsk("c3", DEC, NOW, -2_000_000, "  Oops  "))
+        assertEquals("session.add", add.getValue("type").jsonPrimitive.content); assertEquals(-2_000_000L, add.getValue("amount").jsonPrimitive.content.toLong()); assertEquals("Oops", add.getValue("note").jsonPrimitive.content)
+        assertEquals(false, "note" in frame(WingMessage.SessionAddIsk("c4", DEC, NOW, 5)))
+    }
+
+    @Test fun anOlderRoomsSessionHasNoOpsAndTheSumsFallBackToZero() {
+        val ch = channel()
+        ch.apply(WingCodec.decode("""{"type":"state","from":0,"at":$NOW,"timers":[],"items":[],"presence":[],"session":{"id":"s1","activity":"mining","startedAt":$NOW,"startedBy":$DEC,"contrib":{"$DEC":{"isk":5,"units":7}}}}""")!!)
+        assertEquals(SessionTotals(5, 7), ch.session.value!!.sum); assertEquals(emptyList<GasOp>(), ch.session.value!!.ops)
+        ch.reportOp(Pilot.Decxus, GasOp("t1", 0, "t1", 30375, NOW, null, 3, 0.3, 100))
+        assertEquals(100L, ch.session.value!!.of(DEC).mined); assertEquals(100L, ch.session.value!!.sum.value); assertEquals(DEC, ch.session.value!!.ops.single().by)
     }
 
     @Test fun anOlderRoomsSnapshotHasNoStatusesOrSessionsAndThatIsFine() {
