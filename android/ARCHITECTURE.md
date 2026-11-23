@@ -192,6 +192,21 @@ The room's coordination types (worker/README.md, "Coordination types") on top of
 - `CorpSection` gives every screen the same frame: no snapshot yet (404), the backend's error, a section the source
   pilot's in-game role can't read ("needs role Director"), one never read, then the content; the snapshot's age and
   source pilot sit on top. Fuel hours and days come computed from the Worker (worker/corp.js withHealth).
+- The console (`CorpOverview.kt`, `CorpConsole.kt`): `overview` is the first hub entry; its card is the overview in
+  miniature (corporation logo, ticker from ESI `corporations/{id}`, members, a rolling treasury, health rings), the
+  full screen adds the fuel bay (`LiquidGauge`: the fill sloshes when its value changes, a notch marks the alert line,
+  reinforced rows pulse red) and "Locked sections" (`roleNotes`: which in-game role a section needs and who can fix it).
+  The thresholds (`Thresholds`, `Starbase.health()`) are shared with the alerts. Reduced motion and screenshots stand still.
+- Refuel planner (`CorpFuel.kt`, `CorpRefuel.kt`): `refuelPlan(snapshot, days)` tops each tower (blocks per hour by size,
+  block by race) and structure (online services' burn, an estimate by service name) up to 7/14/30 days from what its bay
+  holds, 5 m³ a block; `multibuy(plan)` is the "name quantity" list Copy shopping list puts on the clipboard.
+- Local alerts (`CorpAlerts.kt`, `CorpAlertWork.kt`, `CorpAlertSettings.kt`): `CorpFeature.start` enqueues unique hourly
+  `CorpAlertWorker` work (network required). It reads `/api/corp` for each connected pilot (one snapshot per corporation)
+  and `evaluateAlerts` returns what is new: a tower under 24 h, a structure under 3 days, a reinforced tower or structure.
+  Told keys (`kind:corp:item`, per reinforcement phase) are stored in SharedPreferences `corp_alerts` and forgotten once the
+  condition clears, so a refuel re-arms the item; a switched-off type or an unread section keeps its keys. Each type has a
+  switch in Settings (`CorpAlertSettingsSection`, one line in `nav/Settings.kt`). A tap opens `MainActivity.open(ctx,
+  "Corp/starbases/<id>")`: the deep link's third part is the screen's `ctx.arg`, and the screen scrolls to that item and lights it.
 - Tests parse `src/test/resources/corp-fixture.json`, an answer built with the Worker's own corp.js helpers.
 
 ## Features that start with the app
