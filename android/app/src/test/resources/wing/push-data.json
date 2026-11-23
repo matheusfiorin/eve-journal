@@ -36,6 +36,13 @@
   "activity": "mining",
   "from": "Fiofka"
  },
+ "session.add": {
+  "type": "session.add",
+  "pilot": "2124810474",
+  "kind": "session.add",
+  "amount": "12000000",
+  "from": "Fiofka"
+ },
  "ack.onit": {
   "type": "ack",
   "pilot": "2124815118",

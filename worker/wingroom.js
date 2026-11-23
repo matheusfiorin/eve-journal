@@ -6,7 +6,10 @@
 // Protocol: JSON {type, id, from, at, ...}; the server sets `from` (the authenticated pilot) and `at` (ms), whatever the client sent.
 //   client -> room: timer.upsert {timer}, timer.remove {timer:{id}}, plan.share {plan}, ping {kind, text?, system?}, presence {timers},
 //                   status {status} (live presence: system, ship, docked, activity, destination route; status.share false clears it),
-//                   ack {ref, kind} (seen / onit / cant on a ping or plan), session.start {session}, session.contrib {contrib}, session.end
+//                   ack {ref, kind} (seen / onit / cant on a ping or plan), session.start {session}, session.contrib {contrib}, session.end,
+//                   session.op {op:{id, timer?, gas, startedAt, endedAt?, units, m3, value}} (one operation of the running session, e.g. one gas
+//                   site: upserted by id, only its owner may change it, no push), session.add {amount, note?} (ISK a pilot adds by hand to the
+//                   session, negative to correct one; the wingmate gets a short push for a positive amount)
 //   room -> client: state {timers, items, presence, statuses, session, sessions} first on connect, then the others' messages, presence
 //                   on every join/leave, status {status|null}, ack {ref, kind}, session.start|session.update|session.end {session}
 //                   (these three go to the sender too: the room computes them), error {code}
@@ -24,7 +27,7 @@
 export const PROTOCOL = 2, SCHEMA_VERSION = 2;
 export const DAY = 86400000, MAX_MESSAGE = 8192, MAX_ITEMS = 50, MAX_TIMERS = 100, RATE_WINDOW = 10000, RATE_MAX = 40;
 /** A live status older than this is no longer shown; a session left running this long is ended by the next start. */
-export const STATUS_TTL = 12 * 3600000, SESSION_MAX = DAY, MAX_SESSIONS = 10, MAX_ROUTE = 60, MAX_VISITED = 200, MAX_ISK = 1e13;
+export const STATUS_TTL = 12 * 3600000, SESSION_MAX = DAY, MAX_SESSIONS = 10, MAX_ROUTE = 60, MAX_VISITED = 200, MAX_ISK = 1e13, MAX_OPS = 60, MAX_ADDS = 50;
 const PING_KINDS = ['undock', 'help', 'omw', 'docked', 'custom'], PLAN_KINDS = ['sell', 'haul', 'explore'];
 export const ACTIVITIES = ['idle', 'mining', 'exploring', 'hauling', 'ratting', 'pvp'], ACK_KINDS = ['seen', 'onit', 'cant'];
 const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
@@ -82,10 +85,29 @@ export function cleanContrib(c) {
   if (opt(c.isk) && opt(c.units)) return null;
   return {...(opt(c.isk) ? {} : {isk: Math.round(c.isk)}), ...(opt(c.units) ? {} : {units: c.units})};
 }
-/** A session's totals over both pilots: the summary both phones keep when it ends. */
+/**
+ * One operation of a session (a timer's worth of work, e.g. one gas site) as its owner reports it: the gas type, when it ran, and the
+ * app's estimate of units, volume and ISK so far. Null for a malformed one. `by` is the room's (the sender), never the client's.
+ */
+export function cleanOp(o, pilot) {
+  if (!o || typeof o !== 'object' || !str(o.id, 64) || !(Number.isSafeInteger(o.gas) && o.gas > 0 && o.gas < 1e9) || !num(o.startedAt) || !(Number.isSafeInteger(o.units) && o.units >= 0 && o.units <= 1e12)) return null;
+  if (!opt(o.timer) && !str(o.timer, 64)) return null;
+  if (!opt(o.endedAt) && !(num(o.endedAt) && o.endedAt >= o.startedAt)) return null;
+  if (!(num(o.m3) && o.m3 <= 1e12) || !(num(o.value) && o.value <= MAX_ISK)) return null;
+  return {id: o.id, by: pilot, ...(o.timer ? {timer: o.timer} : {}), gas: o.gas, startedAt: o.startedAt, ...(o.endedAt ? {endedAt: o.endedAt} : {}), units: o.units, m3: Math.round(o.m3 * 100) / 100, value: Math.round(o.value)};
+}
+/** ISK a pilot adds to a session by hand: a non-zero amount (negative corrects a mistake) and a short note. */
+export function cleanAdd(a) {
+  if (!a || typeof a !== 'object' || !Number.isFinite(a.amount) || Math.abs(a.amount) < 1 || Math.abs(a.amount) > MAX_ISK) return null;
+  if (!opt(a.note) && !(typeof a.note === 'string' && a.note.length <= 80)) return null;
+  return {amount: Math.round(a.amount), ...(a.note ? {note: a.note} : {})};
+}
+const sum = (list, f) => list.reduce((a, x) => a + f(x), 0);
+/** A session's totals over both pilots: the summary both phones keep when it ends. value = what the gas ops mined + what was added; isk is the wallet. */
 export function sessionTotals(session) {
   const parts = Object.values(session.contrib || {}), systems = new Set(parts.flatMap(p => p.systems || []));
-  return {isk: parts.reduce((a, p) => a + (p.isk || 0), 0), units: parts.reduce((a, p) => a + (p.units || 0), 0), timers: parts.reduce((a, p) => a + (p.timers || 0), 0), systems: systems.size};
+  const mined = sum(session.ops || [], o => o.value), added = sum(session.adds || [], a => a.amount);
+  return {isk: sum(parts, p => p.isk || 0), units: sum(parts, p => p.units || 0), timers: sum(parts, p => p.timers || 0), systems: systems.size, mined, added, value: mined + added};
 }
 /** When a timer stops mattering: a day after it ended (a paused one, a day after it was paused). */
 export const timerExpiry = t => Math.max(t.startedAt + t.durationMs, t.pausedAt || 0) + DAY;
@@ -191,6 +213,23 @@ export class WingRoom {
     this.saveSession(out);
     return {type: 'session.update', ...base, session: out};
   }
+  /** Rewrites the running session (ops and adds), keeping each pilot's mined and added sums in step; returns the session.update to send. */
+  revise(base, change) {
+    const s = this.activeSession();
+    if (!s) return null;
+    const next = change(s);
+    if (!next) return null;
+    const contrib = {...(s.contrib || {})};
+    for (const pilot of new Set([...Object.keys(contrib), ...(next.ops || []).map(o => String(o.by)), ...(next.adds || []).map(a => String(a.by))])) {
+      const mine = {timers: 0, isk: 0, units: 0, systems: [], ...(contrib[pilot] || {})};
+      mine.mined = sum((next.ops || []).filter(o => String(o.by) === pilot), o => o.value);
+      mine.added = sum((next.adds || []).filter(a => String(a.by) === pilot), a => a.amount);
+      contrib[pilot] = mine;
+    }
+    const out = {...next, contrib};
+    this.saveSession(out);
+    return {type: 'session.update', ...base, session: out};
+  }
   broadcastPresence() { const m = JSON.stringify({type: 'presence', from: 0, at: Date.now(), presence: this.presence()}); for (const {ws} of this.sockets()) try { ws.send(m); } catch { /* Closed. */ } }
   /** Validate a client message from `pilot` and update the room. Returns {broadcast: message|null, push?: {...}} or {error}. */
   apply(msg, pilot, name, now = Date.now()) {
@@ -266,6 +305,27 @@ export class WingRoom {
         if (!c) return {error: 'invalid contrib'};
         const out = this.contribute(pilot, base, m => ({...m, ...c}));
         return out ? {broadcast: out, echo: true} : {error: 'no session'};
+      }
+      case 'session.op': {
+        const op = cleanOp(msg.op, pilot);
+        if (!op) return {error: 'invalid op'};
+        const running = this.activeSession();
+        if (!running) return {error: 'no session'};
+        const had = (running.ops || []).find(o => o.id === op.id);
+        if (had && had.by !== pilot) return {error: 'not your op'};
+        if (!had && (running.ops || []).length >= MAX_OPS) return {error: 'too many ops'};
+        const out = this.revise(base, s => ({...s, ops: had ? s.ops.map(o => o.id === op.id ? op : o) : [...(s.ops || []), op]}));
+        return {broadcast: out, echo: true};
+      }
+      case 'session.add': {
+        const add = cleanAdd(msg);
+        if (!add) return {error: 'invalid add'};
+        const running = this.activeSession();
+        if (!running) return {error: 'no session'};
+        if ((running.adds || []).some(a => a.id === base.id)) return {};
+        if ((running.adds || []).length >= MAX_ADDS) return {error: 'too many adds'};
+        const out = this.revise(base, s => ({...s, adds: [...(s.adds || []), {id: base.id, by: pilot, amount: add.amount, note: add.note || '', at: now}]}));
+        return {broadcast: out, echo: true, ...(add.amount > 0 ? {push: {kind: 'session.add', amount: add.amount, from: name}} : {})};
       }
       case 'session.end': {
         const running = this.activeSession();
