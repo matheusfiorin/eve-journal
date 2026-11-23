@@ -38,8 +38,10 @@ android {
     }
 
     buildTypes {
-        debug { applicationIdSuffix = ".debug" }
+        // The static shortcuts (res/xml/shortcuts.xml) name the app's package, which the debug build suffixes.
+        debug { applicationIdSuffix = ".debug"; resValue("string", "shortcut_package", "com.echelon.eve.debug") }
         release {
+            resValue("string", "shortcut_package", "com.echelon.eve")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -54,6 +56,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        resValues = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true

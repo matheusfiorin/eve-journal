@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "Mining cycle" app shortcut icon: the timer icon in the accent colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="20" android:viewportHeight="20">
+    <path android:pathData="M16,11A6,6 0,1 1,4 11A6,6 0,1 1,16 11Z" android:strokeColor="#FFA58CFF" android:strokeWidth="1.6" android:strokeLineCap="round" />
+    <path android:pathData="M10,11V7.5M8,2.5h4" android:strokeColor="#FFA58CFF" android:strokeWidth="1.6" android:strokeLineCap="round" />
+</vector>

@@ -34,6 +34,8 @@ class TimerStore internal constructor(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     /** Where a pilot is now, from their synced snapshot or the wing summary: new timers start there by default. */
     private val locate: (Pilot) -> TimerSystem? = { null },
+    /** Told every timer list this store holds (boot, each change): the exact alarms follow it. */
+    private val onTimers: (Collection<WingTimer>) -> Unit = {},
 ) {
     /** What the store needs from the wing room: its timers, and the two sends. */
     interface Room {
@@ -46,7 +48,7 @@ class TimerStore internal constructor(
         override val timers = c.wingChannel.timers
         override fun upsert(timer: WingTimer) { c.wingChannel.upsertTimer(timer) }
         override fun remove(id: String, owner: Pilot) { c.wingChannel.removeTimer(id, owner) }
-    }, onActive = { TimerService.ensure(c.app) }, locate = { p -> TimerLocator(c).systemOf(p) })
+    }, onActive = { TimerService.ensure(c.app) }, locate = { p -> TimerLocator(c).systemOf(p) }, onTimers = { resyncAlarms(c.app) })
 
     /** The last live location the app read for each pilot (GET /api/live), fresher than the synced snapshot. */
     private val seen = java.util.concurrent.ConcurrentHashMap<Pilot, TimerSystem>()
@@ -65,7 +67,7 @@ class TimerStore internal constructor(
 
     init {
         // Whenever something is counting down, the service keeps it alive in the background and rings at its end.
-        scope.launch { timers.collect { all -> if (all.values.any { it.running(clock()) }) onActive() } }
+        scope.launch { timers.collect { all -> if (all.values.any { it.running(clock()) }) onActive(); runCatching { onTimers(all.values) } } }
     }
 
     fun board(now: Long = clock()): TimerBoard = TimerBoard.of(timers.value.values, now)
@@ -78,7 +80,8 @@ class TimerStore internal constructor(
         newTimer(UUID.randomUUID().toString(), kind, durationMs, owner, clock(), label, shared, system).also { put(it) }
 
     /** Starts what the creation form describes. */
-    fun start(owner: Pilot, draft: TimerDraft): WingTimer = start(owner, draft.kind, draft.durationMs, draft.label, draft.shared, draft.system)
+    fun start(owner: Pilot, draft: TimerDraft): WingTimer =
+        draft.applyTo(newTimer(UUID.randomUUID().toString(), draft.kind, draft.durationMs, owner, clock(), draft.label, draft.shared, draft.system)).also { put(it) }
 
     fun pause(id: String) = change(id) { it.paused(clock()) }
     fun resume(id: String) = change(id) { it.resumed(clock()) }
@@ -87,6 +90,20 @@ class TimerStore internal constructor(
     fun setShared(id: String, shared: Boolean) = change(id) { it.copy(shared = shared) }
     /** Moves a timer to another system (null: no system). */
     fun place(id: String, system: TimerSystem?) = change(id) { it.placed(system) }
+
+    /** Changes the warning points of a timer (ms before the end; empty: none). The wingmate's phone sees it too. */
+    fun setWarnings(id: String, points: List<Long>) = change(id) { it.withWarnings(points) }
+
+    /**
+     * A repeating timer that reached its end [endsAt] starts its next cycle at that end (so cycles don't drift). The
+     * service and the alarm receiver both call it for the same end; only the first one changes anything. Only this phone's
+     * own timers advance: the wingmate's phone advances theirs.
+     */
+    fun advance(id: String, endsAt: Long) { if (id in local.value) change(id) { t -> advanced(t, endsAt) } }
+
+    private fun advanced(t: WingTimer, endsAt: Long): WingTimer =
+        if (!t.repeats || t.pausedAt != null || t.endsAt != endsAt || !t.done(clock())) t
+        else t.copy(startedAt = if (clock() - endsAt < t.durationMs) endsAt else clock())
 
     /** Removes one of this phone's pilots' timers here and, if it was shared, in the room. */
     fun remove(id: String) {

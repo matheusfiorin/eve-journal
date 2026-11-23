@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the launcher icon: the three things worth one tap while flying. Gas and Mining act without opening the app. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="gas_timer"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_gas"
+        android:shortcutShortLabel="@string/shortcut_gas_short"
+        android:shortcutLongLabel="@string/shortcut_gas_long">
+        <intent
+            android:action="com.echelon.eve.SHORTCUT_GAS"
+            android:targetPackage="@string/shortcut_package"
+            android:targetClass="com.echelon.eve.fly.cockpit.ShortcutActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="mining_cycle"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mining"
+        android:shortcutShortLabel="@string/shortcut_mining_short"
+        android:shortcutLongLabel="@string/shortcut_mining_long">
+        <intent
+            android:action="com.echelon.eve.SHORTCUT_MINING"
+            android:targetPackage="@string/shortcut_package"
+            android:targetClass="com.echelon.eve.fly.cockpit.ShortcutActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="cockpit"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_cockpit"
+        android:shortcutShortLabel="@string/cockpit_activity_label"
+        android:shortcutLongLabel="@string/shortcut_cockpit_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="@string/shortcut_package"
+            android:targetClass="com.echelon.eve.fly.cockpit.CockpitActivity" />
+    </shortcut>
+</shortcuts>

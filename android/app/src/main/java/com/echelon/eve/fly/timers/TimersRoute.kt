@@ -17,6 +17,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.echelon.eve.fly.cockpit.CockpitControl
+import com.echelon.eve.fly.cockpit.worthShowing
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,13 +87,25 @@ internal fun rememberAppTimers(container: AppContainer, pilot: Pilot, base: Time
     val here = live ?: synced
     val mate = remember(pilot, pilots, wing) { locator.systemIdOf(pilot.wingmate) }
     LaunchedEffect(pilot, here, systems.size) { store.noteLocation(pilot, here?.let { TimerSystem(it, systems[it]?.name.orEmpty()) }) }
-    val map = remember(systems, here, mate, data) { TimerMap(systems, here, mate, regionName = { id -> data?.regionName(id) }) }
     val context = LocalContext.current
+    // What the fit and skills say about a cycle, read again when the pilots refresh.
+    val mining by produceState<MiningUi?>(null, pilot, pilots, wing) { value = runCatching { container.fly.mining.load(pilot) }.getOrNull() }
+    val feed = container.fly.cockpit
+    val offered by feed.suggestion.collectAsStateWithLifecycle()
+    val all by store.timers.collectAsStateWithLifecycle()
+    val suggestion = offered?.takeIf { it.worthShowing(all.values, pilot, System.currentTimeMillis()) }
+    // The exact-alarm switch is Android's, so look again whenever the screen comes back from Settings.
+    var exactOk by remember { mutableStateOf(ExactAlarms.allowed(context)) }
+    var exactHidden by rememberSaveable { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactOk = ExactAlarms.allowed(context); runCatching { resyncAlarms(context) } }
+    val map = remember(systems, here, mate, data, mining, suggestion, exactOk, exactHidden) {
+        TimerMap(systems, here, mate, regionName = { id -> data?.regionName(id) }, mining = mining, suggestion = suggestion, exactRationale = !exactOk && !exactHidden)
+    }
     // Android 13+: the ongoing countdown and the alert at zero need the notification permission; ask on the first start.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) Toast.makeText(context, "Timers still run, but without notifications you won’t hear when one ends.", Toast.LENGTH_LONG).show()
     }
-    val actions = remember(store, pilot, base) {
+    val actions = remember(store, pilot, base, suggestion, mining) {
         TimerActions(
             start = base.start, pause = base.pause, resume = base.resume, restart = base.restart, share = base.share, remove = base.remove, clearFinished = base.clearFinished,
             startIn = base.startIn ?: { draft ->
@@ -95,6 +113,15 @@ internal fun rememberAppTimers(container: AppContainer, pilot: Pilot, base: Time
                 store.start(pilot, draft); Unit
             },
             place = { id, system -> store.place(id, system); base.place(id, system) },
+            warn = store::setWarnings,
+            startSuggestion = {
+                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+                suggestion?.let { CockpitControl.startSuggestion(store, pilot, it, mining?.profile) }
+                feed.dismissSuggestion()
+            },
+            dismissSuggestion = feed::dismissSuggestion,
+            openExactSettings = { runCatching { context.startActivity(ExactAlarms.settingsIntent(context)) } },
+            dismissExactRationale = { exactHidden = true },
         )
     }
     return map to actions
@@ -112,9 +139,11 @@ fun TimersRoute(ctx: ScreenContext) {
         TimerActions(
             start = { kind, length, label, shared -> ctx.pilot?.let { store.start(it, kind, length, label, shared) } },
             pause = store::pause, resume = store::resume, restart = store::restart, share = store::setShared, remove = store::remove,
-            clearFinished = { ctx.pilot?.let(store::clearFinished) },
+            clearFinished = { ctx.pilot?.let(store::clearFinished) }, warn = store::setWarnings,
         )
     }
+    // A read of where you are about once a minute, so entering a wormhole offers the Sleeper timer here too.
+    com.echelon.eve.fly.cockpit.PollLive(container.fly.cockpit, ctx.pilot)
     TimersScreen(ctx.pilot, timers.values, now, actions)
 }
 

@@ -18,6 +18,16 @@ import kotlin.math.sqrt
 object TimerMeta {
     const val SYSTEM = "system"
     const val SYSTEM_NAME = "systemName"
+    /** Warning points: milliseconds before the end ("warnMs": [120000]). In meta so the wingmate's app warns too. */
+    const val WARN = "warnMs"
+    /** Where a gas timer is: "wh" (Sleepers) or "ks" (known space). */
+    const val SITE = "site"
+    /** True: a mining timer starts its next cycle by itself when one ends. */
+    const val REPEAT = "repeat"
+    /** The mining timer's cycle length and the time to fill the hold from empty, in ms, and what they were worked out from. */
+    const val CYCLE = "cycleMs"
+    const val HOLD = "holdFullMs"
+    const val FIT = "fit"
 }
 
 /** A solar system a timer is in. [name] may be blank when only the id is known. */
@@ -69,7 +79,29 @@ fun draftTitle(kind: TimerKind, label: String, system: TimerSystem?): String {
 }
 
 /** What the creation form starts: everything [TimerStore.start] needs. */
-data class TimerDraft(val kind: TimerKind, val durationMs: Long, val label: String = "", val shared: Boolean = true, val system: TimerSystem? = null)
+data class TimerDraft(
+    val kind: TimerKind, val durationMs: Long, val label: String = "", val shared: Boolean = true, val system: TimerSystem? = null,
+    /** Warning points (ms before the end); null takes the kind's default, an empty list means none. Kept in the timer's meta. */
+    val warnings: List<Long>? = null,
+    /** A mining timer starts its next cycle by itself. */
+    val repeat: Boolean = false,
+    /** From the fit: the cycle, the time to fill the hold, and a short description of what they came from. */
+    val cycleMs: Long? = null, val holdFullMs: Long? = null, val fit: String? = null,
+)
+
+/** The meta a draft adds to its timer: the site, warning points, repeat and the mining figures. */
+fun TimerDraft.applyTo(t: WingTimer): WingTimer {
+    var out = t
+    if (kind == TimerKind.Sleeper) out = out.withSite(GasSleepers.SITE_WH) else if (kind == TimerKind.Gas) out = out.withSite(GasSleepers.SITE_KS)
+    if (warnings != null) out = out.withWarnings(warnings)
+    if (repeat) out = out.withRepeat(true)
+    val extra = buildMap {
+        cycleMs?.let { put(TimerMeta.CYCLE, JsonPrimitive(it)) }
+        holdFullMs?.let { put(TimerMeta.HOLD, JsonPrimitive(it)) }
+        fit?.takeIf { it.isNotBlank() }?.let { put(TimerMeta.FIT, JsonPrimitive(it.take(120))) }
+    }
+    return if (extra.isEmpty()) out else out.copy(meta = JsonObject(out.meta + extra))
+}
 
 // ---- the gate map ----
 

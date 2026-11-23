@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Quick Settings "Gas timer" tile's icon: a gas cloud over a baseline, one colour so the shade can tint it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="20" android:viewportHeight="20">
+    <path android:pathData="M5.5,14.5A3,3 0,0 1,5.2 8.6A4,4 0,0 1,12.6 7.2A3.2,3.2 0,0 1,14.5 14.5Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M7,17.5h6" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" />
+</vector>

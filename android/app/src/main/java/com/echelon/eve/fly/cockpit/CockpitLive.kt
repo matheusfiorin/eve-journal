@@ -38,6 +38,12 @@ class CockpitLive(private val read: suspend (Pilot) -> LiveUi, private val clock
     val state: StateFlow<State> = _state.asStateFlow()
     private val _events = MutableSharedFlow<CockpitEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<CockpitEvent> = _events.asSharedFlow()
+    private val _suggestion = MutableStateFlow<Suggestion?>(null)
+    /** The timer worth offering right now (entered a wormhole, undocked in a mining hull); the pilot taps it or it goes away. */
+    val suggestion: StateFlow<Suggestion?> = _suggestion.asStateFlow()
+    /** The suggestion was taken or waved away. */
+    fun dismissSuggestion() { _suggestion.value = null }
+
     private val poke = Channel<Unit>(Channel.CONFLATED)
     private val lock = Mutex()
 
@@ -72,6 +78,7 @@ class CockpitLive(private val read: suspend (Pilot) -> LiveUi, private val clock
         _state.value = State(pilot, ui.copy(loading = false), readAt = if (failed) (if (same) s.readAt else 0) else t, triedAt = t,
             nextAt = t + LivePace.delay(got.me, failed, got.rateLimited, failures), failures = failures)
         if (!failed && prev != null) changes(prev, got.me!!).forEach { _events.tryEmit(it) }
+        if (!failed) _suggestion.value = nextSuggestion(if (same) _suggestion.value else null, prev, got.me!!, t)
         true
     }
 }

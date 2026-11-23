@@ -54,6 +54,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onPlaced
@@ -382,7 +383,14 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
     val sweep by animateFloatAsState(left, motionSpec(Springs.value()), label = "ring sweep")
     val heat by animateFloatAsState(urgency(t, now), motionSpec(Springs.value()), label = "ring heat")
     val owner = ownerColor(t)
-    val col by animateColorAsState(when { done -> c.ok; paused -> c.textFaint; else -> owner }, motionSpec(tween(300)), label = "ring colour")
+    // Towards amber as the closest warning nears and red in the last seconds; a Sleeper timer that ends is a red flare, not a green tick.
+    val warnTimer = TimerKind.of(t.kind) == TimerKind.Sleeper
+    val heatNow = ringHeat(t, now)
+    val warnMix by animateFloatAsState(heatNow.warn, motionSpec(Springs.value()), label = "ring warn")
+    val lastMix by animateFloatAsState(heatNow.last, motionSpec(Springs.value()), label = "ring last")
+    // Past the warning the ring leans towards red as well, so an amber pilot's ring still changes.
+    val tinted = lerp(lerp(owner, c.warn, warnMix), c.danger, maxOf(lastMix, warnMix * .6f))
+    val col by animateColorAsState(when { done -> if (warnTimer) c.danger else c.ok; paused -> c.textFaint; else -> tinted }, motionSpec(tween(300)), label = "ring colour")
     val select by animateFloatAsState(if (selected) 1f else 0f, motionSpec(Springs.select()), label = "ring select")
     // The burst: only when this ring sees the timer reach zero (not when it is first drawn already finished).
     val burst = remember(t.id) { Animatable(1f) }
@@ -392,8 +400,16 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
         if (seenRunning && !reduced) { burst.snapTo(0f); burst.animateTo(1f, tween(900)) }
         seenRunning = false
     }
+    // The pulse: each warning point the ring sees pass sends an amber ring outward.
+    val pulse = remember(t.id) { Animatable(1f) }
+    val passed = warningsPassed(t, now)
+    var lastPassed by remember(t.id, t.endsAt) { mutableStateOf(passed) }
+    LaunchedEffect(passed) {
+        if (passed > lastPassed && !reduced) { pulse.snapTo(0f); pulse.animateTo(1f, tween(1100)) }
+        lastPassed = passed
+    }
     val mine = t.ownedBy(pilot)
-    val text = when { done -> "Done"; paused -> clock(t.remaining(now)); else -> clock(t.remaining(now)) }
+    val text = when { done -> if (warnTimer) "Warp out" else "Done"; paused -> clock(t.remaining(now)); else -> clock(t.remaining(now)) }
     val spoken = "${t.label}, ${when { done -> "done"; paused -> "paused, ${duration(t.remaining(now) / 1000.0)} left"; else -> "${duration(t.remaining(now) / 1000.0)} left" }}" +
         if (!mine) ", ${Pilot.of(t.owner)?.displayName ?: "wingmate"}’s" else ""
     Column(
@@ -413,9 +429,11 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
                     done -> drawArc(col, 0f, 360f, false, Offset(inset, inset), arc, style = Stroke(w))
                     sweep > 0f -> drawArc(col, -90f, -360f * sweep, false, Offset(inset, inset), arc, style = Stroke(w, cap = StrokeCap.Round))
                 }
-                if (burst.value < 1f) drawBurst(centre, r, burst.value, c.ok)
+                if (burst.value < 1f) drawBurst(centre, r, burst.value, if (warnTimer) c.danger else c.ok, rays = if (warnTimer) 18 else 10, reach = if (warnTimer) 1.6f else 1f)
+                if (pulse.value < 1f) drawCircle(c.warn.copy(alpha = (1f - pulse.value) * .85f), r * (1f + .45f * pulse.value), centre, style = Stroke((1f - pulse.value) * 5.dp.toPx() + 1f))
             }
-            if (done) Icon(EchelonIcons.Check, null, Modifier.size(26.dp), tint = c.ok)
+            if (done && warnTimer) Text("WARP OUT", style = Echelon.type.chip.copy(color = c.danger), maxLines = 1)
+            else if (done) Icon(EchelonIcons.Check, null, Modifier.size(26.dp), tint = c.ok)
             else RollingText(text, Echelon.type.num.copy(fontSize = if (text.length > 5) Echelon.type.numSmall.fontSize else Echelon.type.num.fontSize, color = if (paused) c.textMuted else if (t.remaining(now) <= MIN) c.warn else c.text))
         }
         Text(t.label, style = Echelon.type.label, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
@@ -425,12 +443,12 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
 }
 
 /** The moment a timer ends: a ring flying outward and fading, with sparks. [p] runs 0 to 1. */
-private fun DrawScope.drawBurst(centre: Offset, r: Float, p: Float, color: Color) {
-    val out = r * (1f + .7f * p)
+private fun DrawScope.drawBurst(centre: Offset, r: Float, p: Float, color: Color, rays: Int = 10, reach: Float = 1f) {
+    val out = r * (1f + .7f * p * reach)
     drawCircle(color.copy(alpha = (1f - p) * .8f), out, centre, style = Stroke((1f - p) * 6.dp.toPx() + 1f))
-    for (k in 0 until 10) {
-        val a = 2 * PI * k / 10
-        val from = r * (1f + .3f * p); val to = r * (1.15f + .75f * p)
+    for (k in 0 until rays) {
+        val a = 2 * PI * k / rays
+        val from = r * (1f + .3f * p); val to = r * (1.15f + .75f * p * reach)
         drawLine(color.copy(alpha = 1f - p), Offset(centre.x + (from * sin(a)).toFloat(), centre.y - (from * cos(a)).toFloat()), Offset(centre.x + (to * sin(a)).toFloat(), centre.y - (to * cos(a)).toFloat()), 2.dp.toPx(), cap = StrokeCap.Round)
     }
 }
@@ -442,6 +460,7 @@ private fun TimerControls(t: WingTimer, pilot: Pilot, now: Long, actions: TimerA
     val c = Echelon.colors
     val mine = t.ownedBy(pilot)
     val done = t.done(now)
+    var editWarn by remember(t.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(top = Spacing.sm).clip(RoundedCornerShape(6.dp)).background(c.surface2).padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(ownerColor(t)))
@@ -454,6 +473,9 @@ private fun TimerControls(t: WingTimer, pilot: Pilot, now: Long, actions: TimerA
                 if (mine && !t.shared) " · only on your devices" else "",
             style = MaterialTheme.typography.bodySmall, color = c.textMuted,
         )
+        if (mine && editWarn && !done) WarnChips(t.durationMs, t.warnings, onChange = { actions.warn(t.id, it) })
+        else if (t.warnings.isNotEmpty() && !done) Text("Warns " + t.warnings.joinToString(" and ") { spoken(it) } + " before the end", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
+        t.fitLine()?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.textMuted) }
         if (mine) FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
             when {
                 done -> LinkButton("Again", { actions.restart(t.id) })
@@ -461,6 +483,7 @@ private fun TimerControls(t: WingTimer, pilot: Pilot, now: Long, actions: TimerA
                 else -> LinkButton("Pause", { actions.pause(t.id) })
             }
             if (!done) LinkButton("Restart", { actions.restart(t.id) })
+            if (!done) LinkButton(if (editWarn) "Done" else "Warnings", { editWarn = !editWarn }, tone = Tone.Neutral)
             LinkButton("Move", { onMove(t) }, tone = Tone.Neutral)
             LinkButton(if (t.shared) "Unshare" else "Share", { actions.share(t.id, !t.shared) }, tone = Tone.Neutral)
             LinkButton("Remove", { actions.remove(t.id) }, tone = Tone.Danger)

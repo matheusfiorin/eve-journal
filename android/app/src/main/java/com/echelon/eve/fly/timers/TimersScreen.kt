@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.model.SolarSystem
 import com.echelon.eve.core.wing.WingTimer
+import com.echelon.eve.fly.cockpit.Suggestion
 import com.echelon.eve.nav.LocalAppContainer
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.ChoiceChip
@@ -83,6 +84,14 @@ class TimerActions(
     val startIn: ((TimerDraft) -> Unit)? = null,
     /** Moves a timer to another system (null: none). */
     val place: (String, TimerSystem?) -> Unit = { _, _ -> },
+    /** Sets a timer's warning points (ms before the end; empty for none). */
+    val warn: (String, List<Long>) -> Unit = { _, _ -> },
+    /** Takes the suggestion on the card (starts the timer it names), or waves it away. */
+    val startSuggestion: () -> Unit = {},
+    val dismissSuggestion: () -> Unit = {},
+    /** Opens the system's exact-alarm switch, or hides its rationale for now. */
+    val openExactSettings: () -> Unit = {},
+    val dismissExactRationale: () -> Unit = {},
 ) {
     /** Starts [draft], in its system when the route can take one. */
     fun startDraft(draft: TimerDraft) = startIn?.invoke(draft) ?: start(draft.kind, draft.durationMs, draft.label, draft.shared)
@@ -98,6 +107,12 @@ class TimerMap(
     val here: Long? = null,
     val wingmateAt: Long? = null,
     val regionName: (Long) -> String? = { null },
+    /** What the flying pilot's fit and skills say about a mining cycle (null: not asked or not loaded). */
+    val mining: MiningUi? = null,
+    /** A timer worth offering now (entered a wormhole, undocked in a mining hull), and whether the card is showing. */
+    val suggestion: Suggestion? = null,
+    /** True while the exact-alarm permission is missing and the rationale card has not been put away. */
+    val exactRationale: Boolean = false,
 ) {
     val hereSystem: TimerSystem? get() = here?.let { TimerSystem(it, systems[it]?.name.orEmpty()) }
 
@@ -155,6 +170,8 @@ private fun TimersBoard(pilot: Pilot?, timers: Collection<WingTimer>, now: Long,
         val scope = rememberCoroutineScope()
         val requesters = remember { HashMap<String, BringIntoViewRequester>() }
 
+        SuggestionCard(map.suggestion, map.mining, actions.startSuggestion, actions.dismissSuggestion)
+        if (map.exactRationale) ExactAlarmCard(actions.openExactSettings, actions.dismissExactRationale)
         StartPanel(pilot, map, jumps, groups, open = formOpen ?: timers.isEmpty(), actions)
         if (timers.isEmpty() && map.here == null) {
             EmptyState("Timers you start show here by system, and so do the ones ${pilot.wingmate.displayName} shares.", title = "No timers yet", icon = EchelonIcons.Timer)
@@ -234,11 +251,20 @@ internal fun TimerForm(
     onStart: (TimerDraft) -> Unit,
     onClose: (() -> Unit)? = null,
     query: String? = null,
+    initialKind: TimerKind? = null,
 ) {
     val c = Echelon.colors
-    var kindKey by rememberSaveable { mutableStateOf(TimerKind.Gas.key) }
+    // Wormhole gas is what the timer is for: known space starts on the plain gas timer (no Sleepers there).
+    val start0 = initial ?: map.hereSystem
+    var kindKey by rememberSaveable { mutableStateOf(initialKind?.key ?: if (start0 != null && !GasSleepers.isJSpace(start0.id) && map.systems.containsKey(start0.id)) TimerKind.Gas.key else TimerKind.Sleeper.key) }
     val kind = TimerKind.of(kindKey)
-    var length by rememberSaveable(kindKey) { mutableLongStateOf(kind.defaultMs) }
+    val profile = map.mining?.profile
+    var length by rememberSaveable(kindKey) { mutableLongStateOf(if (kind == TimerKind.Mining && profile != null) profile.cycleMs.coerceAtLeast(10 * SEC) else kind.defaultMs) }
+    // Warnings before the end, as "120000,60000" so they survive a rotation; the kind's default until changed.
+    var warnText by rememberSaveable(kindKey) { mutableStateOf(defaultWarnings(kind).joinToString(",")) }
+    val warn = warnText.split(',').mapNotNull { it.toLongOrNull() }
+    var repeat by rememberSaveable { mutableStateOf(true) }
+    var alsoHold by rememberSaveable { mutableStateOf(false) }
     var label by rememberSaveable { mutableStateOf("") }
     var shared by rememberSaveable { mutableStateOf(true) }
     // The system follows where you are until it is picked; then it stays.
@@ -270,6 +296,9 @@ internal fun TimerForm(
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         kind.presets.forEach { p -> ChoiceChip(short(p), selected = p == length, onClick = { length = p }) }
     }
+    if (kind != TimerKind.Cyno) WarnChips(length, warn, onChange = { warnText = it.joinToString(",") })
+    if (kind == TimerKind.Mining || ((kind == TimerKind.Sleeper || kind == TimerKind.Gas) && profile?.kind == Harvest.Gas))
+        MiningPanel(map.mining, kind, repeat, { repeat = it }, alsoHold, { alsoHold = it }, onUse = { profile?.let { length = it.cycleMs.coerceAtLeast(10 * SEC) } })
     val fieldColors = OutlinedTextFieldDefaults.colors(focusedBorderColor = c.accent, unfocusedBorderColor = c.line, focusedTextColor = c.text, unfocusedTextColor = c.text)
     OutlinedTextField(
         value = label, onValueChange = { label = it.take(60) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -284,8 +313,13 @@ internal fun TimerForm(
         }
         Switch(shared, { shared = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
     }
-    PrimaryButton("Start ${duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
-        onStart(TimerDraft(kind, length, label, shared, system)); label = ""
+    PrimaryButton("Start ${if (length < 2 * MIN) clock(length) else duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
+        val fits = profile != null && (kind == TimerKind.Mining || ((kind == TimerKind.Sleeper || kind == TimerKind.Gas) && profile.kind == Harvest.Gas))
+        onStart(TimerDraft(kind, length, label, shared, system, warnings = warn, repeat = repeat && kind == TimerKind.Mining,
+            cycleMs = profile?.cycleMs.takeIf { fits }, holdFullMs = profile?.holdFullMs.takeIf { fits }, fit = profile?.let { "${it.shipName}: ${it.summary}" }.takeIf { fits }))
+        // A second timer for the hold filling up, when asked: the one-time end, no repeat.
+        if (alsoHold && fits && profile != null) onStart(TimerDraft(TimerKind.Generic, profile.holdFullMs, "Hold full", shared, system, warnings = listOf(MIN).filter { it < profile.holdFullMs }, fit = "${profile.shipName}: ${profile.summary}"))
+        label = ""
     }, modifier = Modifier.fillMaxWidth())
 }
 

@@ -12,7 +12,10 @@ import com.echelon.eve.core.wing.WingTimer
  * because EVE's numbers depend on the site, ship and skills. [presets] are the quick lengths offered for the kind.
  */
 enum class TimerKind(val key: String, val title: String, val hint: String, val defaultMs: Long, val presets: List<Long>) {
-    Gas("gas", "Gas site", "Until the site's clouds are gone or rats arrive", 20 * MIN, listOf(5 * MIN, 10 * MIN, 15 * MIN, 20 * MIN, 30 * MIN)),
+    /** Wormhole gas: the Sleepers' arrival, researched in [GasSleepers]. */
+    Sleeper("sleeper", "Sleeper gas", "Wormhole gas site: Sleepers arrive 15 to 20 minutes after the first ship lands", GasSleepers.DEFAULT_MS, GasSleepers.PRESETS),
+    /** Known-space gas has no Sleepers: this is your own idle or despawn limit. */
+    Gas("gas", "Gas site", "Known space has no Sleepers: your own idle limit or the site's despawn", 20 * MIN, listOf(5 * MIN, 10 * MIN, 15 * MIN, 20 * MIN, 30 * MIN)),
     Mining("mining", "Mining cycle", "One cycle of your mining modules", 3 * MIN, listOf(60 * SEC, 90 * SEC, 2 * MIN, 3 * MIN, 5 * MIN)),
     Despawn("despawn", "Despawn", "A wreck, container or anomaly about to go", 2 * HOUR, listOf(15 * MIN, 30 * MIN, HOUR, 2 * HOUR)),
     Cyno("cyno", "Cyno", "A cynosural field's cycle", 5 * MIN, listOf(5 * MIN, 10 * MIN)),

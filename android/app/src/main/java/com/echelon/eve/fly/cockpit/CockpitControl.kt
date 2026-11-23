@@ -7,7 +7,13 @@ import com.echelon.eve.core.api.ApiError
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.wing.WingTimer
 import com.echelon.eve.fly.fly
+import com.echelon.eve.fly.timers.GasSleepers
+import com.echelon.eve.fly.timers.MiningProfile
+import com.echelon.eve.fly.timers.SEC
+import com.echelon.eve.fly.timers.TimerDraft
 import com.echelon.eve.fly.timers.TimerKind
+import com.echelon.eve.fly.timers.TimerSystem
+import com.echelon.eve.fly.timers.defaultWarnings
 import com.echelon.eve.fly.timers.TimerStore
 import com.echelon.eve.ui.format.plural
 import kotlinx.coroutines.flow.first
@@ -29,6 +35,35 @@ object CockpitControl {
         val q = QuickTimer.of(store.timers.value.values, pilot, kind)
         return if (q.reuse != null) { store.restart(q.reuse.id); store.timers.value[q.reuse.id] }
         else store.start(pilot, kind, q.durationMs)
+    }
+
+    /**
+     * Starts what [s] suggests for [pilot], on one tap: the Sleeper gas timer in the wormhole system with its default
+     * length and warnings, or a repeating mining timer at the fit's cycle (or the kind's default without a fit).
+     */
+    fun startSuggestion(store: TimerStore, pilot: Pilot, s: Suggestion, mining: MiningProfile?): WingTimer = when (s) {
+        is Suggestion.Wormhole -> store.start(pilot, TimerDraft(TimerKind.Sleeper, GasSleepers.DEFAULT_MS, shared = true, system = TimerSystem(s.systemId, s.name.orEmpty()), warnings = listOf(GasSleepers.WARN_MS)))
+        is Suggestion.Mining -> store.start(pilot, TimerDraft(TimerKind.Mining, mining?.cycleMs?.coerceAtLeast(10 * SEC) ?: TimerKind.Mining.defaultMs, repeat = true,
+            cycleMs = mining?.cycleMs, holdFullMs = mining?.holdFullMs, fit = mining?.let { "${it.shipName}: ${it.summary}" }))
+    }
+
+    /** The kinds the gas tile and shortcut manage. */
+    private val GAS_KEYS = setOf(TimerKind.Sleeper.key, TimerKind.Gas.key)
+
+    /** The pilot's gas timer that is counting (or paused), newest first; null when there is none. */
+    fun gasTimer(timers: Collection<WingTimer>, pilot: Pilot, now: Long): WingTimer? =
+        timers.filter { it.owner == pilot.id && it.kind in GAS_KEYS && (it.pausedAt != null || it.endsAt > now) }.maxByOrNull { it.startedAt }
+
+    /** Wormhole gas (Sleepers) in J-space or when where the pilot is isn't known; the known-space gas timer elsewhere. */
+    fun gasKindFor(systemId: Long?): TimerKind = if (systemId == null || GasSleepers.isJSpace(systemId)) TimerKind.Sleeper else TimerKind.Gas
+
+    /** The gas tile or shortcut: stops the gas timer that is running, else starts one for where [pilot] is. Returns what to say. */
+    fun toggleGas(store: TimerStore, pilot: Pilot, now: Long = System.currentTimeMillis()): String {
+        gasTimer(store.timers.value.values, pilot, now)?.let { store.remove(it.id); return "${it.label} stopped" }
+        val here = store.here(pilot)
+        val kind = gasKindFor(here?.id)
+        val t = store.start(pilot, TimerDraft(kind, kind.defaultMs, system = here, warnings = defaultWarnings(kind)))
+        return "${t.label} started"
     }
 
     /** The flying pilot, waiting for the saved choice when the process has just started (a widget tap on a cold app). */

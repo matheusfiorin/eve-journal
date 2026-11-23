@@ -30,6 +30,7 @@ import com.echelon.eve.core.wing.WingMessage
 import com.echelon.eve.core.wing.WingPing
 import com.echelon.eve.fly.fly
 import com.echelon.eve.fly.timers.TimerBoard
+import com.echelon.eve.fly.timers.warningsPassed
 import com.echelon.eve.nav.Destination
 import com.echelon.eve.nav.LocalAppContainer
 import com.echelon.eve.nav.ScreenContext
@@ -80,6 +81,10 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
     val pings by c.wingChannel.pings.collectAsStateWithLifecycle()
     val plans by c.wingChannel.plans.collectAsStateWithLifecycle()
     val market by c.market.state.collectAsStateWithLifecycle()
+    val offered by live.suggestion.collectAsStateWithLifecycle()
+    val minings by c.fly.mining.state.collectAsStateWithLifecycle()
+    LaunchedEffect(pilot, state.readAt) { if (pilot != null) runCatching { c.fly.mining.load(pilot) } }
+    val mining = pilot?.let { minings[it] }
     val prefs = remember { cockpitPrefs(context) }
     var sound by remember { mutableStateOf(prefs.getBoolean("sound", true)) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -119,6 +124,12 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
         if (was != null && timers[was]?.done(System.currentTimeMillis()) == true) haptics.heavy()
     }
 
+    // A warning point reached on screen: two quick taps (the end is the firm one above); a new suggestion: a confirm.
+    val passed = board.next?.let { warningsPassed(it, System.currentTimeMillis()) } ?: 0
+    var lastPassed by remember { mutableStateOf(passed) }
+    LaunchedEffect(board.next?.id, passed) { if (passed > lastPassed) { haptics.tick(); kotlinx.coroutines.delay(140); haptics.tick() }; lastPassed = passed }
+    LaunchedEffect(offered) { if (offered != null) haptics.confirm() }
+
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val mate = pilot?.wingmate
     val systemName = { id: Long -> market.data?.systems?.get(id)?.name }
@@ -139,6 +150,8 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
         plan = plans.firstOrNull { it.value.route.size > 1 && now - it.at < PLAN_FRESH }?.let { PlanLine(it.value.title, it.value.route) },
         status = status,
         sound = sound,
+        suggestion = pilot?.let { p -> offered?.takeIf { it.worthShowing(timers.values, p, now) } },
+        mining = mining,
     )
     val actions = CockpitActions(
         refresh = { live.refresh(); haptics.select() },
@@ -166,6 +179,18 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
         openTimers = { ctx.open(Destination.Fly, "timers", null) },
         openWing = { ctx.open(Destination.Fly, "wing", null) },
         sound = { sound = it; prefs.edit().putBoolean("sound", it).apply(); haptics.select() },
+        startSuggestion = {
+            val p = pilot; val s = ui.suggestion
+            if (p != null && s != null) {
+                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+                val t = CockpitControl.startSuggestion(c.fly.timers, p, s, mining?.profile)
+                haptics.confirm()
+                status = "${t.label} started."
+                CockpitWidget.refresh(context)
+            }
+            live.dismissSuggestion()
+        },
+        dismissSuggestion = { live.dismissSuggestion(); haptics.tick() },
     )
     CockpitScreen(ui, now, actions)
 }
