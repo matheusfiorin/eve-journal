@@ -51,6 +51,8 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # The run number keeps every build newer than the last, so a push build and a tagged release install over each other.
+          VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew --no-configuration-cache :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:verifyPaparazziDebug
       - name: Keep the screenshot diffs when a test fails
         if: failure()
