@@ -86,6 +86,8 @@ class TimerStore internal constructor(
     fun pause(id: String) = change(id) { it.paused(clock()) }
     fun resume(id: String) = change(id) { it.resumed(clock()) }
     fun restart(id: String) = change(id) { it.restarted(clock()) }
+    /** Adds [ms] to the time left (PiP's +1 min). */
+    fun extend(id: String, ms: Long) = change(id) { it.extended(ms, clock()) }
     /** Shares a private timer with the wing, or takes a shared one back (the room tells the wingmate it is gone). */
     fun setShared(id: String, shared: Boolean) = change(id) { it.copy(shared = shared) }
     /** Moves a timer to another system (null: no system). */

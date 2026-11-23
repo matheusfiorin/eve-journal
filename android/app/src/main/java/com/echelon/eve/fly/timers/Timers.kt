@@ -44,6 +44,9 @@ fun WingTimer.paused(now: Long): WingTimer = if (pausedAt != null || done(now)) 
 /** Carries on from where it was paused: the start moves forward by the time spent paused. */
 fun WingTimer.resumed(now: Long): WingTimer = pausedAt?.let { copy(startedAt = startedAt + (now - it).coerceAtLeast(0), pausedAt = null) } ?: this
 
+/** Adds [ms] to a running or paused timer (the picture-in-picture +1 min), up to [MAX_TIMER]; a finished one is left alone. */
+fun WingTimer.extended(ms: Long, now: Long): WingTimer = if (done(now) || ms <= 0) this else copy(durationMs = (durationMs + ms).coerceAtMost(MAX_TIMER))
+
 /** Starts again from the full length (the next mining cycle, a fresh despawn). */
 fun WingTimer.restarted(now: Long): WingTimer = copy(startedAt = now, pausedAt = null)
 

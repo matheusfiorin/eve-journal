@@ -274,7 +274,7 @@ private fun NextTimer(timers: List<WingTimer>, pilot: Pilot?, now: Long, onOpen:
     val c = Echelon.colors
     val board = TimerBoard.of(timers, now)
     val next = board.next
-    EchelonCard(Modifier.fillMaxWidth(), onClick = onOpen) {
+    EchelonCard(Modifier.fillMaxWidth().pipAnchor(), onClick = onOpen) {
         // Short screens drop the header: the label and the countdown say enough.
         if (!compact || next == null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             Icon(EchelonIcons.Timer, null, Modifier.size(20.dp), tint = c.accent)

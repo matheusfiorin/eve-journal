@@ -60,6 +60,14 @@ class TimerService : Service() {
         // Alerts already past when the service starts were seen in the app (or rung by their alarm); only new ones ring.
         val start = System.currentTimeMillis()
         store.timers.value.values.forEach { t -> allAlerts(t).filter { it.at <= start }.forEach { rung += it.key } }
+        running = true
+    }
+
+    /** The watch starts with the first command, after any action it carries (a PiP Resume) has been applied. */
+    private fun startWatch() {
+        if (watch != null) return
+        val container = (application as EchelonApp).container
+        val store = container.fly.timers
         watch = scope.launch {
             store.timers.collectLatest { all ->
                 while (true) {
@@ -87,10 +95,29 @@ class TimerService : Service() {
     /** The gate map's systems, for names in the notifications (empty before the market has loaded; stored names then serve). */
     private fun systems(container: com.echelon.eve.AppContainer) = container.market.state.value.data?.systems.orEmpty()
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        intent?.let(::apply)
+        startWatch()
+        return START_STICKY
+    }
+
+    /** A picture-in-picture button: pause, resume or +1 min on one of the flying pilot's own timers. */
+    private fun apply(intent: Intent) {
+        val id = intent.getStringExtra(EXTRA_TIMER) ?: return
+        val container = (application as EchelonApp).container
+        val store = container.fly.timers
+        val t = store.timers.value[id] ?: return
+        if (!t.ownedBy(container.selectedPilot.value)) return
+        when (intent.action) {
+            ACTION_PAUSE -> store.pause(id)
+            ACTION_RESUME -> store.resume(id)
+            ACTION_EXTEND -> store.extend(id, MIN)
+        }
+    }
 
     private fun stop() {
         running = false
+        watch = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -108,6 +135,14 @@ class TimerService : Service() {
         /** An end missed by more than this (the phone was off) is not announced late. */
         private const val RING_WINDOW = 10 * 60_000L
         @Volatile private var running = false
+        const val ACTION_PAUSE = "com.echelon.eve.timers.PAUSE"
+        const val ACTION_RESUME = "com.echelon.eve.timers.RESUME"
+        const val ACTION_EXTEND = "com.echelon.eve.timers.EXTEND"
+        const val EXTRA_TIMER = "timer"
+
+        /** The service intent of a timer action (the PiP buttons send these through PendingIntent.getForegroundService). */
+        fun actionIntent(context: Context, action: String, timerId: String): Intent =
+            Intent(context, TimerService::class.java).setAction(action).putExtra(EXTRA_TIMER, timerId)
 
         /** Starts the service if it isn't running. Android refuses a start from the background; the app tries again on its next change. */
         fun ensure(context: Context) {

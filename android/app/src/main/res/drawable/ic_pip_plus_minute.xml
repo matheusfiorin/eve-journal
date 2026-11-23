@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picture-in-picture "+1 min": the timer's dial with a plus. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="20" android:viewportHeight="20">
+    <path android:pathData="M15.5,9.5A6,6 0,1 1,10.5 4.03" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" />
+    <path android:pathData="M10,10.5V7.5M15.5,2.5v5M13,5h5" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" />
+</vector>
