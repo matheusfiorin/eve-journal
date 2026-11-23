@@ -91,8 +91,22 @@ test('every workflow action is pinned to a commit SHA, and the secret-holding jo
   assert.match(check,/if: github\.ref == 'refs\/heads\/main'\n\s+environment: github-pages/,'the Cloudflare check uses the secrets environment only on main');
   assert.match(market,/if: github\.ref == 'refs\/heads\/main'\n\s+environment: github-pages/);
   assert.equal((pages.match(/environment: github-pages|name: github-pages/g)||[]).length,2);
-  assert.equal((pages.match(/github\.ref == 'refs\/heads\/main'/g)||[]).length,2,'both deploy jobs');
+  assert.equal((pages.match(/github\.ref == 'refs\/heads\/main'/g)||[]).length,3,'backend, Pages preparation and deploy jobs');
   assert.match(market,/PIPELINE_SECRET: \$\{\{ secrets\.PIPELINE_SECRET \}\}/);assert.match(pages,/PIPELINE_SECRET: \$\{\{ secrets\.PIPELINE_SECRET \}\}/);
+});
+test('Pages deploy waits for the uploaded artifact and reuses its attempt-specific name',async()=>{
+  const pages=await read('.github/workflows/pages.yml');
+  const prepare=pages.match(/^  prepare-pages:\n[\s\S]*?(?=^  deploy:)/m)?.[0];
+  const deploy=pages.match(/^  deploy:\n[\s\S]*?(?=^  verify-published:)/m)?.[0];
+  assert.ok(prepare);assert.ok(deploy);
+  const name='pages-${{ github.run_id }}-${{ github.run_attempt }}';
+  assert.ok(prepare.includes(`artifact-name: ${name}`));
+  assert.ok(prepare.includes(`name: ${name}`));
+  assert.match(prepare,/actions\/upload-pages-artifact@/);
+  assert.doesNotMatch(prepare,/actions\/deploy-pages@/);
+  assert.match(deploy,/needs: prepare-pages/);
+  assert.match(deploy,/artifact_name: \$\{\{ needs\.prepare-pages\.outputs\.artifact-name \}\}/);
+  assert.match(deploy,/actions\/deploy-pages@/);
 });
 test('the health workflow runs hourly, writes one "health" issue with an issues-only token, and holds no secrets',async()=>{
   const text=await read('.github/workflows/health.yml');

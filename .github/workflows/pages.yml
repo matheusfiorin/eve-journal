@@ -64,17 +64,15 @@ jobs:
           FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
         run: node scripts/deploy-backend.mjs
-  deploy:
+  prepare-pages:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [verify, deploy-backend]
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      pages: read
     runs-on: ubuntu-latest
+    outputs:
+      artifact-name: pages-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Configure Pages (enable Settings → Pages → GitHub Actions first)
@@ -91,9 +89,23 @@ jobs:
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: _site
+          name: pages-${{ github.run_id }}-${{ github.run_attempt }}
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: prepare-pages
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: ${{ needs.prepare-pages.outputs.artifact-name }}
   verify-published:
     name: Test published site and live EVE APIs
     needs: [deploy, deploy-backend]
