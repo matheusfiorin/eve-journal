@@ -135,6 +135,16 @@ object Durations {
     const val stagger = 40
     /** A celebration burst (timer done, goal reached), first spark to last fade. */
     const val celebrate = 1100
+    /** The warp between destinations: streaks out, the new screen settling. */
+    const val warp = 460
+    /** One scan sweep revealing results (Explore, the Jump radar). */
+    const val scan = 1100
+    /** A wingmate's comet trail after their status changes. */
+    const val trail = 720
+    /** A ping or acknowledgement's ripple. */
+    const val ripple = 900
+    /** The skeleton developing into content. */
+    const val develop = 420
 }
 
 object Easings {

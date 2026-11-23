@@ -1,5 +1,6 @@
 package com.echelon.eve.plan.mine
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SecurityBadge
 import com.echelon.eve.ui.components.SkeletonRows
+import com.echelon.eve.ui.components.Developed
+import com.echelon.eve.ui.components.rememberWasLoading
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
@@ -108,11 +111,12 @@ fun MineScreen(ui: MineUi, actions: MineActions, modifier: Modifier = Modifier, 
         }
     }
     val r = ui.result
+    val developing = rememberWasLoading(r == null)
     when {
         ui.problem != null -> ErrorState("Couldn’t rank belts", ui.problem, action = { SecondaryButton("Try again", actions.retry) })
         r == null -> SkeletonRows(rows = 5, label = "Pricing ore…")
         !r.ready || r.me == null -> EmptyState("The hourly pipeline prices ore on its next run.", title = "No ore prices yet", icon = EchelonIcons.Search)
-        else -> Results(ui, r, r.me, actions)
+        else -> Developed(developing) { Results(ui, r, r.me, actions) }
     }
 }
 
@@ -187,7 +191,7 @@ private fun Results(ui: MineUi, r: MineResult, me: MinerPlan, actions: MineActio
         r.ores.forEachIndexed { i, o ->
             if (i > 0) Hairline()
             ListRow(o.name, supporting = "Raw ${format(o.raw, Kind.Isk)} · compressed ${format(o.compressed, Kind.Isk)} · minerals ${format(o.refined, Kind.Isk)} per unit",
-                trailing = { Column(horizontalAlignment = Alignment.End) { Text(format(o.perM3, Kind.Isk), style = Echelon.type.num, color = c.text); Text(o.how, style = Echelon.type.label, color = c.textMuted) } })
+                trailing = { Column(horizontalAlignment = Alignment.End) { RollingNumber(o.perM3, kind = Kind.Isk, style = Echelon.type.num, color = c.text); Text(o.how, style = Echelon.type.label, color = c.textMuted) } })
         }
     }
     SectionHeader("Last 30 days")

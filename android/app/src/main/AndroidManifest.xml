@@ -71,9 +71,17 @@
         </receiver>
         <!-- The cockpit on its own (fly.cockpit.CockpitActivity): opened by the home-screen widget, and by a long press on
              the Quick Settings tile (QS_TILE_PREFERENCES). Not exported beyond that intent. -->
+        <!-- Picture-in-picture: its own task (so PiP never takes the main app with it), and PiP's resizes handled in
+             place rather than by recreating the activity. -->
         <activity
             android:name=".fly.cockpit.CockpitActivity"
             android:exported="true"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.echelon.eve.cockpit"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:label="@string/cockpit_activity_label"
             android:theme="@style/Theme.Echelon"
             android:windowSoftInputMode="adjustResize">

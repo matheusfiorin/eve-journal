@@ -50,6 +50,10 @@ import androidx.compose.ui.unit.dp
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.motion.StaggerRoot
 import com.echelon.eve.ui.motion.entrance
+import com.echelon.eve.ui.motion.develop
+import com.echelon.eve.ui.motion.Springs
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.ColumnScope
 import com.echelon.eve.ui.theme.Durations
 import com.echelon.eve.ui.theme.Easings
 import com.echelon.eve.ui.theme.Echelon
@@ -96,19 +100,36 @@ fun SkeletonRows(modifier: Modifier = Modifier, rows: Int = 4, height: Dp = 40.d
 }
 
 /**
- * Skeleton → content: shows [skeleton] while [loading], then cross-fades to [content], whose cards and headers then
- * play their staggered entrance (a fresh [StaggerRoot]). Reduced motion swaps without fading; screenshots show the
- * state they are given.
+ * Skeleton → content, as a morph rather than a pop: while [loading] it shows [skeleton]; then the box's height springs
+ * from the skeleton's to the content's while [content] develops in top to bottom behind a scanline (Modifier.develop),
+ * and its cards and headers play their staggered entrance (a fresh [StaggerRoot]). Reduced motion fades, without the
+ * scanline or the height spring; screenshots show the state they are given.
  */
 @Composable
 fun LoadingCrossfade(loading: Boolean, modifier: Modifier = Modifier, skeleton: @Composable () -> Unit = { SkeletonRows() }, content: @Composable () -> Unit) {
+    val developing = rememberWasLoading(loading)
     val reduced = Echelon.reduceMotion
-    AnimatedContent(loading, modifier, transitionSpec = {
-        if (reduced) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-        else fadeIn(tween(Durations.medium, delayMillis = 80, easing = Easings.out)) togetherWith fadeOut(tween(Durations.short))
-    }, label = "loading") { isLoading ->
-        if (isLoading) skeleton() else StaggerRoot("loaded") { content() }
+    Box(modifier.then(if (reduced) Modifier else Modifier.animateContentSize(Springs.nav()))) {
+        if (loading) skeleton()
+        else Box(if (developing) Modifier.develop() else Modifier) { StaggerRoot("loaded") { content() } }
     }
+}
+
+/** True once [loading] has been true while composed: the content that follows should develop in, not just appear. */
+@Composable
+fun rememberWasLoading(loading: Boolean): Boolean {
+    val was = remember { booleanArrayOf(false) }
+    if (loading) was[0] = true
+    return was[0]
+}
+
+/**
+ * The results that replace a skeleton on a page (Explore, Trade, the corp screens): a column spaced like the page that
+ * develops in when [developing] (see [rememberWasLoading]) and simply appears otherwise.
+ */
+@Composable
+fun Developed(developing: Boolean, modifier: Modifier = Modifier, spacing: Dp = Spacing.lg, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.fillMaxWidth().then(if (developing) Modifier.develop() else Modifier), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
 }
 
 /**

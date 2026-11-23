@@ -36,6 +36,7 @@ import com.echelon.eve.nav.LocalAppContainer
 import com.echelon.eve.nav.ScreenContext
 import com.echelon.eve.ui.components.rememberNow
 import com.echelon.eve.ui.motion.rememberHaptics
+import com.echelon.eve.ui.motion.HapticMoment
 import kotlinx.coroutines.launch
 
 /** Keeps the display on while composed: the phone lies next to the keyboard for the whole session. */
@@ -112,22 +113,24 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
     // A call from the wingmate while the cockpit is open.
     LaunchedEffect(pilot) {
         c.wingChannel.incoming.collect { m ->
-            if (m is WingMessage.Ping && m.pilot != pilot) { haptics.heavy(); if (soundOn) tones?.startTone(ToneGenerator.TONE_PROP_ACK, 200) }
+            if (m is WingMessage.Ping && m.pilot != pilot) { if (soundOn) tones?.startTone(ToneGenerator.TONE_PROP_ACK, 200); haptics.play(HapticMoment.Ping) }
+            if (m is WingMessage.Ack && m.pilot != pilot && m.kind != com.echelon.eve.core.wing.WingAck.SEEN) haptics.play(HapticMoment.Ack)
         }
     }
-    // A timer reaching zero on screen: a firm tap (the timer service rings in the background).
+    // A timer reaching zero on screen: a firm tap, or the Warp out pattern for the Sleepers (the service rings in the background).
     val board = TimerBoard.of(timers.values, now)
     var lastNext by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(board.next?.id) {
         val was = lastNext
         lastNext = board.next?.id
-        if (was != null && timers[was]?.done(System.currentTimeMillis()) == true) haptics.heavy()
+        val ended = was?.let { timers[it] }?.takeIf { it.done(System.currentTimeMillis()) }
+        if (ended != null) { if (com.echelon.eve.fly.timers.TimerKind.of(ended.kind) == com.echelon.eve.fly.timers.TimerKind.Sleeper) haptics.play(HapticMoment.WarpOut) else haptics.heavy() }
     }
 
     // A warning point reached on screen: two quick taps (the end is the firm one above); a new suggestion: a confirm.
     val passed = board.next?.let { warningsPassed(it, System.currentTimeMillis()) } ?: 0
     var lastPassed by remember { mutableStateOf(passed) }
-    LaunchedEffect(board.next?.id, passed) { if (passed > lastPassed) { haptics.tick(); kotlinx.coroutines.delay(140); haptics.tick() }; lastPassed = passed }
+    LaunchedEffect(board.next?.id, passed) { if (passed > lastPassed) haptics.play(HapticMoment.Warning); lastPassed = passed }
     LaunchedEffect(offered) { if (offered != null) haptics.confirm() }
 
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -159,7 +162,7 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
             val p = pilot ?: return@CockpitActions
             if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
             val t = CockpitControl.cycle(c.fly.timers, p, q.kind)
-            haptics.confirm()
+            scope.launch { haptics.play(HapticMoment.Start) }
             status = t?.let { "${it.label} ${if (q.reuse != null) "restarted" else "started"}." }
             CockpitWidget.refresh(context)
         },
@@ -184,7 +187,7 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
             if (p != null && s != null) {
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
                 val t = CockpitControl.startSuggestion(c.fly.timers, p, s, mining?.profile)
-                haptics.confirm()
+                scope.launch { haptics.play(HapticMoment.Start) }
                 status = "${t.label} started."
                 CockpitWidget.refresh(context)
             }

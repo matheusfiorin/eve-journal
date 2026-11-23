@@ -18,6 +18,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import com.echelon.eve.ui.motion.HapticMoment
+import com.echelon.eve.ui.motion.rememberHaptics
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -105,18 +109,21 @@ internal fun rememberAppTimers(container: AppContainer, pilot: Pilot, base: Time
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) Toast.makeText(context, "Timers still run, but without notifications you won’t hear when one ends.", Toast.LENGTH_LONG).show()
     }
+    // Starting a timer has its own feel (HapticMoment.Start), the same as the cockpit's quick timers.
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
     val actions = remember(store, pilot, base, suggestion, mining) {
         TimerActions(
             start = base.start, pause = base.pause, resume = base.resume, restart = base.restart, share = base.share, remove = base.remove, clearFinished = base.clearFinished,
             startIn = base.startIn ?: { draft ->
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
-                store.start(pilot, draft); Unit
+                store.start(pilot, draft); scope.launch { haptics.play(HapticMoment.Start) }; Unit
             },
             place = { id, system -> store.place(id, system); base.place(id, system) },
             warn = store::setWarnings,
             startSuggestion = {
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
-                suggestion?.let { CockpitControl.startSuggestion(store, pilot, it, mining?.profile) }
+                suggestion?.let { CockpitControl.startSuggestion(store, pilot, it, mining?.profile); scope.launch { haptics.play(HapticMoment.Start) } }
                 feed.dismissSuggestion()
             },
             dismissSuggestion = feed::dismissSuggestion,

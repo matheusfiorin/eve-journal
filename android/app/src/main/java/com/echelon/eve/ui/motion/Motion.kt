@@ -66,9 +66,17 @@ class NavMotion(private val reduced: Boolean) {
     val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
         if (reduced) fadeOut(fade(Durations.quick)) else slideOutHorizontally(slide) { it / 5 } + fadeOut(fade(Durations.quick)) + scaleOut(targetScale = .96f)
     }
-    /** Switching bottom-bar destinations: a fade through with a slight zoom, no direction (the tabs are peers). */
+    /**
+     * Switching destinations is a warp (Warp.kt): the old one rushes past the camera (grows to 108 % and fades), the
+     * new one decelerates out of warp (from 92 % on a soft spring) while Modifier.warp draws the streaks. No direction:
+     * the tabs are peers. Reduced motion: a short cross-fade.
+     */
     val tabEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        if (reduced) fadeIn(fade(Durations.quick)) else fadeIn(tween(Durations.medium, delayMillis = 60, easing = Easings.emphasized)) + scaleIn(spring(stiffness = 600f), initialScale = .97f)
+        if (reduced) fadeIn(fade(Durations.quick)) else fadeIn(tween(Durations.medium, delayMillis = 90, easing = Easings.emphasized)) + scaleIn(spring(dampingRatio = .9f, stiffness = 420f), initialScale = .92f)
     }
-    val tabExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = { fadeOut(fade(Durations.quick)) }
+    /** A hub giving way to one of its own screens: it only fades, under the card's container transform. */
+    val underCard: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = { fadeOut(fade(Durations.quick)) }
+    val tabExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+        if (reduced) fadeOut(fade(Durations.quick)) else fadeOut(tween(Durations.short, easing = Easings.into)) + scaleOut(tween(Durations.short, easing = Easings.into), targetScale = 1.08f)
+    }
 }

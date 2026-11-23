@@ -1,5 +1,6 @@
 package com.echelon.eve.plan.trade
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import com.echelon.eve.ui.components.PrimaryPanel
 import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SkeletonRows
+import com.echelon.eve.ui.components.Developed
+import com.echelon.eve.ui.components.rememberWasLoading
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
@@ -121,11 +124,12 @@ fun TradeScreen(ui: TradeUi, actions: TradeActions, modifier: Modifier = Modifie
         }
     }
     val r = ui.result
+    val developing = rememberWasLoading(r == null)
     when {
         ui.problem != null -> ErrorState("Couldn’t scan the market", ui.problem, action = { SecondaryButton("Try again", actions.retry) })
         r == null -> SkeletonRows(rows = 5, label = "Scanning stations…")
         !r.ready -> EmptyState("The hourly pipeline stores its first scan on its next run.", title = "No market data yet", icon = EchelonIcons.Swap)
-        else -> Results(ui, r, actions)
+        else -> Developed(developing) { Results(ui, r, actions) }
     }
 }
 
@@ -262,7 +266,7 @@ private fun MyOrders(pilotName: String, o: OrdersState, name: (Long, String?) ->
                     else -> "Not checked: not in the market scan"
                 },
                 trailing = { Column(horizontalAlignment = Alignment.End) {
-                    Text(format(r.price, Kind.Isk), style = Echelon.type.num, color = if (r.state == "outbid") c.danger else c.text)
+                    RollingNumber(r.price, kind = Kind.Isk, style = Echelon.type.num, color = if (r.state == "outbid") c.danger else c.text)
                     Text("${"%,d".format(r.remain)} of ${"%,d".format(r.total)} left", style = Echelon.type.label, color = c.textMuted)
                 } })
         }

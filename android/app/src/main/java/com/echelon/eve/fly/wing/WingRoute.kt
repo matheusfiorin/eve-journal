@@ -27,6 +27,7 @@ import com.echelon.eve.ui.components.rememberNow
 import com.echelon.eve.ui.format.parseIsk
 import com.echelon.eve.ui.format.plural
 import com.echelon.eve.ui.motion.rememberHaptics
+import com.echelon.eve.ui.motion.HapticMoment
 import com.echelon.eve.wing.wingServices
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -79,7 +80,9 @@ fun WingRoute(ctx: ScreenContext) {
     // A call from the wingmate while this screen is open: a tap you can feel. Arriving in your system: two.
     LaunchedEffect(Unit) {
         ch.incoming.collect { m ->
-            if (m is WingMessage.Ping && m.pilot != pilot) haptics.heavy()
+            if (m is WingMessage.Ping && m.pilot != pilot) haptics.play(HapticMoment.Ping)
+            // Their answer to one of your calls (not the automatic "seen"): the Ack moment, with the ripple on screen.
+            if (m is WingMessage.Ack && m.pilot != pilot && m.kind != WingAck.SEEN) haptics.play(HapticMoment.Ack)
             if (m is WingMessage.StatusUpdate && m.pilot != pilot && m.status?.system != null && m.status.system == mine) haptics.confirm()
         }
     }
@@ -129,7 +132,7 @@ fun WingRoute(ctx: ScreenContext) {
             activity = { haptics.select(); settings.setActivity(it) },
             stopRoute = { services.stopFollowing() },
             follow = { route -> autopilot(route, "Following ${pilot?.wingmate?.displayName ?: "your wingmate"}"); services.follow(route) },
-            ack = { item, kind -> if (pilot != null) { haptics.confirm(); ch.ack(pilot, item.id, kind) } },
+            ack = { item, kind -> if (pilot != null) { scope.launch { haptics.play(HapticMoment.Ack) }; ch.ack(pilot, item.id, kind) } },
             goal = { goal = it },
             startSession = {
                 if (pilot != null) {

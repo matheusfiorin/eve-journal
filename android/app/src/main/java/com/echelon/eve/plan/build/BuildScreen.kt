@@ -39,6 +39,8 @@ import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SecurityBadge
 import com.echelon.eve.ui.components.SkeletonRows
+import com.echelon.eve.ui.components.Developed
+import com.echelon.eve.ui.components.rememberWasLoading
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
@@ -141,11 +143,12 @@ fun BuildScreen(ui: BuildUi, actions: BuildActions, modifier: Modifier = Modifie
         }
     }
     val r = ui.result
+    val developing = rememberWasLoading(r == null)
     when {
         ui.problem != null -> ErrorState("Couldn’t price blueprints", ui.problem, action = { SecondaryButton("Try again", actions.retry) })
         r == null -> SkeletonRows(rows = 5, label = "Pricing starter blueprints…")
         !r.ready -> EmptyState("The hourly pipeline prices starter blueprints on its next run.", title = "No blueprint prices yet", icon = EchelonIcons.Plan)
-        else -> Results(ui, r, actions)
+        else -> Developed(developing) { Results(ui, r, actions) }
     }
 }
 

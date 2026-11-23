@@ -20,6 +20,10 @@ import com.echelon.eve.plan.Sys
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.ChoiceChip
 import com.echelon.eve.ui.components.EchelonCard
+import com.echelon.eve.ui.motion.ScanSweep
+import com.echelon.eve.ui.motion.rememberScanSweep
+import com.echelon.eve.ui.motion.scanReveal
+import com.echelon.eve.ui.motion.scanSweep
 import com.echelon.eve.ui.components.EmptyState
 import com.echelon.eve.ui.components.ErrorState
 import com.echelon.eve.ui.components.Hairline
@@ -32,6 +36,8 @@ import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SecurityBadge
 import com.echelon.eve.ui.components.SkeletonRows
+import com.echelon.eve.ui.components.Developed
+import com.echelon.eve.ui.components.rememberWasLoading
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
@@ -131,12 +137,13 @@ fun ExploreScreen(ui: ExploreUi, now: Long, actions: ExploreActions, canSend: Bo
         }
     }
     val r = ui.result
+    val developing = rememberWasLoading(r == null)
     when {
         s.bands.isEmpty() -> EmptyState("High-sec is the safe place to start.", title = "Pick at least one security band", icon = EchelonIcons.Search,
             action = { SecondaryButton("Use high-sec", { actions.settings(s.copy(bands = setOf("hi"))) }) })
         ui.problem != null -> ErrorState("Couldn’t rank systems", ui.problem, action = { SecondaryButton("Try again", actions.retry) })
         r == null -> SkeletonRows(rows = 5, label = "Reading traffic across New Eden…")
-        else -> Results(ui, r, now, actions, canSend)
+        else -> Developed(developing) { Results(ui, r, now, actions, canSend) }
     }
 }
 
@@ -181,10 +188,16 @@ private fun Results(ui: ExploreUi, r: ExploreResult, now: Long, actions: Explore
     })
     if (r.rows.isEmpty()) EmptyState("Widen the range or add a security band.", title = "No systems match", icon = EchelonIcons.Search,
         action = if (ui.settings.maxJumps < 20) ({ SecondaryButton("Search 20 jumps", { actions.settings(ui.settings.copy(maxJumps = 20)) }) }) else null)
-    else EchelonCard(padding = false) {
-        r.rows.forEachIndexed { i, row ->
-            if (i > 0) Hairline()
-            SystemRow(row, ui, now, open = ui.open == row.system.id, actions, canSend)
+    else {
+        // The ranking resolves like a probe scan: the beam turns across the card and each system appears as it passes.
+        val sweep = rememberScanSweep(r)
+        EchelonCard(Modifier.scanSweep(sweep), padding = false) {
+            r.rows.forEachIndexed { i, row ->
+                Column(Modifier.scanReveal(sweep, ScanSweep.listAt(i, r.rows.size))) {
+                    if (i > 0) Hairline()
+                    SystemRow(row, ui, now, open = ui.open == row.system.id, actions, canSend)
+                }
+            }
         }
     }
     Text("EVE doesn’t publish signature counts, so quiet means least travelled: fewer ships through a system means fewer explorers clearing its sites. Traffic covers ${trafficSpan(r.trafficHours)}.",

@@ -34,6 +34,7 @@ import com.echelon.eve.ui.format.secText
 import com.echelon.eve.ui.motion.Springs
 import com.echelon.eve.ui.motion.pressScale
 import com.echelon.eve.ui.motion.pulse
+import com.echelon.eve.ui.motion.heartbeat
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.indication
 import androidx.compose.material3.ripple
@@ -118,9 +119,12 @@ fun Dart(color: Color, modifier: Modifier = Modifier) {
     }
 }
 
-/** A status dot; [live] adds a halo that breathes (the beacon), still in screenshots and with reduced motion. */
+/**
+ * A status dot; [live] adds a halo that breathes (online, the beacon), [heartbeat] a lub-dub (a sync running). Both
+ * are still in screenshots and with reduced motion.
+ */
 @Composable
-fun StatusDot(tone: Tone, modifier: Modifier = Modifier, live: Boolean = false) {
+fun StatusDot(tone: Tone, modifier: Modifier = Modifier, live: Boolean = false, heartbeat: Boolean = false) {
     val color = if (tone == Tone.Neutral) Echelon.colors.textFaint else tone.color()
-    Box(modifier.size(8.dp).pulse(live, color).clip(CircleShape).background(color))
+    Box(modifier.size(8.dp).pulse(live && !heartbeat, color).heartbeat(heartbeat, color).clip(CircleShape).background(color))
 }

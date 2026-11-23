@@ -1,5 +1,6 @@
 package com.echelon.eve.fly.wing
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -8,6 +9,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +48,8 @@ import com.echelon.eve.ui.components.ProgressBar
 import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.StatusDot
+import com.echelon.eve.ui.motion.cometTrail
+import com.echelon.eve.ui.motion.pingRipple
 import com.echelon.eve.ui.components.Tag
 import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.components.WingChip
@@ -116,7 +122,10 @@ fun WingScreen(ui: WingUi, now: Long, actions: WingActions, modifier: Modifier =
     val theirs = ui.statuses[mate.id]
     PrimaryPanel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            StatusDot(if (p?.online == true) Tone.Ok else Tone.Neutral, live = p?.online == true)
+            // Their mark trails a comet when their status changes, and ripples when their latest call lands.
+            val mateColor = com.echelon.eve.ui.theme.PilotColors.of(mate.id).color
+            StatusDot(if (p?.online == true) Tone.Ok else Tone.Neutral, Modifier.cometTrail(p?.online to theirs?.let { statusLine(it, ui.systemName) }, mateColor)
+                .pingRipple(ui.feed.firstOrNull { it.from == mate }?.id, mateColor), live = p?.online == true)
             Text(if (p?.online == true) "${mate.displayName} has the app open" else "${mate.displayName} is away", style = Echelon.type.screenTitle, color = c.text)
         }
         if (theirs != null) {
@@ -228,7 +237,14 @@ private fun Answers(item: FeedItem, pilot: Pilot, now: Long, actions: WingAction
     val mine = item.from == pilot
     val answer = item.acks[if (mine) pilot.wingmate.id else pilot.id]
     if (mine) {
-        answer?.let { Text("${pilot.wingmate.displayName}: ${ackWord(it.kind)} · ${ago(it.at, now)}", style = Echelon.type.label, color = if (it.kind == WingAck.CANT) c.warn else if (it.kind == WingAck.ONIT) c.ok else c.textMuted) }
+        // Their answer arrives with a ripple off its dot (and the Ack haptic, from the route).
+        answer?.let { a ->
+            val tone = if (a.kind == WingAck.CANT) c.warn else if (a.kind == WingAck.ONIT) c.ok else c.textMuted
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                androidx.compose.foundation.layout.Box(Modifier.size(6.dp).pingRipple(a.kind to a.at, tone).background(tone, androidx.compose.foundation.shape.CircleShape))
+                Text("${pilot.wingmate.displayName}: ${ackWord(a.kind)} · ${ago(a.at, now)}", style = Echelon.type.label, color = tone)
+            }
+        }
         return
     }
     if (item.from == null) return
@@ -266,7 +282,7 @@ private fun ColumnScope.SessionSection(ui: WingUi, now: Long, actions: WingActio
                     Text(if (who == pilot) "You" else who.displayName, style = MaterialTheme.typography.titleSmall, color = PilotColors.of(who.id).color)
                     Text(tally(part.units, part.timers, part.systems.size), style = MaterialTheme.typography.bodySmall, color = c.textMuted)
                 }
-                Text(format(part.isk.toDouble(), Kind.Isk), style = Echelon.type.num, color = c.text)
+                RollingNumber(part.isk.toDouble(), kind = Kind.Isk, style = Echelon.type.num, color = c.text)
             }
         }
         SecondaryButton("End session", actions.endSession, Modifier.padding(top = Spacing.sm), enabled = ui.canSend)
