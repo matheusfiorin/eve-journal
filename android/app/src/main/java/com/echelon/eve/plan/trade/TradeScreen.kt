@@ -32,6 +32,8 @@ import com.echelon.eve.ui.components.PrimaryPanel
 import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SkeletonRows
+import com.echelon.eve.ui.components.Developed
+import com.echelon.eve.ui.components.rememberWasLoading
 import com.echelon.eve.ui.components.StatRow
 import com.echelon.eve.ui.components.StatTile
 import com.echelon.eve.ui.components.Tag
@@ -121,11 +123,12 @@ fun TradeScreen(ui: TradeUi, actions: TradeActions, modifier: Modifier = Modifie
         }
     }
     val r = ui.result
+    val developing = rememberWasLoading(r == null)
     when {
         ui.problem != null -> ErrorState("Couldn’t scan the market", ui.problem, action = { SecondaryButton("Try again", actions.retry) })
         r == null -> SkeletonRows(rows = 5, label = "Scanning stations…")
         !r.ready -> EmptyState("The hourly pipeline stores its first scan on its next run.", title = "No market data yet", icon = EchelonIcons.Swap)
-        else -> Results(ui, r, actions)
+        else -> Developed(developing) { Results(ui, r, actions) }
     }
 }
 

@@ -48,6 +48,11 @@ import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.motion.NoEntrance
 import com.echelon.eve.ui.motion.StaggerRoot
 import com.echelon.eve.ui.motion.entrance
+import com.echelon.eve.ui.motion.parallaxHeader
+import com.echelon.eve.ui.motion.HapticMoment
+import com.echelon.eve.ui.motion.rememberHaptics
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import com.echelon.eve.ui.motion.sharedContainer
 import com.echelon.eve.ui.motion.sharedText
 import com.echelon.eve.ui.theme.Echelon
@@ -71,17 +76,17 @@ private val HubMaxWidth = Spacing.maxContent
 fun DestinationHub(destination: Destination, state: ShellState, actions: ShellActions, registry: FeatureRegistry, open: (Destination, String, String?) -> Unit, contentPadding: PaddingValues = PaddingValues()) {
     val entries = registry.entries(destination, state.selected)
     val list = rememberLazyListState()
+    // A pull you made gets its "sync done" tick when the sync lands (the background syncs stay silent).
+    val haptics = rememberHaptics()
+    val asked = remember { booleanArrayOf(false) }
+    LaunchedEffect(state.sync.syncing) { if (!state.sync.syncing && asked[0]) { asked[0] = false; haptics.play(HapticMoment.SyncDone) } }
     StaggerRoot("hub:${destination.name}") {
-        EchelonRefreshBox(isRefreshing = state.sync.syncing, onRefresh = actions.refresh, modifier = Modifier.fillMaxSize()) {
+        EchelonRefreshBox(isRefreshing = state.sync.syncing, onRefresh = { asked[0] = true; actions.refresh() }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = Spacing.xxl + contentPadding.calculateBottomPadding(), top = contentPadding.calculateTopPadding()),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm), horizontalAlignment = Alignment.CenterHorizontally) {
                 item("hero") {
-                    Hero(destination, state.selected, Modifier.graphicsLayer {
-                        // Parallax: while the hero is the first row, it moves at half the scroll and fades out.
-                        val off = if (list.firstVisibleItemIndex == 0) list.firstVisibleItemScrollOffset.toFloat() else size.height
-                        translationY = off * .5f
-                        alpha = (1f - off / size.height.coerceAtLeast(1f) * 1.2f).coerceIn(0f, 1f)
-                    })
+                    // Parallax: while the hero is the first row, it moves at half the scroll and fades out.
+                    Hero(destination, state.selected, Modifier.parallaxHeader(list))
                 }
                 item("banner") { Banner(state, actions, Modifier.widthIn(max = HubMaxWidth)) }
                 if (entries.isEmpty()) item("empty") { EmptyState("Nothing here yet.", Modifier.widthIn(max = HubMaxWidth).padding(horizontal = Spacing.gutter)) }

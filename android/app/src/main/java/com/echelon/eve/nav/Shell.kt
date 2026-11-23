@@ -45,6 +45,7 @@ import com.echelon.eve.ui.motion.NavMotion
 import com.echelon.eve.ui.motion.ProvideNavScope
 import com.echelon.eve.ui.motion.SharedElementsRoot
 import com.echelon.eve.ui.motion.StaggerRoot
+import com.echelon.eve.ui.motion.warp
 import com.echelon.eve.ui.motion.Springs
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.widthIn
@@ -115,15 +116,23 @@ fun EchelonShell(
                 },
             ) { padding ->
                 SharedElementsRoot {
-                    NavHost(nav, startDestination = start, modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)), enterTransition = motion.enter, exitTransition = motion.exit, popEnterTransition = motion.popEnter, popExitTransition = motion.popExit) {
+                    // Changing destination warps: the streaks over the whole NavHost, the scales in NavMotion.tabEnter/tabExit.
+                    NavHost(nav, startDestination = start, modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).warp(current), enterTransition = motion.enter, exitTransition = motion.exit, popEnterTransition = motion.popEnter, popExitTransition = motion.popExit) {
+                        // Back from a sub-screen to its hub is a pop (the card takes the screen back); back to another tab warps.
+                        val hubPopEnter: androidx.compose.animation.AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.EnterTransition = {
+                            if (initialState.destination.hasRoute(SubRoute::class)) motion.popEnter(this) else motion.tabEnter(this)
+                        }
+                        val hubExit: androidx.compose.animation.AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.ExitTransition = {
+                            if (targetState.destination.hasRoute(SubRoute::class) && destinationOf(targetState) == destinationOf(initialState)) motion.underCard(this) else motion.tabExit(this)
+                        }
                         Destination.entries.forEach { d ->
                             val hub: @Composable androidx.compose.animation.AnimatedContentScope.(NavBackStackEntry) -> Unit = {
                                 ProvideNavScope(this) { DestinationHub(d, state, actions, registry, open, padding) }
                             }
                             when (d) {
-                                Destination.Plan -> composable<PlanRoute>(enterTransition = motion.tabEnter, exitTransition = motion.tabExit, popEnterTransition = motion.tabEnter, popExitTransition = motion.tabExit, content = hub)
-                                Destination.Fly -> composable<FlyRoute>(enterTransition = motion.tabEnter, exitTransition = motion.tabExit, popEnterTransition = motion.tabEnter, popExitTransition = motion.tabExit, content = hub)
-                                Destination.Corp -> composable<CorpRoute>(enterTransition = motion.tabEnter, exitTransition = motion.tabExit, popEnterTransition = motion.tabEnter, popExitTransition = motion.tabExit, content = hub)
+                                Destination.Plan -> composable<PlanRoute>(enterTransition = motion.tabEnter, exitTransition = hubExit, popEnterTransition = hubPopEnter, popExitTransition = motion.tabExit, content = hub)
+                                Destination.Fly -> composable<FlyRoute>(enterTransition = motion.tabEnter, exitTransition = hubExit, popEnterTransition = hubPopEnter, popExitTransition = motion.tabExit, content = hub)
+                                Destination.Corp -> composable<CorpRoute>(enterTransition = motion.tabEnter, exitTransition = hubExit, popEnterTransition = hubPopEnter, popExitTransition = motion.tabExit, content = hub)
                             }
                         }
                         composable<SubRoute> { e ->

@@ -76,7 +76,7 @@ import com.echelon.eve.core.wing.WingTimer
 import com.echelon.eve.ui.EchelonIcons
 import com.echelon.eve.ui.components.EchelonCard
 import com.echelon.eve.ui.components.LinkButton
-import com.echelon.eve.ui.components.RollingText
+import com.echelon.eve.ui.motion.RollingText
 import com.echelon.eve.ui.components.Tag
 import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.format.clock
@@ -86,6 +86,10 @@ import com.echelon.eve.ui.format.secLabel
 import com.echelon.eve.ui.format.secText
 import com.echelon.eve.ui.motion.Springs
 import com.echelon.eve.ui.motion.motionSpec
+import com.echelon.eve.ui.motion.drawScanBeam
+import com.echelon.eve.ui.motion.rememberScanSweep
+import com.echelon.eve.ui.motion.rememberBreath
+import com.echelon.eve.ui.motion.breathAt
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Spacing
@@ -225,6 +229,8 @@ fun JumpRadar(here: SystemGroup?, nodes: List<RadarNode>, now: Long, wingmate: P
     val sweeps = nodes.map { n -> key(n.systemId) { animateFloatAsState(n.timers.firstOrNull { it.running(now) }?.let { 1f - it.progress(now) } ?: 0f, motionSpec(Springs.value()), label = "radar ${n.systemId}") } }
     val mateColor = wingmate?.let { PilotColors.of(it.id).color } ?: c.accent
     val spoken = nodes.joinToString("; ") { "${it.name}, ${jumpsText(it.jumps)}, ${it.timers.size} timers" }
+    // A scan sweep each time a system joins the radar: the beam turns once and each system lights as it passes.
+    val sweep = rememberScanSweep(nodes.map { it.systemId }.toSet())
     EchelonCard(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Jump radar", style = MaterialTheme.typography.titleSmall, color = c.text, modifier = Modifier.weight(1f))
@@ -245,23 +251,27 @@ fun JumpRadar(here: SystemGroup?, nodes: List<RadarNode>, now: Long, wingmate: P
                     drawText(label, topLeft = Offset(centre.x - r * .7071f - label.size.width, centre.y - r * .7071f - label.size.height * .8f))
                     j += step
                 }
+                drawScanBeam(sweep.progress, centre, radius + 14.dp.toPx(), c.accent)
                 nodes.forEachIndexed { i, n ->
                     val a = radarAngle(i, nodes.size)
+                    val v = sweep.reveal((a / (2 * PI)).toFloat())
+                    if (v <= 0f) return@forEachIndexed
                     val r = radarRadius(n.jumps.coerceAtMost(maxJumps).toFloat(), reach, 30.dp.toPx(), radius)
                     val p = Offset(centre.x + (r * sin(a)).toFloat(), centre.y - (r * cos(a)).toFloat())
-                    drawLine(c.lineStrong.copy(alpha = .6f), centre, p, 1.dp.toPx())
+                    drawLine(c.lineStrong.copy(alpha = .6f * v), centre, p, 1.dp.toPx())
                     val next = n.timers.firstOrNull { it.running(now) }
                     val u = next?.let { urgency(it, now) } ?: 0f
-                    val dot = (5f + 5f * u).dp.toPx()
-                    if (n.wingmate) drawCircle(mateColor.copy(alpha = .22f), dot + 9.dp.toPx(), p)
-                    drawCircle(n.sec?.let(::secColor) ?: c.textFaint, dot, p)
+                    // Lit by the sweep: a contact resolving grows from a point as it fades in.
+                    val dot = (5f + 5f * u).dp.toPx() * (.4f + .6f * v)
+                    if (n.wingmate) drawCircle(mateColor.copy(alpha = .22f * v), dot + 9.dp.toPx(), p)
+                    drawCircle((n.sec?.let(::secColor) ?: c.textFaint).let { it.copy(alpha = it.alpha * v) }, dot, p)
                     val ringR = dot + 4.dp.toPx()
-                    drawCircle(c.surface3, ringR, p, style = Stroke(2.5.dp.toPx()))
-                    if (next != null) drawArc(ownerColor(next), -90f, 360f * sweeps[i].value, false, Offset(p.x - ringR, p.y - ringR), Size(ringR * 2, ringR * 2), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
-                    else if (n.timers.any { it.done(now) }) drawCircle(c.ok, ringR, p, style = Stroke(2.5.dp.toPx()))
+                    drawCircle(c.surface3.copy(alpha = v), ringR, p, style = Stroke(2.5.dp.toPx()))
+                    if (next != null) drawArc(ownerColor(next).copy(alpha = v), -90f, 360f * sweeps[i].value, false, Offset(p.x - ringR, p.y - ringR), Size(ringR * 2, ringR * 2), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
+                    else if (n.timers.any { it.done(now) }) drawCircle(c.ok.copy(alpha = v), ringR, p, style = Stroke(2.5.dp.toPx()))
                     val text = measurer.measure(n.name, nameStyle.copy(color = if (n.wingmate) mateColor else c.text), maxLines = 1)
                     val below = p.y + ringR + 2.dp.toPx()
-                    drawText(text, topLeft = Offset((p.x - text.size.width / 2f).coerceIn(0f, wPx - text.size.width), if (below + text.size.height > size.height) p.y - ringR - text.size.height - 2.dp.toPx() else below))
+                    drawText(text, topLeft = Offset((p.x - text.size.width / 2f).coerceIn(0f, wPx - text.size.width), if (below + text.size.height > size.height) p.y - ringR - text.size.height - 2.dp.toPx() else below), alpha = v)
                 }
                 // you, at the centre
                 drawCircle(c.accent.copy(alpha = .18f), 16.dp.toPx(), centre)
@@ -277,7 +287,7 @@ fun JumpRadar(here: SystemGroup?, nodes: List<RadarNode>, now: Long, wingmate: P
                 val a = radarAngle(i, nodes.size)
                 val r = radarRadius(n.jumps.coerceAtMost(maxJumps).toFloat(), maxJumps.toFloat(), with(d) { 30.dp.toPx() }, radius)
                 val x = wPx / 2 + (r * sin(a)).toFloat(); val y = hPx / 2 - (r * cos(a)).toFloat()
-                Box(Modifier.offset { IntOffset((x - 22.dp.toPx()).toInt(), (y - 22.dp.toPx()).toInt()) }.size(44.dp).clip(CircleShape).clickable(onClickLabel = "Show ${n.name}") { onPick(n.systemId) })
+                Box(Modifier.offset { IntOffset((x - 24.dp.toPx()).toInt(), (y - 24.dp.toPx()).toInt()) }.size(Spacing.touch).clip(CircleShape).clickable(onClickLabel = "Show ${n.name}") { onPick(n.systemId) })
             }
         }
     }
@@ -408,6 +418,11 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
         if (passed > lastPassed && !reduced) { pulse.snapTo(0f); pulse.animateTo(1f, tween(1100)) }
         lastPassed = passed
     }
+    // Breathing: while the ring heats towards a warning or the end, its glow breathes (twice as fast in the last
+    // seconds). Colour and timing stay ringHeat's; this only adds the breath. Read in the draw phase.
+    val nearing = !done && !paused && (heatNow.warn > 0f || heatNow.last > 0f)
+    val breath = rememberBreath(nearing)
+    val breaths = if (heatNow.last > .5f) 2 else 1
     val mine = t.ownedBy(pilot)
     val text = when { done -> if (warnTimer) "Warp out" else "Done"; paused -> clock(t.remaining(now)); else -> clock(t.remaining(now)) }
     val spoken = "${t.label}, ${when { done -> "done"; paused -> "paused, ${duration(t.remaining(now) / 1000.0)} left"; else -> "${duration(t.remaining(now) / 1000.0)} left" }}" +
@@ -422,6 +437,10 @@ fun TimerRing(t: WingTimer, pilot: Pilot, now: Long, selected: Boolean, onClick:
                 val centre = Offset(this.size.width / 2, this.size.height / 2)
                 val r = arc.width / 2
                 if (heat > 0f) drawCircle(owner.copy(alpha = .10f + .22f * heat), r + w / 2 + 4.dp.toPx() * heat, centre)
+                if (nearing) {
+                    val b = breathAt(breath.value, breaths)
+                    drawCircle(col.copy(alpha = (.08f + .20f * b) * maxOf(warnMix, lastMix).coerceAtLeast(.4f)), r + w / 2 + (2f + 5f * b).dp.toPx(), centre)
+                }
                 if (select > 0f) drawCircle(c.accent.copy(alpha = .9f * select), r + w + 1.5.dp.toPx(), centre, style = Stroke(1.5.dp.toPx()))
                 val track = if (paused) Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))) else Stroke(w)
                 drawArc(c.surface3, 0f, 360f, false, Offset(inset, inset), arc, style = track)

@@ -39,7 +39,7 @@ import com.echelon.eve.ui.components.EveImages
 import com.echelon.eve.ui.components.Hairline
 import com.echelon.eve.ui.components.PrimaryButton
 import com.echelon.eve.ui.components.PrimaryPanel
-import com.echelon.eve.ui.components.RollingText
+import com.echelon.eve.ui.motion.RollingNumber
 import com.echelon.eve.ui.components.SecondaryButton
 import com.echelon.eve.ui.components.SectionHeader
 import com.echelon.eve.ui.components.SecurityBadge
@@ -91,22 +91,12 @@ fun CorpSnapshot.walletTotal(): Double? = wallets.value?.sumOf { it.balance }
 
 private fun iskDigits(v: Double) = String.format(Locale.US, "%,.0f", v)
 
-/** The treasury as an odometer: digits roll when it first appears and whenever it changes. */
+/** The treasury as an odometer: the shared [RollingNumber] (counts up as the screen appears, rolls on a change). */
 @Composable
 fun WalletOdometer(value: Double, modifier: Modifier = Modifier, compact: Boolean = false) {
     val c = Echelon.colors
-    val still = Echelon.reduceMotion || LocalInspectionMode.current
-    var shown by remember { mutableStateOf(if (still) value else 0.0) }
-    var from by remember { mutableStateOf(shown) }
-    LaunchedEffect(value, still) {
-        if (still) { shown = value; return@LaunchedEffect }
-        val start = from
-        // Eight quick steps along an ease-out: the digits spin up fast and settle on the last one.
-        for (i in 1..8) { val t = i / 8.0; shown = start + (value - start) * (1 - (1 - t) * (1 - t) * (1 - t)); delay(70) }
-        shown = value; from = value
-    }
     Row(modifier.semantics(mergeDescendants = true) { contentDescription = "${iskDigits(value)} ISK" }, verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row { RollingText(iskDigits(shown), Echelon.type.numLarge.copy(color = c.text, fontSize = androidx.compose.ui.unit.TextUnit(if (compact) 14f else 26f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(if (compact) 18f else 30f, androidx.compose.ui.unit.TextUnitType.Sp))) }
+        RollingNumber(value, style = Echelon.type.numLarge.copy(color = c.text, fontSize = androidx.compose.ui.unit.TextUnit(if (compact) 14f else 26f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(if (compact) 18f else 30f, androidx.compose.ui.unit.TextUnitType.Sp)), text = ::iskDigits)
         Text("ISK", style = Echelon.type.overline, color = c.textMuted, modifier = Modifier.padding(bottom = 4.dp))
     }
 }

@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.echelon.eve.ui.motion.dangerShimmer
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.echelon.eve.ui.components.Tone
@@ -176,7 +177,8 @@ fun Modifier.reinforcedPulse(active: Boolean): Modifier {
     val still = rememberStill()
     val beat = if (still) null else rememberInfiniteTransition(label = "pulse").animateFloat(.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha")
     val red = Echelon.colors.danger
-    return drawBehind {
+    // The wash breathes and, every few seconds, the shared danger sheen crosses the row (ui.motion.dangerShimmer).
+    return dangerShimmer(true, red).drawBehind {
         val alpha = beat?.value ?: .85f // read while drawing: the pulse never recomposes
         drawRect(red.copy(alpha = .10f * alpha))
         drawRect(red.copy(alpha = alpha), Offset.Zero, Size(3.dp.toPx(), size.height))

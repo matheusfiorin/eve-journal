@@ -1,12 +1,5 @@
 package com.echelon.eve.ui.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +19,7 @@ import com.echelon.eve.ui.format.clock
 import com.echelon.eve.ui.format.duration
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.motion.celebrate as celebrateBurst
+import com.echelon.eve.ui.motion.RollingText
 import kotlinx.coroutines.delay
 
 /** The wall clock, ticking once a second while composed. Tests and previews pass a fixed [now]. */
@@ -70,20 +64,4 @@ fun Countdown(
     val m = if (celebrate) modifier.celebrateBurst(remaining <= 0, key = endsAt) else modifier
     if (total != null && total > 0) ProgressRing(1f - remaining.coerceIn(0, total).toFloat() / total, m, size = androidx.compose.ui.unit.Dp(120f), color = if (tone == Tone.Neutral) c.accent else tone.color()) { body() }
     else Column(m, verticalArrangement = Arrangement.Center) { body() }
-}
-
-/** Text whose characters roll vertically when they change (only the changed ones move). Reduced motion swaps in place. */
-@Composable
-fun RollingText(text: String, style: TextStyle) {
-    val reduced = Echelon.reduceMotion
-    Row {
-        text.forEachIndexed { i, ch ->
-            androidx.compose.runtime.key(text.length - i) {
-                AnimatedContent(ch, transitionSpec = {
-                    if (reduced) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                    else (slideInVertically(tween(220)) { -it / 2 } + fadeIn(tween(220))) togetherWith (slideOutVertically(tween(220)) { it / 2 } + fadeOut(tween(160)))
-                }, label = "digit") { Text(it.toString(), style = style) }
-            }
-        }
-    }
 }

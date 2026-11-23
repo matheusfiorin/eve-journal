@@ -81,6 +81,7 @@ import com.echelon.eve.ui.motion.motionSpec
 import com.echelon.eve.ui.motion.pressScale
 import com.echelon.eve.ui.motion.rememberHaptics
 import com.echelon.eve.ui.motion.sharedText
+import com.echelon.eve.ui.motion.settle
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Radii
@@ -142,7 +143,8 @@ private fun SyncIndicator(state: ShellState, actions: ShellActions, zone: ZoneId
     Row(Modifier.defaultMinSize(minHeight = Spacing.touch).clip(RoundedCornerShape(Radii.control))
         .then(if (fix != null) Modifier.clickable(onClickLabel = if (line.fix == SyncLine.Fix.Reconnect) "Reconnect" else "Retry", onClick = fix) else Modifier)
         .padding(horizontal = Spacing.sm), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        StatusDot(line.tone, live = line.tone == Tone.Ok || state.sync.syncing)
+        // The beacon: a heartbeat while a sync runs, a ring settling out when it lands, then the online breath.
+        StatusDot(line.tone, Modifier.settle(state.sync.lastSyncedAt, c.ok), live = line.tone == Tone.Ok, heartbeat = state.sync.syncing)
         AnimatedContent(line.text, transitionSpec = {
             if (reduced) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
             else (slideInVertically(Springs.nav()) { it / 2 } + fadeIn()) togetherWith (slideOutVertically(Springs.nav()) { -it / 2 } + fadeOut())
