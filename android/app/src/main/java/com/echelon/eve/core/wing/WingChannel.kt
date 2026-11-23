@@ -24,10 +24,15 @@ import java.util.UUID
 import kotlin.math.min
 import kotlin.random.Random
 
-/** Reconnect delays: 1 s doubling to a minute, with ±20 % jitter so two phones don't retry in step. */
+/**
+ * Reconnect delays: [baseMs] doubling to [maxMs], each with ±20 % jitter so two phones don't retry in step. The jitter never lifts a delay
+ * past [maxMs] (a cap is a cap: a dead room costs one try a minute, not more), and never takes one below 80 % of its step.
+ */
 class Backoff(private val baseMs: Long = 1_000, private val maxMs: Long = 60_000, private val random: Random = Random.Default) {
     private var attempt = 0
-    fun next(): Long { val d = min(maxMs, baseMs shl min(attempt, 16)); attempt++; return (d * (0.8 + random.nextDouble() * 0.4)).toLong() }
+    /** How many delays were handed out since the last [reset]. */
+    val attempts: Int get() = attempt
+    fun next(): Long { val d = min(maxMs, baseMs shl min(attempt, 16)); attempt++; return min(maxMs, (d * (0.8 + random.nextDouble() * 0.4)).toLong()) }
     fun reset() { attempt = 0 }
 }
 
@@ -41,7 +46,10 @@ data class WingEvent<T>(val from: Pilot?, val at: Long, val value: T, val id: St
  * It is connected only while something holds it: the app in the foreground ([FOREGROUND], from the process
  * lifecycle; register the channel with ProcessLifecycleOwner) or a running timer service ([TIMER_SERVICE]: the Fly
  * feature calls [onTimerServiceStarted] / [onTimerServiceStopped]). With no holds it closes, and the room marks the
- * pilot offline. Drops reconnect with [Backoff]; a refused session (401) stops retrying until the token changes.
+ * pilot offline. Drops reconnect with [Backoff] (capped, jittered; it starts over only after a connection stayed up for
+ * [stableMs], so a room that accepts and drops at once is not hammered); a refused session (401) stops retrying until the token
+ * changes. A heartbeat ([heartbeatMs], an OkHttp ping) finds a connection that died silently, e.g. after a network switch, and
+ * sends it down the same retry path; a ping every 25 s is far cheaper for the battery than a stale socket that hides messages.
  *
  * Outgoing messages sent while disconnected are queued (the latest 50) and flushed once the snapshot has arrived.
  */
@@ -54,6 +62,10 @@ class WingChannel(
     private val onUnauthorized: (token: String) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
     private val backoff: Backoff = Backoff(),
+    private val heartbeatMs: Long = HEARTBEAT_MS,
+    private val stableMs: Long = STABLE_MS,
+    /** A monotonic clock for how long a connection lived (not [clock], which tests pin). */
+    private val uptime: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : DefaultLifecycleObserver {
     sealed interface Status {
         data object Idle : Status
@@ -96,6 +108,10 @@ class WingChannel(
     private val holds = mutableSetOf<String>()
     private var socket: WebSocket? = null
     private var socketToken: String? = null
+    private var socketOpen = false
+    private var openedAt: Long? = null
+    /** The client the sockets use: the app's, with the heartbeat. */
+    internal val socketClient: OkHttpClient = client.newBuilder().pingInterval(heartbeatMs, java.util.concurrent.TimeUnit.MILLISECONDS).build()
     private var refusedToken: String? = null
     private var retry: Job? = null
     private var stateWait: Job? = null
@@ -157,13 +173,18 @@ class WingChannel(
         val url = base.newBuilder().encodedPath("/api/wing/socket").build()
         val request = Request.Builder().url(url).header("Authorization", "Bearer ${who.second}").build()
         socketToken = who.second
-        socket = client.newWebSocket(request, Listener(who))
+        socketOpen = false; openedAt = null
+        socket = socketClient.newWebSocket(request, Listener(who))
     }
 
     private fun disconnect(keepHolds: Boolean = false) {
         synchronized(lock) {
             retry?.cancel(); retry = null; stateWait?.cancel(); stateWait = null
-            socket?.close(1000, if (keepHolds) "switching pilot" else "app closed"); socket = null
+            // A socket still connecting has nobody to say goodbye to; cancelling frees it at once instead of after the handshake.
+            socket?.let { if (socketOpen) it.close(1000, if (keepHolds) "switching pilot" else "app closed") else it.cancel() }
+            socket = null; socketOpen = false; openedAt = null
+            // Wanting the room again later (the app comes back to the front) is a fresh start, not the next step of an old outage.
+            if (!keepHolds) backoff.reset()
         }
         _status.value = Status.Idle
     }
@@ -171,6 +192,8 @@ class WingChannel(
     private fun scheduleRetry(reason: String) {
         synchronized(lock) {
             socket = null
+            if (openedAt?.let { uptime() - it >= stableMs } == true) backoff.reset()
+            openedAt = null; socketOpen = false
             if (holds.isEmpty()) { _status.value = Status.Idle; return }
             val wait = backoff.next()
             _status.value = Status.Retrying(wait, reason)
@@ -183,7 +206,7 @@ class WingChannel(
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (!current(webSocket)) return
-            backoff.reset()
+            synchronized(lock) { socketOpen = true; openedAt = uptime() }
             webSocket.send(WingCodec.encode(WingMessage.PresenceUpdate(newId(), who.first.id, clock(), true, _timers.value.values.count { it.owner == who.first.id && !it.done(clock()) })))
             // The room sends its snapshot first. Until it lands, sends stay queued, so the snapshot can't overwrite them;
             // a room that sends none still counts as connected after a moment.
@@ -206,7 +229,7 @@ class WingChannel(
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!current(webSocket)) return
             if (response?.code == 401 || response?.code == 403) {
-                synchronized(lock) { socket = null; refusedToken = who.second }
+                synchronized(lock) { socket = null; socketOpen = false; openedAt = null; refusedToken = who.second }
                 _status.value = Status.Unauthorized
                 if (response.code == 401) onUnauthorized(who.second)
                 return
@@ -279,5 +302,7 @@ class WingChannel(
         const val KEEP = 50
         private const val DAY = 86_400_000L
         private const val STATE_WAIT_MS = 3_000L
+        const val HEARTBEAT_MS = 25_000L
+        const val STABLE_MS = 10_000L
     }
 }

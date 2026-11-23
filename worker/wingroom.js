@@ -12,9 +12,16 @@
 //                   (these three go to the sender too: the room computes them), error {code}
 // Every type added after the first release is optional on both sides: an app that does not know one skips it, and the room answers
 // `unknown_type` to a type it does not know, which the apps ignore.
+// Compatibility rules (tests/wingroom.test.js, WingCompatTest.kt): the first release's fields (timers, items, presence in `state`; timer,
+// plan, ping and presence frames) are never renamed or removed; additions are new optional fields or new types. The pilots may run
+// different app versions against one room, so an app skips what it does not know and the room skips what it does not know. `proto` in
+// the `state` hello says which revision the room speaks (1 = timers, plans, pings, presence; 2 = + status, ack, sessions); an app may
+// use it to hide a feature the room lacks, but must work without it (a room from before it sent none).
 // Not extending cloudflare:workers' DurableObject keeps this importable in Node tests; the class-with-constructor(state, env) form is
 // still a valid Durable Object.
 
+/** The revision of this protocol; see the compatibility rules above. */
+export const PROTOCOL = 2, SCHEMA_VERSION = 2;
 export const DAY = 86400000, MAX_MESSAGE = 8192, MAX_ITEMS = 50, MAX_TIMERS = 100, RATE_WINDOW = 10000, RATE_MAX = 40;
 /** A live status older than this is no longer shown; a session left running this long is ended by the next start. */
 export const STATUS_TTL = 12 * 3600000, SESSION_MAX = DAY, MAX_SESSIONS = 10, MAX_ROUTE = 60, MAX_VISITED = 200, MAX_ISK = 1e13;
@@ -99,10 +106,34 @@ export class WingRoom {
     this.state = state; this.env = env; this.fetchImpl = fetchImpl; this.pair = pair; this.rates = new WeakMap(); this.token = null;
     this.sql = state.storage.sql;
     this.q = (text, ...bind) => this.sql.exec(text, ...bind).toArray();
-    this.q('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, owner INTEGER NOT NULL, data TEXT NOT NULL, ends_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, notified INTEGER NOT NULL DEFAULT 0)');
-    this.q('CREATE TABLE IF NOT EXISTS items (seq INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
-    this.q('CREATE TABLE IF NOT EXISTS statuses (pilot INTEGER PRIMARY KEY, data TEXT NOT NULL, at INTEGER NOT NULL)');
-    this.q('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, active INTEGER NOT NULL, started_at INTEGER NOT NULL)');
+    this.migrate();
+  }
+  /**
+   * Brings the room's own SQLite to SCHEMA_VERSION. A Durable Object's storage survives deploys, so this runs on every wake and must
+   * be idempotent: each step is CREATE ... IF NOT EXISTS, and a step that changes an existing table (ALTER TABLE ADD COLUMN) runs only
+   * above the stored version. A database from before versions existed has no row and counts as version 0, which re-runs the
+   * IF NOT EXISTS steps harmlessly. Adding tables here needs no Durable Object migration tag (scripts/deploy-backend.mjs); a class
+   * rename, deletion or a new class does.
+   */
+  migrate() {
+    this.q('CREATE TABLE IF NOT EXISTS room_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    const have = Number(this.q("SELECT value FROM room_meta WHERE key = 'schema'")[0]?.value) || 0;
+    const steps = [
+      // 1: the first release.
+      () => {
+        this.q('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, owner INTEGER NOT NULL, data TEXT NOT NULL, ends_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, notified INTEGER NOT NULL DEFAULT 0)');
+        this.q('CREATE TABLE IF NOT EXISTS items (seq INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
+      },
+      // 2: live status and shared sessions.
+      () => {
+        this.q('CREATE TABLE IF NOT EXISTS statuses (pilot INTEGER PRIMARY KEY, data TEXT NOT NULL, at INTEGER NOT NULL)');
+        this.q('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, active INTEGER NOT NULL, started_at INTEGER NOT NULL)');
+      },
+    ];
+    if (steps.length !== SCHEMA_VERSION) throw new Error('SCHEMA_VERSION does not match the migration steps');
+    if (have >= SCHEMA_VERSION) return;
+    for (let v = have; v < SCHEMA_VERSION; v++) steps[v]();
+    this.q("INSERT INTO room_meta (key, value) VALUES ('schema', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(SCHEMA_VERSION));
   }
   // The Worker has checked the session and ALLOWED; it names the pilot in these headers (the room is reachable only through it).
   async fetch(request) {
@@ -126,7 +157,7 @@ export class WingRoom {
   attach(ws, pilot, name) {
     this.state.acceptWebSocket(ws);
     ws.serializeAttachment({pilot, name, timers: 0});
-    ws.send(JSON.stringify({type: 'state', from: 0, at: Date.now(), ...this.snapshot()}));
+    ws.send(JSON.stringify({type: 'state', from: 0, at: Date.now(), proto: PROTOCOL, ...this.snapshot()}));
     this.broadcastPresence();
   }
   sockets() { return this.state.getWebSockets().map(ws => ({ws, a: ws.deserializeAttachment() || {}})); }
@@ -189,7 +220,7 @@ export class WingRoom {
         const plan = cleanPlan(msg.plan);
         if (!plan) return {error: 'invalid plan'};
         const out = {type: 'plan.share', ...base, plan};
-        this.keep(out); return {broadcast: out};
+        this.keep(out); return {broadcast: out, push: {kind: 'plan', text: plan.title, from: name}};
       }
       case 'ping': {
         if (!PING_KINDS.includes(msg.kind) || (msg.text !== undefined && !str(msg.text, 140))) return {error: 'invalid ping'};

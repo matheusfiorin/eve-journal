@@ -64,10 +64,10 @@ class WingServicesTest {
         val names = mapOf(JITA to "Jita")
         val a = WingAlerts(names::get)
         val me = Pilot.Fiofka
-        assertEquals(WingAlert(PushText("Decxus", "Need help · Jita"), "ping-p1"), a.of(WingMessage.Ping("p1", DEC, 1, WingPing(WingPing.HELP, system = JITA)), me, null))
+        assertEquals(WingAlert(PushText("Decxus", "Need help · Jita", open = PushText.OPEN_WING), "ping-p1"), a.of(WingMessage.Ping("p1", DEC, 1, WingPing(WingPing.HELP, system = JITA)), me, null))
         assertNull("my own call is not news", a.of(WingMessage.Ping("p2", FIO, 1, WingPing(WingPing.HELP)), me, null))
         assertNull("seen is silent", a.of(WingMessage.Ack("a", DEC, 1, "p1", WingAck.SEEN), me, null))
-        assertEquals(PushText("Decxus: On it", "Answering your call", updates = true), a.of(WingMessage.Ack("a", DEC, 1, "p1", WingAck.ONIT), me, null)!!.text)
+        assertEquals(PushText("Decxus: On it", "Answering your call", updates = true, open = PushText.OPEN_WING), a.of(WingMessage.Ack("a", DEC, 1, "p1", WingAck.ONIT), me, null)!!.text)
         assertEquals("Decxus started a mining session", a.of(WingMessage.SessionEvent("s", DEC, 1, "start", WingSession("x", "mining")), me, null)!!.text.title)
         assertNull(a.of(WingMessage.SessionEvent("s", DEC, 1, "update", WingSession("x", "mining")), me, null))
         val end = WingSession("x", "mining", contrib = mapOf("$FIO" to Contribution(timers = 2, systems = listOf(JITA)), "$DEC" to Contribution(timers = 1, systems = listOf(JITA, AMARR))))
@@ -75,7 +75,7 @@ class WingServicesTest {
         // Arrival in my system: once, until they leave and come back.
         val mine = WingStatus(system = JITA)
         val there = WingMessage.StatusUpdate("u", DEC, 1, WingStatus(system = JITA, pilot = DEC))
-        assertEquals(WingAlert(PushText("Decxus is in Jita", "You are in the same system", updates = true), "nearby"), a.of(there, me, mine))
+        assertEquals(WingAlert(PushText("Decxus is in Jita", "You are in the same system", updates = true, open = PushText.OPEN_WING), "nearby"), a.of(there, me, mine))
         assertNull(a.of(there, me, mine))
         assertNull(a.of(WingMessage.StatusUpdate("u", DEC, 1, WingStatus(system = AMARR)), me, mine))
         assertEquals("nearby", a.of(there, me, mine)?.tag)
@@ -97,12 +97,12 @@ class WingServicesTest {
 
     @Test fun pushTextReadsTheRoomsNewShapeAndTheOldOnes() {
         // What the room sends now: type, kind, the sender's id as pilot and their name as from.
-        assertEquals(PushText("Decxus", "Needs help"), PushText.of(mapOf("type" to "ping", "kind" to "ping", "ping" to "help", "pilot" to "$DEC", "from" to "Decxus")))
+        assertEquals(PushText("Decxus", "Needs help", open = PushText.OPEN_WING), PushText.of(mapOf("type" to "ping", "kind" to "ping", "ping" to "help", "pilot" to "$DEC", "from" to "Decxus")))
         // What older rooms sent: no type, the name in from.
-        assertEquals(PushText("Decxus", "On my way"), PushText.of(mapOf("kind" to "ping", "ping" to "omw", "from" to "Decxus")))
-        assertEquals(PushText("Fiofka started a timer", "Timer"), PushText.of(mapOf("kind" to "timer.start", "label" to "", "from" to "Fiofka")))
-        assertEquals(PushText("Decxus: Can’t make it", "Answering “tackled”", updates = true), PushText.of(mapOf("type" to "ack", "ack" to "cant", "text" to "tackled", "pilot" to "$DEC")))
-        assertEquals(PushText("Decxus started a mining session", "Open the Wing screen to join in", updates = true), PushText.of(mapOf("type" to "session.start", "activity" to "mining", "pilot" to "$DEC")))
+        assertEquals(PushText("Decxus", "On my way", open = PushText.OPEN_WING), PushText.of(mapOf("kind" to "ping", "ping" to "omw", "from" to "Decxus")))
+        assertEquals(PushText("Fiofka started a timer", "Timer", open = PushText.OPEN_COCKPIT), PushText.of(mapOf("kind" to "timer.start", "label" to "", "from" to "Fiofka")))
+        assertEquals(PushText("Decxus: Can’t make it", "Answering “tackled”", updates = true, open = PushText.OPEN_WING), PushText.of(mapOf("type" to "ack", "ack" to "cant", "text" to "tackled", "pilot" to "$DEC")))
+        assertEquals(PushText("Decxus started a mining session", "Open the Wing screen to join in", updates = true, open = PushText.OPEN_WING), PushText.of(mapOf("type" to "session.start", "activity" to "mining", "pilot" to "$DEC")))
         assertEquals("Fiofka ended the session", PushText.of(mapOf("type" to "session.end", "from" to "Fiofka"))?.title)
     }
 }

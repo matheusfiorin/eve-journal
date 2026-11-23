@@ -34,8 +34,8 @@ class WingAlerts(private val systemName: (Long) -> String? = { null }) {
         if (m.from == me.id) return null
         val who = Pilot.of(m.from)?.displayName ?: "Your wingmate"
         return when (m) {
-            is WingMessage.Ping -> WingAlert(PushText(who, pingText(m.ping) + (m.ping.system?.let { s -> " · ${systemName(s) ?: "system $s"}" } ?: "")), "ping-${m.id}")
-            is WingMessage.Ack -> if (m.kind == WingAck.SEEN) null else WingAlert(PushText("$who: ${ackWord(m.kind)}", "Answering your call", updates = true), "ack-${m.ref}")
+            is WingMessage.Ping -> WingAlert(PushText(who, pingText(m.ping) + (m.ping.system?.let { s -> " · ${systemName(s) ?: "system $s"}" } ?: ""), open = PushText.OPEN_WING), "ping-${m.id}")
+            is WingMessage.Ack -> if (m.kind == WingAck.SEEN) null else WingAlert(PushText("$who: ${ackWord(m.kind)}", "Answering your call", updates = true, open = PushText.OPEN_WING), "ack-${m.ref}")
             is WingMessage.SessionEvent -> session(m.phase, m.session, who)
             is WingMessage.StatusUpdate -> {
                 val there = m.status?.system
@@ -43,15 +43,15 @@ class WingAlerts(private val systemName: (Long) -> String? = { null }) {
                 // Once per arrival: staying together, or a status refresh in the same place, says nothing new.
                 if (!together) { nearby = null; null }
                 else if (nearby == there) null
-                else { nearby = there; WingAlert(PushText("$who is in ${systemName(there!!) ?: "your system"}", "You are in the same system", updates = true), "nearby") }
+                else { nearby = there; WingAlert(PushText("$who is in ${systemName(there!!) ?: "your system"}", "You are in the same system", updates = true, open = PushText.OPEN_WING), "nearby") }
             }
             else -> null
         }
     }
 
     private fun session(phase: String, s: WingSession, who: String): WingAlert? = when (phase) {
-        "start" -> WingAlert(PushText("$who started ${aOrAn(activityWord(s.activity))} session", s.title ?: "Open the Wing screen to see it", updates = true), "session")
-        "end" -> WingAlert(PushText("Session ended", "${s.sum.systems} systems, ${s.sum.timers} timers between you", updates = true), "session")
+        "start" -> WingAlert(PushText("$who started ${aOrAn(activityWord(s.activity))} session", s.title ?: "Open the Wing screen to see it", updates = true, open = PushText.OPEN_WING), "session")
+        "end" -> WingAlert(PushText("Session ended", "${s.sum.systems} systems, ${s.sum.timers} timers between you", updates = true, open = PushText.OPEN_WING), "session")
         else -> null
     }
 }

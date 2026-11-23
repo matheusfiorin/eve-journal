@@ -54,21 +54,31 @@ class PushRegistrar(private val context: Context, private val api: EchelonApi, p
  * What a data message says, in plain words. The room sends {type, kind, pilot (sender id), from (sender name), label |
  * ping + text | ack | activity}; older rooms sent {kind, from (name), ping} and the first app read {type, from (id), kind}:
  * all three shapes are read. [updates] puts it on the quieter "wing updates" channel instead of "Wingmate calls".
+ * [open] is the sub-screen a tap opens ("Destination/key", MainActivity.EXTRA_OPEN): timers go to the Cockpit, whatever the
+ * wingmate said or did to the Wing screen. No payload is read for a location: the room puts none in a push.
  */
-data class PushText(val title: String, val body: String, val updates: Boolean = false) {
+data class PushText(val title: String, val body: String, val updates: Boolean = false, val open: String? = null) {
     companion object {
+        const val OPEN_WING = "Fly/wing"
+        const val OPEN_COCKPIT = "Fly/cockpit"
+
+        /** What a received FCM message shows: the room's data message in words, else a plain notification someone sent, else nothing. */
+        fun ofMessage(data: Map<String, String>, title: String?, body: String?): PushText? =
+            of(data) ?: title?.let { PushText(it, body.orEmpty(), open = OPEN_WING) } ?: body?.let { PushText("Echelon", it, open = OPEN_WING) }
+
         fun of(data: Map<String, String>): PushText? {
-            data["title"]?.let { return PushText(it, data["body"].orEmpty()) }
+            data["title"]?.let { return PushText(it, data["body"].orEmpty(), open = OPEN_WING) }
             val from = data["from"]
             val who = Pilot.of(data["pilot"]?.toLongOrNull() ?: from?.toLongOrNull())?.displayName ?: from?.takeIf { it.isNotBlank() && it.toLongOrNull() == null } ?: "Your wingmate"
             val type = data["type"] ?: data["kind"]
             return when (type) {
-                "timer.start", "timer.upsert" -> PushText("$who started a timer", data["label"]?.takeIf { it.isNotBlank() } ?: "Timer")
-                "timer.end" -> PushText("${data["label"]?.takeIf { it.isNotBlank() } ?: "A timer"} is done", "$who’s timer ended")
-                "ping" -> PushText(who, when (data["ping"] ?: data["kind"]) { "undock" -> "Undocking"; "help" -> "Needs help"; "omw" -> "On my way"; "docked" -> "Docked"; else -> data["text"]?.takeIf { it.isNotBlank() } ?: "Ping" })
-                "ack" -> PushText("$who: ${ackWord(data["ack"] ?: WingAck.SEEN)}", data["text"]?.takeIf { it.isNotBlank() }?.let { "Answering “$it”" } ?: "Answering your call", updates = true)
-                "session.start" -> PushText("$who started ${aOrAn(activityWord(data["activity"] ?: "wing"))} session", "Open the Wing screen to join in", updates = true)
-                "session.end" -> PushText("$who ended the session", "The summary is on the Wing screen", updates = true)
+                "timer.start", "timer.upsert" -> PushText("$who started a timer", data["label"]?.takeIf { it.isNotBlank() } ?: "Timer", open = OPEN_COCKPIT)
+                "timer.end" -> PushText("${data["label"]?.takeIf { it.isNotBlank() } ?: "A timer"} is done", "$who’s timer ended", open = OPEN_COCKPIT)
+                "ping" -> PushText(who, when (data["ping"] ?: data["kind"]) { "undock" -> "Undocking"; "help" -> "Needs help"; "omw" -> "On my way"; "docked" -> "Docked"; else -> data["text"]?.takeIf { it.isNotBlank() } ?: "Ping" }, open = OPEN_WING)
+                "plan" -> PushText("$who sent a plan", data["text"]?.takeIf { it.isNotBlank() } ?: "Open the Wing screen to follow it", updates = true, open = OPEN_WING)
+                "ack" -> PushText("$who: ${ackWord(data["ack"] ?: WingAck.SEEN)}", data["text"]?.takeIf { it.isNotBlank() }?.let { "Answering “$it”" } ?: "Answering your call", updates = true, open = OPEN_WING)
+                "session.start" -> PushText("$who started ${aOrAn(activityWord(data["activity"] ?: "wing"))} session", "Open the Wing screen to join in", updates = true, open = OPEN_WING)
+                "session.end" -> PushText("$who ended the session", "The summary is on the Wing screen", updates = true, open = OPEN_WING)
                 else -> null
             }
         }
@@ -95,7 +105,9 @@ object WingNotifications {
         // Checked inline (not through allowed()) so lint sees the check guarding notify().
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         ensureChannel(context)
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // One request code per notification: with a shared one, UPDATE_CURRENT would rewrite the target of every notification still showing.
+        val intent = text.open?.let { MainActivity.open(context, it) } ?: Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val open = PendingIntent.getActivity(context, tag.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(context, if (text.updates) UPDATES else CHANNEL).setSmallIcon(R.drawable.ic_stat_echelon).setContentTitle(text.title).setContentText(text.body)
             .setAutoCancel(true).setContentIntent(open).setCategory(if (text.updates) NotificationCompat.CATEGORY_STATUS else NotificationCompat.CATEGORY_MESSAGE).setColor(0xFFA58CFF.toInt()).build()
         runCatching { NotificationManagerCompat.from(context).notify(tag, 0, n) }
@@ -110,7 +122,7 @@ class EchelonMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val text = PushText.of(message.data) ?: message.notification?.let { PushText(it.title ?: "Echelon", it.body.orEmpty()) } ?: return
+        val text = PushText.ofMessage(message.data, message.notification?.title, message.notification?.body) ?: return
         WingNotifications.show(this, text, message.data["id"] ?: message.messageId ?: "wing")
     }
 }

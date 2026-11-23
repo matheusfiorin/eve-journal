@@ -60,6 +60,9 @@ jobs:
           EVE_CLIENT_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
           PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Optional background push for the Android app (docs/FIREBASE_SETUP.md); the deploy sets them as Worker secrets when both exist.
+          FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
         run: node scripts/deploy-backend.mjs
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

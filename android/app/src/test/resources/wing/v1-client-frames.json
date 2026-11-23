@@ -1,0 +1,9 @@
+{
+  "timer.upsert": {"type":"timer.upsert","id":"c1","from":2124810474,"at":1800000000000,"timer":{"id":"gas1","kind":"gas","label":"Gas site","startedAt":1800000000000,"durationMs":900000,"owner":2124810474,"shared":true,"meta":{"site":"Barren Perimeter Reservoir"}}},
+  "timer.upsert.paused": {"type":"timer.upsert","id":"c2","from":2124810474,"at":1800000000000,"timer":{"id":"gas1","kind":"gas","label":"Gas site","startedAt":1800000000000,"durationMs":900000,"pausedAt":1800000060000,"owner":2124810474,"shared":true,"meta":{}}},
+  "timer.remove": {"type":"timer.remove","id":"c3","from":2124810474,"at":1800000000000,"timer":{"id":"gas1"}},
+  "plan.share": {"type":"plan.share","id":"c4","from":2124810474,"at":1800000000000,"plan":{"kind":"haul","title":"Jita to Amarr","summary":"","route":[30000142,30000144,30002187]}},
+  "ping": {"type":"ping","id":"c5","from":2124810474,"at":1800000000000,"kind":"custom","text":"Bring paste","system":30000142},
+  "ping.plain": {"type":"ping","id":"c6","from":2124810474,"at":1800000000000,"kind":"undock"},
+  "presence": {"type":"presence","id":"c7","from":2124810474,"at":1800000000000,"online":true,"timers":1}
+}

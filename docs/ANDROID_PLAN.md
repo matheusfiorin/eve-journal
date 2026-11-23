@@ -43,7 +43,7 @@ Deploys work again: the Cloudflare token was replaced, and the deploys for #3 an
 | Fly: app shortcut | Missing |
 | Fly: ProgressStyle notification (Android 16) | Missing (nice to have) |
 | Picture-in-picture Cockpit | **Not built**, though PR #5's description says "picture-in-picture overlay". `CockpitActivity` is an ordinary standalone screen. |
-| Background push (FCM) | Code present. Needs a Firebase project and the Worker secrets. |
+| Background push (FCM) | Built and tested end to end with fakes (room, then notification and deep link). Needs the owner's Firebase project and secrets: `docs/FIREBASE_SETUP.md`. |
 | Opus review of the whole app | Done before #4 ("fixes from a full review"); #5's ~6,400 new lines have no independent review yet |
 
 ## Review of PR #5
@@ -54,10 +54,13 @@ re-recorded, a flaky test was fixed, the wing-room backend changes have tests, a
 1. **Fix the PR description.** It claims a picture-in-picture overlay that isn't built. Either build PiP
    (`supportsPictureInPicture` on `CockpitActivity` plus `enterPictureInPictureMode` with a compact layout) or remove
    the claim.
-2. **The wing-room protocol changed** (live status, acknowledgements, sessions). Make sure an app from #4 still works
+2. **The wing-room protocol changed** (live status, acknowledgements, sessions). **Resolved:** `tests/wingcompat.test.js` and
+   `WingCompatTest.kt` (with a frozen copy of #4's protocol) test an app from #4 against today's room and today's app against older and newer
+   rooms; the `state` hello now carries `proto`. Original ask: make sure an app from #4 still works
    against the #5 backend, and the other way round, since the two pilots may update at different times. Check that
    unknown message types are ignored on both sides and that the `state` snapshot stays compatible.
-3. **Merging #5 redeploys the Worker.** Check that the wing-room changes need no Durable Object migration beyond
+3. **Merging #5 redeploys the Worker.** **Resolved:** no new Durable Object migration tag is needed (same class, only SQLite tables added
+   inside it; a test pins `v1` as the only tag), and the room's schema now migrates itself idempotently with a version row. Original ask: check that the wing-room changes need no Durable Object migration beyond
    `v1`, or that one is added in `scripts/deploy-backend.mjs`.
 
 **Can follow after merging** (the "Missing" items above): sleeper timing with research and a warning, mining from the

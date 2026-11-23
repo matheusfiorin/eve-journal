@@ -1,0 +1,421 @@
+{
+ "state_empty": {
+  "type": "state",
+  "from": 0,
+  "at": 1800000000000,
+  "proto": 2,
+  "timers": [],
+  "items": [],
+  "presence": [
+   {
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "online": true,
+    "timers": 0
+   }
+  ],
+  "statuses": [],
+  "session": null,
+  "sessions": []
+ },
+ "timer.upsert": {
+  "type": "timer.upsert",
+  "id": "m1",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "timer": {
+   "id": "gas1",
+   "kind": "gas",
+   "label": "Gas site",
+   "startedAt": 1800000000000,
+   "durationMs": 900000,
+   "owner": 2124810474,
+   "shared": true,
+   "meta": {
+    "site": "Barren Perimeter Reservoir"
+   }
+  }
+ },
+ "timer.remove": {
+  "type": "timer.remove",
+  "id": "m2",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "timer": {
+   "id": "gas1",
+   "owner": 2124810474
+  }
+ },
+ "ping": {
+  "type": "ping",
+  "id": "p1",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "kind": "help",
+  "text": "Tackled",
+  "system": 30000142
+ },
+ "plan.share": {
+  "type": "plan.share",
+  "id": "pl1",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "plan": {
+   "kind": "haul",
+   "title": "Jita to Amarr",
+   "summary": "Two trips",
+   "route": [
+    30000142,
+    30000144,
+    30002187
+   ]
+  }
+ },
+ "status": {
+  "type": "status",
+  "id": "s1",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "status": {
+   "share": true,
+   "activity": "mining",
+   "system": 30000142,
+   "docked": false,
+   "shipType": 17478,
+   "ship": "Retriever",
+   "destination": 30002187,
+   "route": [
+    30000142,
+    30000144,
+    30002187
+   ],
+   "pilot": 2124810474,
+   "name": "Fiofka",
+   "at": 1800000000000
+  }
+ },
+ "ack": {
+  "type": "ack",
+  "id": "k1",
+  "from": 2124815118,
+  "at": 1800000000000,
+  "ref": "p1",
+  "kind": "onit"
+ },
+ "session.start": {
+  "type": "session.start",
+  "id": "ss1",
+  "from": 2124815118,
+  "at": 1800000000000,
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {}
+  }
+ },
+ "session.update": {
+  "type": "session.update",
+  "id": "ss2",
+  "from": 2124815118,
+  "at": 1800000000000,
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {
+    "2124815118": {
+     "timers": 0,
+     "isk": 1200000,
+     "units": 3400,
+     "systems": []
+    }
+   }
+  }
+ },
+ "state_rich": {
+  "type": "state",
+  "from": 0,
+  "at": 1800000000000,
+  "proto": 2,
+  "timers": [
+   {
+    "id": "gas2",
+    "kind": "gas",
+    "label": "Gas site",
+    "startedAt": 1800000000000,
+    "durationMs": 900000,
+    "owner": 2124810474,
+    "shared": true,
+    "meta": {}
+   }
+  ],
+  "items": [
+   {
+    "type": "ping",
+    "id": "p1",
+    "from": 2124810474,
+    "at": 1800000000000,
+    "kind": "help",
+    "text": "Tackled",
+    "system": 30000142,
+    "acks": {
+     "2124815118": {
+      "kind": "onit",
+      "at": 1800000000000
+     }
+    }
+   },
+   {
+    "type": "plan.share",
+    "id": "pl1",
+    "from": 2124810474,
+    "at": 1800000000000,
+    "plan": {
+     "kind": "haul",
+     "title": "Jita to Amarr",
+     "summary": "Two trips",
+     "route": [
+      30000142,
+      30000144,
+      30002187
+     ]
+    }
+   }
+  ],
+  "presence": [
+   {
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "online": true,
+    "timers": 0
+   },
+   {
+    "pilot": 2124815118,
+    "name": "Decxus",
+    "online": true,
+    "timers": 0
+   }
+  ],
+  "statuses": [
+   {
+    "share": true,
+    "activity": "mining",
+    "system": 30000142,
+    "docked": false,
+    "shipType": 17478,
+    "ship": "Retriever",
+    "destination": 30002187,
+    "route": [
+     30000142,
+     30000144,
+     30002187
+    ],
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "at": 1800000000000
+   }
+  ],
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {
+    "2124815118": {
+     "timers": 0,
+     "isk": 1200000,
+     "units": 3400,
+     "systems": []
+    }
+   }
+  },
+  "sessions": []
+ },
+ "session.end": {
+  "type": "session.end",
+  "id": "ss3",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {
+    "2124815118": {
+     "timers": 0,
+     "isk": 1200000,
+     "units": 3400,
+     "systems": []
+    }
+   },
+   "endedAt": 1800000000000,
+   "endedBy": 2124810474,
+   "totals": {
+    "isk": 1200000,
+    "units": 3400,
+    "timers": 0,
+    "systems": 0
+   }
+  }
+ },
+ "state_after": {
+  "type": "state",
+  "from": 0,
+  "at": 1800000000000,
+  "proto": 2,
+  "timers": [
+   {
+    "id": "gas2",
+    "kind": "gas",
+    "label": "Gas site",
+    "startedAt": 1800000000000,
+    "durationMs": 900000,
+    "owner": 2124810474,
+    "shared": true,
+    "meta": {}
+   }
+  ],
+  "items": [
+   {
+    "type": "ping",
+    "id": "p1",
+    "from": 2124810474,
+    "at": 1800000000000,
+    "kind": "help",
+    "text": "Tackled",
+    "system": 30000142,
+    "acks": {
+     "2124815118": {
+      "kind": "onit",
+      "at": 1800000000000
+     }
+    }
+   },
+   {
+    "type": "plan.share",
+    "id": "pl1",
+    "from": 2124810474,
+    "at": 1800000000000,
+    "plan": {
+     "kind": "haul",
+     "title": "Jita to Amarr",
+     "summary": "Two trips",
+     "route": [
+      30000142,
+      30000144,
+      30002187
+     ]
+    }
+   }
+  ],
+  "presence": [
+   {
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "online": true,
+    "timers": 0
+   },
+   {
+    "pilot": 2124815118,
+    "name": "Decxus",
+    "online": true,
+    "timers": 0
+   }
+  ],
+  "statuses": [
+   {
+    "share": true,
+    "activity": "mining",
+    "system": 30000142,
+    "docked": false,
+    "shipType": 17478,
+    "ship": "Retriever",
+    "destination": 30002187,
+    "route": [
+     30000142,
+     30000144,
+     30002187
+    ],
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "at": 1800000000000
+   }
+  ],
+  "session": null,
+  "sessions": [
+   {
+    "id": "uuid-1",
+    "activity": "mining",
+    "goal": 50000000,
+    "where": 30000142,
+    "title": "Belt run",
+    "startedBy": 2124815118,
+    "startedAt": 1800000000000,
+    "contrib": {
+     "2124815118": {
+      "timers": 0,
+      "isk": 1200000,
+      "units": 3400,
+      "systems": []
+     }
+    },
+    "endedAt": 1800000000000,
+    "endedBy": 2124810474,
+    "totals": {
+     "isk": 1200000,
+     "units": 3400,
+     "timers": 0,
+     "systems": 0
+    }
+   }
+  ]
+ },
+ "status_clear": {
+  "type": "status",
+  "id": "s2",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "status": null
+ },
+ "error": {
+  "type": "error",
+  "from": 0,
+  "at": 1800000000000,
+  "code": "unknown_type"
+ },
+ "presence": {
+  "type": "presence",
+  "from": 0,
+  "at": 1800000000000,
+  "presence": [
+   {
+    "pilot": 2124810474,
+    "name": "Fiofka",
+    "online": true,
+    "timers": 0
+   },
+   {
+    "pilot": 2124815118,
+    "name": "Decxus",
+    "online": true,
+    "timers": 0
+   }
+  ]
+ }
+}

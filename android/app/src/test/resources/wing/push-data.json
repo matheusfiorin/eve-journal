@@ -1,0 +1,77 @@
+{
+ "timer.start": {
+  "type": "timer.start",
+  "pilot": "2124810474",
+  "kind": "timer.start",
+  "label": "Gas site",
+  "from": "Fiofka"
+ },
+ "ping.help": {
+  "type": "ping",
+  "pilot": "2124810474",
+  "kind": "ping",
+  "ping": "help",
+  "text": "",
+  "from": "Fiofka"
+ },
+ "ping.custom": {
+  "type": "ping",
+  "pilot": "2124810474",
+  "kind": "ping",
+  "ping": "custom",
+  "text": "Bring paste",
+  "from": "Fiofka"
+ },
+ "plan.share": {
+  "type": "plan",
+  "pilot": "2124810474",
+  "kind": "plan",
+  "text": "Jita to Amarr",
+  "from": "Fiofka"
+ },
+ "session.start": {
+  "type": "session.start",
+  "pilot": "2124810474",
+  "kind": "session.start",
+  "activity": "mining",
+  "from": "Fiofka"
+ },
+ "ack.onit": {
+  "type": "ack",
+  "pilot": "2124815118",
+  "kind": "ack",
+  "ack": "onit",
+  "text": "",
+  "from": "Decxus"
+ },
+ "ack.cant": {
+  "type": "ack",
+  "pilot": "2124815118",
+  "kind": "ack",
+  "ack": "cant",
+  "text": "Bring paste",
+  "from": "Decxus"
+ },
+ "ack.plan": {
+  "type": "ack",
+  "pilot": "2124815118",
+  "kind": "ack",
+  "ack": "onit",
+  "text": "Jita to Amarr",
+  "from": "Decxus"
+ },
+ "session.end": {
+  "type": "session.end",
+  "pilot": "2124810474",
+  "kind": "session.end",
+  "activity": "mining",
+  "from": "Fiofka"
+ },
+ "timer.end": {
+  "type": "timer.end",
+  "pilot": "2124810474",
+  "kind": "timer.end",
+  "label": "Gas site",
+  "from": ""
+ }
+}

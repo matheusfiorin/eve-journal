@@ -145,13 +145,21 @@ sealed interface WingMessage {
     data class PresenceUpdate(override val id: String, override val from: Long, override val at: Long, val online: Boolean, val timers: Int, val list: List<Presence>? = null) : WingMessage
     /** The room's snapshot, sent first on every connection: current timers and the last shared items (pings, plans). */
     data class State(override val id: String, override val from: Long, override val at: Long, val timers: List<WingTimer>, val items: List<WingMessage>, val presence: List<Presence>,
-        val statuses: List<WingStatus> = emptyList(), val session: WingSession? = null, val sessions: List<WingSession> = emptyList()) : WingMessage
+        val statuses: List<WingStatus> = emptyList(), val session: WingSession? = null, val sessions: List<WingSession> = emptyList(),
+        /** The revision the room speaks (see [WingCodec.PROTOCOL]); 1 when it sends none: a room from before the field. */ val proto: Int = 1) : WingMessage
     data class Error(override val id: String, override val from: Long, override val at: Long, val message: String) : WingMessage
 
     val pilot: Pilot? get() = Pilot.of(from)
 }
 
 object WingCodec {
+    /**
+     * The revision of the protocol this app speaks, to compare with [WingMessage.State.proto]: 1 = timers, plans, pings, presence (PR #4);
+     * 2 = + status, acks, sessions. Compatibility rules, kept by WingCompatTest and tests/wingcompat.test.js: the first revision's fields are
+     * never renamed or removed; additions are optional fields or new message types; an app skips types and fields it does not know, so
+     * two pilots on different builds can share one room. The app never refuses a room for its revision, it only hides what the room lacks.
+     */
+    const val PROTOCOL = 2
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true; encodeDefaults = true }
 
     /** Encodes an outgoing message as the room expects it. */
@@ -211,7 +219,7 @@ object WingCodec {
                 (o["presence"] as? JsonArray)?.mapNotNull { runCatching { json.decodeFromJsonElement(Presence.serializer(), it) }.getOrNull() } ?: emptyList(),
                 (o["statuses"] as? JsonArray)?.mapNotNull { runCatching { json.decodeFromJsonElement(WingStatus.serializer(), it) }.getOrNull() } ?: emptyList(),
                 session(o["session"] as? JsonObject),
-                (o["sessions"] as? JsonArray)?.mapNotNull { session(it as? JsonObject) } ?: emptyList())
+                (o["sessions"] as? JsonArray)?.mapNotNull { session(it as? JsonObject) } ?: emptyList(), o.long("proto")?.toInt() ?: 1)
             "error" -> WingMessage.Error(id, from, at, o.str("message") ?: o.str("error") ?: o.str("code") ?: "The wing room refused a message.")
             else -> null
         }
