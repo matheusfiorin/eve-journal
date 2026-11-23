@@ -44,8 +44,8 @@ import java.util.Date
 class TimerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watch: Job? = null
-    /** Timer ends already announced, by id and end time (a restart is a new end). */
-    private val rung = mutableSetOf<Pair<String, Long>>()
+    /** Alerts already announced (warnings and ends), by [TimerAlert.key]: a restart is a new end, so a new key. */
+    private val rung = mutableSetOf<String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -57,22 +57,28 @@ class TimerService : Service() {
         val container = (application as EchelonApp).container
         container.wingChannel.onTimerServiceStarted()
         val store = container.fly.timers
-        // Ends already past when the service starts were seen in the app; only new ends ring.
+        // Alerts already past when the service starts were seen in the app (or rung by their alarm); only new ones ring.
         val start = System.currentTimeMillis()
-        store.timers.value.values.filter { it.done(start) }.forEach { rung += it.id to it.endsAt }
+        store.timers.value.values.forEach { t -> allAlerts(t).filter { it.at <= start }.forEach { rung += it.key } }
         watch = scope.launch {
             store.timers.collectLatest { all ->
                 while (true) {
                     val now = System.currentTimeMillis()
-                    all.values.filter { it.done(now) && (it.id to it.endsAt) !in rung && now - it.endsAt < RING_WINDOW }.forEach { t ->
-                        rung += t.id to t.endsAt
-                        TimerNotifications.done(this@TimerService, t, mine = t.owner == container.selectedPilot.value?.id, systems = systems(container))
+                    val systems = systems(container)
+                    val me = container.selectedPilot.value?.id
+                    all.values.forEach { t ->
+                        dueAlerts(t, now, RING_WINDOW, t.systemNameIn(systems)).filter { rung.add(it.key) }.forEach { a ->
+                            // The alarm for the same alert may have rung already: same tag and id, and only-alert-once, so it replaces it quietly.
+                            TimerNotifications.alert(this@TimerService, a, who = Pilot.of(t.owner)?.takeIf { t.owner != me }?.displayName)
+                            if (a.kind == AlertKind.End) store.advance(t.id, a.endsAt)
+                        }
                     }
                     val board = TimerBoard.of(all.values, now)
                     if (board.next == null) { stop(); return@collectLatest }
-                    TimerNotifications.update(this@TimerService, board.next, board.runningCount, now, systems(container))
-                    // Wake at the next end, or within a minute to keep the text's "N running" honest.
-                    delay((board.next.endsAt - now).coerceIn(250, 60_000))
+                    TimerNotifications.update(this@TimerService, board.next, board.runningCount, now, systems)
+                    // Wake at the next alert or end, or within a minute to keep the text's "N running" honest.
+                    val nextAlert = all.values.flatMap { alertsOf(it, now) }.minOfOrNull { it.at } ?: board.next.endsAt
+                    delay((nextAlert - now).coerceIn(250, 60_000))
                 }
             }
         }
@@ -111,66 +117,3 @@ class TimerService : Service() {
     }
 }
 
-/** The timer notifications: one ongoing (the next end, counting down in the shade) and one alert per finished timer. */
-object TimerNotifications {
-    const val ONGOING = "timers"
-    const val DONE = "timers_done"
-
-    fun ensureChannels(context: Context) {
-        val nm = context.getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(ONGOING) == null) nm.createNotificationChannel(NotificationChannel(ONGOING, "Running timers", NotificationManager.IMPORTANCE_LOW).apply { description = "The next timer to end, while timers run"; setShowBadge(false) })
-        if (nm.getNotificationChannel(DONE) == null) nm.createNotificationChannel(NotificationChannel(DONE, "Timer ended", NotificationManager.IMPORTANCE_HIGH).apply { description = "A timer reached zero"; enableVibration(true) })
-    }
-
-    private fun open(context: Context) = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
-    /** The ongoing notification: the next timer and its system ("Gas site in Tama") and a chronometer counting down to its end. */
-    fun ongoing(context: Context, next: WingTimer?, running: Int, now: Long, systems: Map<Long, SolarSystem> = emptyMap()) = NotificationCompat.Builder(context, ONGOING)
-        .setSmallIcon(R.drawable.ic_stat_echelon).setColor(0xFFA58CFF.toInt()).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
-        .setCategory(NotificationCompat.CATEGORY_STOPWATCH).setContentIntent(open(context)).setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        .apply {
-            if (next == null) setContentTitle("Timers").setContentText("Starting…")
-            else {
-                setContentTitle(next.title(systems)).setContentText(ongoingText(next, running))
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(ongoingLine(next, running, at(next.endsAt), systems)))
-                setWhen(next.endsAt).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
-            }
-        }.build()
-
-    private fun at(time: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(time))
-
-    /** "Ends at 14:32 · 3 running" */
-    fun ongoingText(next: WingTimer, running: Int): String = ongoingText(at(next.endsAt), running)
-
-    /** "Ends at 14:32 · 3 running", with the end time already formatted. */
-    fun ongoingText(at: String, running: Int): String = if (running > 1) "Ends at $at · $running running" else "Ends at $at"
-
-    /** The expanded line: "Gas site in Tama ends at 14:32 · 3 running". */
-    fun ongoingLine(next: WingTimer, running: Int, at: String, systems: Map<Long, SolarSystem> = emptyMap()): String =
-        "${next.title(systems)} ends at $at" + if (running > 1) " · $running running" else ""
-
-    /** "Gas site in Tama is done" (yours) or "Decxus’s Gas site in Tama is done". */
-    fun doneTitle(t: WingTimer, mine: Boolean, systems: Map<Long, SolarSystem> = emptyMap()): String {
-        val who = Pilot.of(t.owner)?.displayName
-        val what = t.title(systems)
-        return if (mine || who == null) "$what is done" else "$who’s $what is done"
-    }
-
-    fun update(context: Context, next: WingTimer, running: Int, now: Long, systems: Map<Long, SolarSystem> = emptyMap()) {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        runCatching { NotificationManagerCompat.from(context).notify(TimerService.ONGOING_ID, ongoing(context, next, running, now, systems)) }
-    }
-
-    /** The alert when a timer ends: [doneTitle], and how long it ran. */
-    fun done(context: Context, t: WingTimer, mine: Boolean, systems: Map<Long, SolarSystem> = emptyMap()) {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val title = doneTitle(t, mine, systems)
-        val n = NotificationCompat.Builder(context, DONE).setSmallIcon(R.drawable.ic_stat_echelon).setColor(0xFFA58CFF.toInt())
-            .setContentTitle(title).setContentText("Ran ${clock(t.durationMs)}").setAutoCancel(true).setContentIntent(open(context))
-            .setCategory(NotificationCompat.CATEGORY_ALARM).setPriority(NotificationCompat.PRIORITY_HIGH).build()
-        runCatching { NotificationManagerCompat.from(context).notify(t.id, DONE_ID, n) }
-    }
-
-    private const val DONE_ID = 4101
-}

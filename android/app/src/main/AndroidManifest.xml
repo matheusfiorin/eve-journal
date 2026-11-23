@@ -7,6 +7,10 @@
     <!-- Fly timers: an ongoing countdown and an alert at zero while the app is in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Fly timers: exact alarms for the warning before the end and for the end (a rationale screen sends the person to the
+         switch; without it the alerts still come, only possibly late). RECEIVE_BOOT_COMPLETED sets them again after a reboot. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".EchelonApp"
@@ -44,6 +48,18 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-started countdown timers for a game session, shown in an ongoing notification with an alert when each ends." />
         </service>
+        <!-- Fly timers' exact alarms: posts the warning or the end even if the service and the app were killed. -->
+        <receiver android:name=".fly.timers.TimerAlarmReceiver" android:exported="false" />
+        <!-- Sets the alarms again after a reboot, an update, a clock change or a change of the exact-alarm switch. -->
+        <receiver android:name=".fly.timers.TimerBootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <!-- The cockpit on its own (fly.cockpit.CockpitActivity): opened by the home-screen widget, and by a long press on
              the Quick Settings tile (QS_TILE_PREFERENCES). Not exported beyond that intent. -->
         <activity
