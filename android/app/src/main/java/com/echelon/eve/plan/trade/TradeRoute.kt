@@ -67,7 +67,7 @@ suspend fun AppContainer.tradePlan(pilot: Pilot, s: TradeSettings): TradeResult?
 
 /** The flying pilot's orders through orders.view (ui/ordersview.js), or why they can't be shown. */
 suspend fun AppContainer.myOrders(pilot: Pilot): OrdersState {
-    val own = pilots.state(pilot).private ?: return OrdersState(note = "${pilot.displayName}’s orders are private. Connect ${pilot.displayName} on this phone to see them.")
+    val own = pilots.state(pilot).private ?: return OrdersState(note = "Connect ${pilot.displayName} in Settings to see your orders.")
     val orders = own.op("orders") ?: return OrdersState(note = "Not synced yet. Pull down on the Plan hub to sync.")
     if (orders.permission == false) return OrdersState(note = "${pilot.displayName} has not allowed Echelon to read market orders. Reconnect them in Settings to grant it.")
     val live = orders.value as? JsonArray ?: return OrdersState(note = orders.error ?: "Not synced yet. Pull down on the Plan hub to sync.")

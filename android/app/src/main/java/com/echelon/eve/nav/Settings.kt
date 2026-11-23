@@ -52,7 +52,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-/** Settings: the pilots connected on this phone (connect, reconnect, sign out, disconnect), appearance, and about. */
+/** Settings: this phone's pilot (connect, reconnect, sign out, disconnect), appearance, and about. One phone, one pilot. */
 @Composable
 fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit, zone: ZoneId = ZoneId.systemDefault()) {
     val c = Echelon.colors
@@ -61,8 +61,10 @@ fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit,
         BackBar("Settings", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.navigationBars).fillMaxWidth().wrapContentWidth().widthIn(max = Spacing.maxContent).padding(horizontal = Spacing.gutter).padding(bottom = Spacing.xxl),
             verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            SectionHeader("Pilots", subtitle = "Each pilot connects once. The backend keeps the EVE sign-in; this phone keeps only a session, locked with its keystore.")
-            state.pilots.forEach { p -> PilotCard(p, state.selected == p.pilot, actions, zone, onDisconnect = { confirm = p.pilot }) }
+            val mate = state.pilots.firstOrNull { it.pilot != state.selected }
+            SectionHeader("Pilot", subtitle = "This phone flies as ${state.selected?.displayName ?: "one pilot"}." + (mate?.let { " ${it.name} connects on their own phone; what they share reaches you through the wing." } ?: "") +
+                " The backend keeps the EVE sign-in; this phone keeps only a session, locked with its keystore.")
+            state.current?.let { p -> PilotCard(p, actions, zone, onDisconnect = { confirm = p.pilot }) }
 
             SectionHeader("Appearance")
             EchelonCard {
@@ -104,7 +106,7 @@ fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit,
 }
 
 @Composable
-private fun PilotCard(p: PilotState, selected: Boolean, actions: ShellActions, zone: ZoneId, onDisconnect: () -> Unit) {
+private fun PilotCard(p: PilotState, actions: ShellActions, zone: ZoneId, onDisconnect: () -> Unit) {
     val c = Echelon.colors
     val colors = PilotColors.of(p.id)
     val expired = p.problem?.kind == Problem.Kind.Expired
@@ -114,7 +116,6 @@ private fun PilotCard(p: PilotState, selected: Boolean, actions: ShellActions, z
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     Text(p.name, style = MaterialTheme.typography.titleMedium, color = colors.color)
-                    if (selected) Tag("Flying", tone = Tone.Accent)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     StatusDot(if (expired) Tone.Warn else if (p.connected) Tone.Ok else Tone.Neutral)
@@ -133,7 +134,6 @@ private fun PilotCard(p: PilotState, selected: Boolean, actions: ShellActions, z
                     LinkButton("Disconnect", onDisconnect, tone = Tone.Danger)
                 }
             }
-            if (!selected) LinkButton("Fly as ${p.name}", { actions.selectPilot(p.pilot) })
         }
     }
 }

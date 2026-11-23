@@ -47,7 +47,7 @@ fun missing(state: PilotState?, op: Operation?, what: String, sharedByWing: Bool
     if (sharedByWing) return null
     val name = state?.name ?: "This pilot"
     return when {
-        state == null || (!state.connected && state.private == null) -> "$name is not connected on this phone and does not share $what with the wing."
+        state == null || (!state.connected && state.private == null) -> "$name does not share $what with the wing yet. They turn it on when connecting on their own phone."
         state.problem != null && state.private == null -> state.problem.message
         op == null -> "Not synced yet. Pull down on the Fly hub to sync."
         op.permission == false -> "$name has not allowed Echelon to read $what. Reconnect them in Settings to grant it."

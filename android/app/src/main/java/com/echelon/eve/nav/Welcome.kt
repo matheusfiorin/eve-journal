@@ -115,8 +115,8 @@ fun WelcomeScreen(state: ShellState, actions: ShellActions, initialChosen: Pilot
 private fun Picker(state: ShellState, onPick: (Pilot) -> Unit) {
     val c = Echelon.colors
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        Text("Who’s flying?", style = MaterialTheme.typography.titleLarge, color = c.text)
-        Text("Every screen centres on this pilot, with the wingmate’s plans alongside.", style = MaterialTheme.typography.bodyMedium, color = c.textMuted, textAlign = TextAlign.Center)
+        Text("Whose phone is this?", style = MaterialTheme.typography.titleLarge, color = c.text)
+        Text("Each pilot uses their own phone. Pick yours; your wingmate’s timers, calls and plans reach you through the wing.", style = MaterialTheme.typography.bodyMedium, color = c.textMuted, textAlign = TextAlign.Center)
         state.pilots.forEachIndexed { i, p -> PilotChoice(p, Modifier.entrance(3 + i)) { onPick(p.pilot) } }
     }
 }

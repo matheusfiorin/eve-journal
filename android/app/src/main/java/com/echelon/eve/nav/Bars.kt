@@ -155,7 +155,8 @@ private fun SyncIndicator(state: ShellState, actions: ShellActions, zone: ZoneId
 }
 
 /**
- * The pilot switcher: who is flying; the menu shows both pilots with their sign-in state. The pill is drawn 40 dp tall
+ * The pilot badge: who this phone flies as (each pilot has their own phone; the wingmate is seen through the wing),
+ * with its sign-in state in a small menu. The pill is drawn 40 dp tall
  * inside a 48 dp target; switching pilots rolls the portrait and name over.
  */
 @Composable
@@ -169,8 +170,9 @@ fun PilotSwitcher(state: ShellState, actions: ShellActions) {
     val reduced = Echelon.reduceMotion
     val pill = RoundedCornerShape(99.dp)
     Box {
-        Box(Modifier.height(Spacing.touch).clickable(interaction, null, onClickLabel = "Switch pilot") { open = true }
-            .semantics { contentDescription = "Flying as ${current?.displayName ?: "nobody"}. Switch pilot" }, contentAlignment = Alignment.Center) {
+        // One phone, one pilot: the badge says who this phone flies as; tapping it shows the sign-in state, nothing more.
+        Box(Modifier.height(Spacing.touch).clickable(interaction, null, onClickLabel = "Sign-in state") { open = true }
+            .semantics { contentDescription = "This phone flies as ${current?.displayName ?: "nobody yet"}" }, contentAlignment = Alignment.Center) {
             Row(Modifier.pressScale(interaction, .95f).height(40.dp).clip(pill).background(colors.soft).border(1.dp, colors.color.copy(alpha = .5f), pill)
                 .then(Modifier.drawBehind { drawRect(Brush.horizontalGradient(listOf(colors.color.copy(alpha = .14f), Color.Transparent))) })
                 .padding(start = 4.dp, end = 12.dp),
@@ -184,16 +186,14 @@ fun PilotSwitcher(state: ShellState, actions: ShellActions) {
                         Text(p?.displayName ?: "Choose pilot", style = MaterialTheme.typography.labelLarge, color = c.text)
                     }
                 }
-                Icon(EchelonIcons.Swap, null, Modifier.size(14.dp), tint = c.textMuted)
             }
         }
         DropdownMenu(open, { open = false }, containerColor = c.surface2) {
-            state.pilots.forEach { p ->
+            state.current?.let { p ->
                 DropdownMenuItem(
                     text = { Column { Text(p.name, style = MaterialTheme.typography.titleSmall, color = PilotColors.of(p.id).color); Text(statusOf(p), style = MaterialTheme.typography.bodySmall, color = c.textMuted) } },
                     leadingIcon = { Portrait(p.id, PilotColors.of(p.id), size = 32.dp) },
-                    trailingIcon = { if (p.pilot == current) Icon(EchelonIcons.Check, "Selected", tint = c.accent) },
-                    onClick = { open = false; haptics.select(); actions.selectPilot(p.pilot) },
+                    onClick = { open = false; haptics.select() },
                 )
             }
         }
