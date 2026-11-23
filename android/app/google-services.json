@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "398383650296",
+    "project_id": "echelon-13ce1",
+    "storage_bucket": "echelon-13ce1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:398383650296:android:3350097a72780c5b86720d",
+        "android_client_info": {
+          "package_name": "com.echelon.eve"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0YM5ti3mIv-ypccxm1y6rcc6OtJBRsvM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:398383650296:android:2b25ce457552b9ce86720d",
+        "android_client_info": {
+          "package_name": "com.echelon.eve.debug"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0YM5ti3mIv-ypccxm1y6rcc6OtJBRsvM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

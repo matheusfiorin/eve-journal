@@ -42,8 +42,8 @@ Deploys work again: the Cloudflare token was replaced, and the deploys for #3 an
 | Fly: Quick Settings tile, home widget | Done in #5; a second "Gas timer" tile (start, or show and stop) added in the finish wave |
 | Fly: app shortcut | Done (finish wave): Gas timer, Mining cycle, Cockpit |
 | Fly: ProgressStyle notification (Android 16) | Done (finish wave), guarded to API 36 |
-| Picture-in-picture Cockpit | **Not built**, though PR #5's description says "picture-in-picture overlay". `CockpitActivity` is an ordinary standalone screen. |
-| Background push (FCM) | Built and tested end to end with fakes (room, then notification and deep link). Needs the owner's Firebase project and secrets: `docs/FIREBASE_SETUP.md`. |
+| Picture-in-picture Cockpit | Done: auto-enters while a timer runs; ring, system, wingmate dot; Pause/Resume and +1 min actions (`fly/cockpit/CockpitPip*.kt`) |
+| Background push (FCM) | Done. Project `echelon-13ce1`: `android/app/google-services.json` (release and debug app ids) is committed, and the Worker secrets `FCM_PROJECT_ID` / `FCM_SERVICE_ACCOUNT` are set. Not yet tried on a device. |
 | Opus review of the whole app | Done before #4 ("fixes from a full review"); #5's ~6,400 new lines have no independent review yet |
 
 ## Review of PR #5

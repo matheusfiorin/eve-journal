@@ -36,7 +36,7 @@ for push.
    for the app but no secret that can send messages; it is the same file every install of the app carries.
 
 ## 3. Put google-services.json in the app
-- **Building on your computer:** copy it to `android/app/google-services.json`. Git ignores that path. The build applies
+- **Done for this project:** `android/app/google-services.json` (project `echelon-13ce1`, with both `com.echelon.eve` and `com.echelon.eve.debug`) is committed, so every build, CI's debug APK included, has Firebase. Its contents ship inside every APK anyway; only the service account can send pushes. To use another project, replace that file. The build applies
   the Google services plugin only when the file exists, so nothing else changes. Build as usual
   (`cd android && ./gradlew :app:assembleDebug`) and install.
 - **The APK from GitHub (a `v*` tag builds a signed release):** add the repository Actions secret
