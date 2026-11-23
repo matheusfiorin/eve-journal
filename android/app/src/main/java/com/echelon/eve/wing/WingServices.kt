@@ -9,6 +9,7 @@ import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.model.Ship
 import com.echelon.eve.core.wing.SessionPlan
 import com.echelon.eve.core.wing.jumpsBetween
+import com.echelon.eve.fly.fly
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import java.util.WeakHashMap
@@ -41,6 +42,7 @@ class WingServices(private val c: AppContainer) {
         if (started) return
         started = true
         publisher.start(); reporter.start(); notifier.start()
+        c.fly.gasOps.start()
     }
 
     /** Where [p] is: GET /api/live when it answers, else the last synced snapshot. The ship is named by its type. */

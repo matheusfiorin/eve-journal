@@ -12,6 +12,8 @@ class FlyServices(val container: AppContainer) {
     val timers = TimerStore(container)
     /** The mining cycle and hold-full time from the flying pilot's fit and skills (ESI dogma, cached). */
     val mining = com.echelon.eve.fly.timers.MiningLoader(container)
+    /** The live gas estimate's inputs and the sync of the pilot's gas operations to the wing room. */
+    val gasOps by lazy { com.echelon.eve.fly.timers.GasOperations(container) }
     /** GET /api/live on a schedule while the cockpit or Where I am is open (one schedule for both). */
     val cockpit = com.echelon.eve.fly.cockpit.CockpitLive({ FlyLoader(container).live(it) })
 
