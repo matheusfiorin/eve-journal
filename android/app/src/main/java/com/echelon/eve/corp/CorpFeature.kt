@@ -26,13 +26,55 @@ import kotlinx.coroutines.launch
 object CorpFeature : Feature {
     override val destination = Destination.Corp
     override fun install(registry: FeatureRegistry) {
-        registry.register(destination, SubScreen("starbases", "Starbases", "Fuel, strontium and reinforcement", EchelonIcons.Alert, 10) { CorpRoute(it) { load, names, now, retry -> StarbasesScreen(load, names, now, retry) } })
-        registry.register(destination, SubScreen("structures", "Structures", "Fuel expiry, services and state", EchelonIcons.Corp, 20) { CorpRoute(it) { load, names, now, retry -> StructuresScreen(load, names, now, retry) } })
+        // The overview leads the hub: its card is the console in miniature (mark, treasury, health rings); a tap opens the full one.
+        registry.register(destination, SubScreen("overview", "Overview", "Health, fuel and treasury at a glance", EchelonIcons.Gauge, 0,
+            card = { ctx, onOpen -> OverviewCardRoute(ctx, onOpen) }) { OverviewRoute(it) })
+        // Starbases and structures take an item id as their argument (a notification's deep link, a tap in the fuel bay): it scrolls to and lights that one.
+        registry.register(destination, SubScreen("starbases", "Starbases", "Fuel, strontium and reinforcement", EchelonIcons.Alert, 10) { ctx -> CorpRoute(ctx) { load, names, now, retry -> StarbasesScreen(load, names, now, retry, focus = ctx.arg?.toLongOrNull()) } })
+        registry.register(destination, SubScreen("structures", "Structures", "Fuel expiry, services and state", EchelonIcons.Corp, 20) { ctx -> CorpRoute(ctx) { load, names, now, retry -> StructuresScreen(load, names, now, retry, focus = ctx.arg?.toLongOrNull()) } })
+        registry.register(destination, SubScreen("refuel", "Refuel planner", "Blocks, cargo and a shopping list for 7, 14 or 30 days", EchelonIcons.Timer, 25) { RefuelRoute(it) })
         registry.register(destination, SubScreen("wallet", "Wallet", "Corporation wallet divisions", EchelonIcons.Corp, 30) { CorpRoute(it) { load, _, now, retry -> WalletScreen(load, now, retry) } })
         registry.register(destination, SubScreen("members", "Members", "Who is in the corporation", EchelonIcons.Wing, 40) { CorpRoute(it) { load, _, now, retry -> MembersScreen(load, now, retry) } })
         registry.register(destination, SubScreen("industry", "Corp jobs", "Corporation industry jobs", EchelonIcons.Check, 50) { CorpRoute(it) { load, names, now, retry -> CorpJobsScreen(load, names, now, retry) } })
         registry.register(destination, SubScreen("customs", "Customs offices", "Planetary customs offices", EchelonIcons.Route, 60) { CorpRoute(it) { load, names, now, retry -> CustomsScreen(load, names, now, retry) } })
         registry.register(destination, SubScreen("assets", "Assets", "Personal and corp assets by location", EchelonIcons.Search, 70) { AssetsRoute(it) })
+    }
+
+    /** The hourly alert job: unique work, so every app start keeps the one schedule (see CorpAlertWork.kt). */
+    override fun start(container: AppContainer) { runCatching { CorpAlertScheduler.schedule(container.app) } }
+}
+
+@Composable
+private fun OverviewCardRoute(ctx: ScreenContext, onOpen: () -> Unit) {
+    val c = LocalAppContainer.current
+    val now = rememberNow(periodMillis = 30_000)
+    if (c == null) { CorpOverviewCard(Load.Loading, null, now, onOpen); return }
+    val repo = c.corp
+    val load by repo.corp.collectAsStateWithLifecycle()
+    val info by repo.info.collectAsStateWithLifecycle()
+    LaunchedEffect(ctx.pilot) { repo.refreshCorp(ctx.pilot) }
+    LaunchedEffect(load) { (load as? Load.Ready)?.value?.corporationId?.let { repo.refreshInfo(it) } }
+    CorpOverviewCard(load, (load as? Load.Ready)?.value?.let { info[it.corporationId] }, now, onOpen)
+}
+
+@Composable
+private fun OverviewRoute(ctx: ScreenContext) {
+    val c = LocalAppContainer.current
+    val infos = c?.corp?.info?.collectAsStateWithLifecycle()
+    CorpRoute(ctx) { load, names, now, retry ->
+        val corp = (load as? Load.Ready)?.value?.corporationId
+        LaunchedEffect(corp) { if (corp != null) c?.corp?.refreshInfo(corp) }
+        CorpOverviewScreen(load, corp?.let { infos?.value?.get(it) }, names, now, retry, open = { key, arg -> ctx.open(Destination.Corp, key, arg) })
+    }
+}
+
+@Composable
+private fun RefuelRoute(ctx: ScreenContext) {
+    var days by rememberSaveable { mutableStateOf(14) }
+    var blockName by rememberSaveable { mutableStateOf(FuelBlock.Helium.name) }
+    val (copied, copy) = rememberCopier()
+    CorpRoute(ctx) { load, names, now, retry ->
+        RefuelScreen(load, names, now, days, { days = it }, FuelBlock.valueOf(blockName), { blockName = it.name }, copied, copy, retry)
     }
 }
 

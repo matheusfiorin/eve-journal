@@ -5,6 +5,7 @@ import com.echelon.eve.core.api.ApiError
 import com.echelon.eve.core.api.EchelonJson
 import com.echelon.eve.core.api.await
 import com.echelon.eve.core.esi.EveNames
+import com.echelon.eve.core.esi.eveNames
 import com.echelon.eve.core.model.IndustryJob
 import com.echelon.eve.core.model.Pilot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,6 +103,9 @@ data class CorpSnapshot(
     }
 }
 
+/** A corporation's public name and ticker. */
+data class CorpInfo(val name: String, val ticker: String)
+
 /** GET /api/assets: one place (station, structure, solar system) with its items, containers holding theirs. */
 @Serializable
 data class AssetItem(@kotlinx.serialization.SerialName("item_id") val itemId: Long, @kotlinx.serialization.SerialName("type_id") val typeId: Long,
@@ -134,6 +138,16 @@ class CorpRepository(private val c: AppContainer) {
     private val _prices = MutableStateFlow<Map<Long, Double>>(emptyMap())
     val prices: StateFlow<Map<Long, Double>> = _prices.asStateFlow()
     private var pricesAt = 0L
+    private val _info = MutableStateFlow<Map<Long, CorpInfo>>(emptyMap())
+    /** The corporation's public name and ticker by id (ESI corporations/{id}); the snapshot carries only the id. */
+    val info: StateFlow<Map<Long, CorpInfo>> = _info.asStateFlow()
+
+    suspend fun refreshInfo(corporationId: Long) {
+        if (corporationId <= 0 || corporationId in _info.value) return
+        val o = c.eveNames.get("corporations/$corporationId") ?: return
+        val name = (o["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return
+        _info.value = _info.value + (corporationId to CorpInfo(name, (o["ticker"] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()))
+    }
 
     private fun token(prefer: Pilot?): String? = (listOfNotNull(prefer) + Pilot.entries).firstNotNullOfOrNull { c.sessions.token(it.id) }
 

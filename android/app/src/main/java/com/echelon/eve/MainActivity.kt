@@ -62,14 +62,15 @@ class MainActivity : ComponentActivity() {
 
     private fun readOpen(intent: Intent?) {
         val target = intent?.getStringExtra(EXTRA_OPEN) ?: return
-        val (d, key) = target.split('/', limit = 2).takeIf { it.size == 2 } ?: return
+        val parts = target.split('/', limit = 3).takeIf { it.size >= 2 } ?: return
+        val (d, key) = parts
         if (com.echelon.eve.nav.Destination.entries.none { it.name == d }) return
-        openRoute.value = com.echelon.eve.nav.SubRoute(d, key)
+        openRoute.value = com.echelon.eve.nav.SubRoute(d, key, parts.getOrNull(2)) // "Corp/structures/<id>": the third part is the screen's argument
         intent.removeExtra(EXTRA_OPEN)
     }
 
     companion object {
-        /** An extra naming a sub-screen to open, "Destination/key", e.g. "Fly/cockpit". */
+        /** An extra naming a sub-screen to open, "Destination/key[/arg]", e.g. "Fly/cockpit" or "Corp/structures/<id>". */
         const val EXTRA_OPEN = "com.echelon.eve.OPEN"
         fun open(context: android.content.Context, target: String): Intent =
             Intent(context, MainActivity::class.java).putExtra(EXTRA_OPEN, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)

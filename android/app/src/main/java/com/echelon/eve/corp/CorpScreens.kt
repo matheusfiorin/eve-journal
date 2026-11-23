@@ -114,7 +114,7 @@ fun sectionProblem(e: String): String = when {
 
 // ── Starbases ──
 @Composable
-fun StarbasesScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRetry: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true) = CorpPage(modifier, scroll) {
+fun StarbasesScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRetry: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true, focus: Long? = null) = CorpPage(modifier, scroll) {
     CorpSection(load, now, { it.starbases }, onRetry, "The corporation has no starbases.") { _, list ->
         val c = Echelon.colors
         val low = list.count { it.state == "online" && (it.fuelHoursLeft ?: Double.MAX_VALUE) < 24 }
@@ -129,8 +129,8 @@ fun StarbasesScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRet
         list.sortedWith(compareBy({ it.state != "reinforced" }, { it.fuelHoursLeft ?: Double.MAX_VALUE })).forEach { t ->
             val left = t.fuelHoursLeft
             val tone = when { t.state == "reinforced" -> Tone.Danger; left != null && left < 24 -> Tone.Danger; left != null && left < 72 -> Tone.Warn; else -> Tone.Neutral }
-            EchelonCard(tone = tone) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            EchelonCard(Modifier.deepLinkFocus(t.id == focus), tone = tone) {
+                Row(Modifier.reinforcedPulse(t.isReinforced()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                     TypeIcon(t.type, size = 40.dp, contentDescription = names.type(t.type))
                     Column(Modifier.weight(1f)) {
                         Text(names.type(t.type), style = MaterialTheme.typography.titleSmall, color = c.text)
@@ -142,7 +142,7 @@ fun StarbasesScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRet
                     Tag(stateWord(t.state), tone = if (t.state == "online") Tone.Ok else if (t.state == "reinforced") Tone.Danger else Tone.Warn)
                 }
                 if (left != null) {
-                    ProgressBar((left / 720.0).toFloat().coerceIn(0f, 1f), Modifier.fillMaxWidth().padding(top = Spacing.sm), color = when (tone) { Tone.Danger -> c.danger; Tone.Warn -> c.warn; else -> c.ok })
+                    LiquidGauge((left / Thresholds.TOWER_GAUGE_HOURS).toFloat(), when (tone) { Tone.Danger -> c.danger; Tone.Warn -> c.warn; else -> c.ok }, Modifier.padding(top = Spacing.sm), mark = (Thresholds.TOWER_HOURS / Thresholds.TOWER_GAUGE_HOURS).toFloat())
                     KeyValueRow("Fuel left", if (t.state == "online") duration(left * 3600) else "${duration(left * 3600)} (not burning)")
                 } else KeyValueRow("Fuel", "Not read")
                 KeyValueRow("Fuel blocks", "%,d".format(t.fuelBlocks))
@@ -161,7 +161,7 @@ private fun stateWord(s: String?) = when (s) { null -> "Unknown"; "online" -> "O
 
 // ── Structures ──
 @Composable
-fun StructuresScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRetry: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true) = CorpPage(modifier, scroll) {
+fun StructuresScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRetry: () -> Unit, modifier: Modifier = Modifier, scroll: Boolean = true, focus: Long? = null) = CorpPage(modifier, scroll) {
     CorpSection(load, now, { it.structures }, onRetry, "The corporation has no Upwell structures.") { _, list ->
         val c = Echelon.colors
         val low = list.count { (it.fuelDaysLeft ?: Double.MAX_VALUE) < 3 }
@@ -176,8 +176,9 @@ fun StructuresScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRe
         list.sortedWith(compareBy({ !(it.state == "armor_reinforce" || it.state == "hull_reinforce") }, { it.fuelDaysLeft ?: Double.MAX_VALUE })).forEach { s ->
             val days = s.fuelDaysLeft
             val reinforced = s.state == "armor_reinforce" || s.state == "hull_reinforce"
-            EchelonCard(tone = when { reinforced -> Tone.Danger; days != null && days < 3 -> Tone.Warn; else -> Tone.Neutral }) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            val tone = when { reinforced -> Tone.Danger; days != null && days < 3 -> Tone.Warn; else -> Tone.Neutral }
+            EchelonCard(Modifier.deepLinkFocus(s.id == focus), tone = tone) {
+                Row(Modifier.reinforcedPulse(reinforced), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                     TypeIcon(s.type, size = 40.dp, contentDescription = names.type(s.type))
                     Column(Modifier.weight(1f)) {
                         Text(s.name ?: names.type(s.type), style = MaterialTheme.typography.titleSmall, color = c.text)
@@ -188,6 +189,7 @@ fun StructuresScreen(load: Load<CorpSnapshot>, names: CorpNames, now: Long, onRe
                     }
                     Tag(stateWord(s.state), tone = if (reinforced) Tone.Danger else if (s.state == "shield_vulnerable") Tone.Ok else Tone.Warn)
                 }
+                if (days != null) LiquidGauge((days / Thresholds.STRUCTURE_GAUGE_DAYS).toFloat(), when (tone) { Tone.Danger -> c.danger; Tone.Warn -> c.warn; else -> c.ok }, Modifier.padding(top = Spacing.xs), mark = (Thresholds.STRUCTURE_DAYS / Thresholds.STRUCTURE_GAUGE_DAYS).toFloat())
                 KeyValueRow("Fuel", days?.let { if (it <= 0) "Out of fuel" else "${duration(it * 86400)} left" } ?: "No fuel (low power or never fuelled)")
                 iso(s.stateTimerEnd)?.let { KeyValueRow("State timer ends", if (it > now) "in ${duration((it - now) / 1000.0)}" else "passed") }
                 s.reinforceHour?.let { KeyValueRow("Reinforce hour", "%02d:00 EVE".format(it)) }

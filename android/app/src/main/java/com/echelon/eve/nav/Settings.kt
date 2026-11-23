@@ -80,6 +80,8 @@ fun SettingsScreen(state: ShellState, actions: ShellActions, onBack: () -> Unit,
                 Text("With reduced motion, screens change without sliding and numbers don’t count up. Turning off animations in Android’s settings does the same.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
             }
 
+            com.echelon.eve.corp.CorpAlertSettingsSection()
+
             SectionHeader("About")
             EchelonCard {
                 Wordmark(size = 40.dp, tagline = "THE WING CONSOLE")
