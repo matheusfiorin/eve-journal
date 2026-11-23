@@ -83,7 +83,8 @@ fun LiquidGauge(fraction: Float, color: Color, modifier: Modifier = Modifier, he
         level.animateTo(target, spring(dampingRatio = .8f, stiffness = Spring.StiffnessLow))
         if (!first) { slosh.snapTo(((target - before) * 2.5f).coerceIn(-1f, 1f)); slosh.animateTo(0f, spring(dampingRatio = .22f, stiffness = Spring.StiffnessVeryLow)) }
     }
-    val drift = if (still) 0f else rememberInfiniteTransition(label = "tide").animateFloat(0f, (2 * PI).toFloat(), infiniteRepeatable(tween(3200, easing = LinearEasing)), label = "phase").value
+    // The surface's idle drift, at 30 fps and read only while drawing: one gauge per tower recomposing at 120 Hz was jank.
+    val tide = com.echelon.eve.ui.motion.rememberAmbientClock(!still, periodMillis = 3200, fps = 30)
     Canvas(modifier.fillMaxWidth().height(height).semantics { contentDescription = label ?: "Fuel ${(target * 100).toInt()} percent" }) {
         val r = CornerRadius(size.height / 2)
         val track = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, r)) }
@@ -99,7 +100,7 @@ fun LiquidGauge(fraction: Float, color: Color, modifier: Modifier = Modifier, he
                     moveTo(0f, 0f); lineTo(x0, 0f)
                     // The leading surface: a vertical wave, so the tank reads as liquid pushed to one side.
                     val steps = 14
-                    for (i in 0..steps) { val y = size.height * i / steps; lineTo(x0 + amp * sin(i * .9f + drift + slosh.value * 3f), y) }
+                    for (i in 0..steps) { val y = size.height * i / steps; lineTo(x0 + amp * sin(i * .9f + tide.value * 2f * PI.toFloat() + slosh.value * 3f), y) }
                     lineTo(0f, size.height); close()
                 }
                 drawPath(fill, Brush.horizontalGradient(listOf(color.copy(alpha = .75f), color), 0f, x0.coerceAtLeast(1f)))

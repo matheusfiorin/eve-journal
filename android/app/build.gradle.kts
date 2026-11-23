@@ -45,7 +45,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release")
+            // Without the release keystore (CI on a branch, a local build) the release build is signed with the debug key,
+            // so the fast, minified APK can still be installed. Keep the debug APK for development only: it is much slower.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -82,6 +84,9 @@ configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configu
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    // Installs the baseline profiles (Compose's own and src/main/baseline-prof.txt) at install time on sideloaded APKs,
+    // so the app runs compiled code from the first launch instead of interpreting it until the next idle maintenance.
+    implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.browser)

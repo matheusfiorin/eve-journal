@@ -70,11 +70,13 @@ import kotlin.math.sin
 fun Modifier.shimmer(): Modifier = composed {
     val c = Echelon.colors
     val still = Echelon.reduceMotion || LocalInspectionMode.current
-    val x = if (still) -1f else rememberInfiniteTransition(label = "shimmer").animateFloat(-1f, 2f, infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart), label = "sweep").value
+    // Read in the draw phase only: reading .value here would recompose every skeleton on every frame.
+    val sweep: State<Float> = if (still) remember { mutableFloatStateOf(-1f) } else rememberInfiniteTransition(label = "shimmer").animateFloat(-1f, 2f, infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart), label = "sweep")
     val band = c.surface3.copy(alpha = 1f)
     val tint = c.accent.copy(alpha = .06f)
     drawBehind {
         val w = size.width
+        val x = sweep.value
         drawRect(c.surface2)
         if (x > -1f) drawRect(Brush.linearGradient(listOf(c.surface2, band, tint, c.surface2), start = Offset(w * x - w * .25f, 0f), end = Offset(w * x + w * .25f, size.height * 2)))
     }
