@@ -1,5 +1,6 @@
 package com.echelon.eve.plan.trade
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -265,7 +266,7 @@ private fun MyOrders(pilotName: String, o: OrdersState, name: (Long, String?) ->
                     else -> "Not checked: not in the market scan"
                 },
                 trailing = { Column(horizontalAlignment = Alignment.End) {
-                    Text(format(r.price, Kind.Isk), style = Echelon.type.num, color = if (r.state == "outbid") c.danger else c.text)
+                    RollingNumber(r.price, kind = Kind.Isk, style = Echelon.type.num, color = if (r.state == "outbid") c.danger else c.text)
                     Text("${"%,d".format(r.remain)} of ${"%,d".format(r.total)} left", style = Echelon.type.label, color = c.textMuted)
                 } })
         }

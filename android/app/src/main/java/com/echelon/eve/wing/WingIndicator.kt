@@ -28,6 +28,9 @@ import com.echelon.eve.ui.components.Tone
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.Radii
 import com.echelon.eve.ui.theme.Spacing
+import com.echelon.eve.ui.motion.cometTrail
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
 
 /** The wing's sync state at a glance: is this phone in the room, is the wingmate, how far apart, and what is still queued. */
 data class WingIndicatorState(
@@ -111,14 +114,20 @@ fun WingStatusIndicator(modifier: Modifier = Modifier, onClick: (() -> Unit)? = 
 fun WingIndicator(state: WingIndicatorState, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val c = Echelon.colors
     val shape = RoundedCornerShape(Radii.pop)
-    Row(
-        modifier.heightIn(min = 28.dp).semantics(mergeDescendants = true) { contentDescription = state.description }
-            .background(c.surface2, shape).border(1.dp, if (state.session) c.accent else c.line, shape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = Spacing.sm, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    val mateColor = state.mate?.let { com.echelon.eve.ui.theme.PilotColors.of(it.id).color } ?: c.accent
+    // The chip is drawn 28 dp tall inside a 48 dp target, like the rest of the top bar.
+    Box(
+        modifier.heightIn(min = Spacing.touch).semantics(mergeDescendants = true) { contentDescription = state.description }
+            .then(if (onClick != null) Modifier.clip(shape).clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
     ) {
-        StatusDot(state.tone, live = state.link == WingIndicatorState.Link.Live && state.mateOnline)
-        Text(state.label, style = Echelon.type.label, color = if (state.link == WingIndicatorState.Link.Refused) c.danger else c.textMuted, maxLines = 1)
+        Row(
+            Modifier.heightIn(min = 28.dp).background(c.surface2, shape).border(1.dp, if (state.session) c.accent else c.line, shape).padding(horizontal = Spacing.sm, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // A comet in the wingmate's colour when the line changes (they came online, jumped closer, the link dropped).
+            StatusDot(state.tone, Modifier.cometTrail(state.label, mateColor), live = state.link == WingIndicatorState.Link.Live && state.mateOnline)
+            Text(state.label, style = Echelon.type.label, color = if (state.link == WingIndicatorState.Link.Refused) c.danger else c.textMuted, maxLines = 1)
+        }
     }
 }

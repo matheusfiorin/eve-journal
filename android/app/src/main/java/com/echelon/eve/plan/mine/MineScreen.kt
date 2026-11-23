@@ -1,5 +1,6 @@
 package com.echelon.eve.plan.mine
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -190,7 +191,7 @@ private fun Results(ui: MineUi, r: MineResult, me: MinerPlan, actions: MineActio
         r.ores.forEachIndexed { i, o ->
             if (i > 0) Hairline()
             ListRow(o.name, supporting = "Raw ${format(o.raw, Kind.Isk)} · compressed ${format(o.compressed, Kind.Isk)} · minerals ${format(o.refined, Kind.Isk)} per unit",
-                trailing = { Column(horizontalAlignment = Alignment.End) { Text(format(o.perM3, Kind.Isk), style = Echelon.type.num, color = c.text); Text(o.how, style = Echelon.type.label, color = c.textMuted) } })
+                trailing = { Column(horizontalAlignment = Alignment.End) { RollingNumber(o.perM3, kind = Kind.Isk, style = Echelon.type.num, color = c.text); Text(o.how, style = Echelon.type.label, color = c.textMuted) } })
         }
     }
     SectionHeader("Last 30 days")

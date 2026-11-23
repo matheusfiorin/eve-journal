@@ -1,5 +1,6 @@
 package com.echelon.eve.plan.sell
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -217,7 +218,7 @@ private fun Plans(ui: SellUi, r: SellResult, actions: SellActions, name: (Long) 
                     Text(s.name, style = MaterialTheme.typography.titleSmall, color = c.text)
                     Text("starts in ${s.start} · ${plural(s.jumps, "jump")}", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
                 }
-                Text(format(s.net, Kind.Isk), style = Echelon.type.num, color = c.ok)
+                RollingNumber(s.net, kind = Kind.Isk, style = Echelon.type.num, color = c.ok)
             }
             if (s.stops.isEmpty()) Text("Nothing to sell or pick up on this trip.", style = MaterialTheme.typography.bodySmall, color = c.textMuted)
             s.stops.forEachIndexed { i, st ->

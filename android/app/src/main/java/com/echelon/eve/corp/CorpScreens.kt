@@ -1,5 +1,6 @@
 package com.echelon.eve.corp
 
+import com.echelon.eve.ui.motion.RollingNumber
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -211,7 +212,7 @@ fun WalletScreen(load: Load<CorpSnapshot>, now: Long, onRetry: () -> Unit, modif
             list.sortedBy { it.division }.forEachIndexed { i, w ->
                 if (i > 0) Hairline()
                 ListRow(labels[w.division]?.takeIf { it.isNotBlank() } ?: if (w.division == 1) "Master wallet" else "Division ${w.division}", supporting = "Division ${w.division}",
-                    trailing = { Text(format(w.balance, Kind.Isk), style = Echelon.type.num, color = c.text) })
+                    trailing = { RollingNumber(w.balance, kind = Kind.Isk, style = Echelon.type.num, color = c.text) })
             }
         }
         if (snap.divisions.value == null) Text("Division names need the Director role; numbers are shown instead.", style = MaterialTheme.typography.bodySmall, color = c.textFaint)

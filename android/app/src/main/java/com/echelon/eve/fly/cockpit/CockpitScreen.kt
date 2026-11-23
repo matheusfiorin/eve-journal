@@ -27,6 +27,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
@@ -71,6 +76,11 @@ import com.echelon.eve.ui.format.clock
 import com.echelon.eve.ui.format.secBand
 import com.echelon.eve.ui.format.secColor
 import com.echelon.eve.ui.format.secLabel
+import com.echelon.eve.ui.format.secText
+import com.echelon.eve.ui.motion.cometTrail
+import com.echelon.eve.ui.motion.pingRipple
+import com.echelon.eve.ui.motion.dangerShimmer
+import com.echelon.eve.ui.motion.parallaxHeader
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
 import com.echelon.eve.ui.theme.Radii
@@ -147,11 +157,15 @@ fun CockpitScreen(ui: CockpitUi, now: Long, actions: CockpitActions, modifier: M
                 Actions(ui, actions, buttonHeight = 60.dp)
             }
         } else Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+            val bgFade = Echelon.colors.bg.copy(alpha = .94f)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Spacing.gutter, vertical = Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 Info(ui, now, actions, withMate = true)
             }
             // Pinned under the thumb: the buttons never scroll away.
-            Column(Modifier.background(Echelon.colors.bg.copy(alpha = .92f)).padding(horizontal = Spacing.gutter, vertical = Spacing.md)) { Actions(ui, actions) }
+            Column(Modifier.drawBehind {
+                drawRect(Brush.verticalGradient(listOf(Color.Transparent, bgFade), startY = -24.dp.toPx(), endY = 0f), topLeft = Offset(0f, -24.dp.toPx()), size = Size(size.width, 24.dp.toPx()))
+                drawRect(bgFade)
+            }.padding(horizontal = Spacing.gutter, vertical = Spacing.md)) { Actions(ui, actions) }
         }
     }
 }
@@ -171,7 +185,7 @@ private fun Banner(e: CockpitEvent) {
     val tone = when ((e as? CockpitEvent.Jumped)?.warning) { SecBand.Null -> Tone.Danger; SecBand.Low -> Tone.Warn; else -> Tone.Accent }
     val c = Echelon.colors
     Row(
-        Modifier.fillMaxWidth().background(tone.soft(), RoundedCornerShape(Radii.control)).padding(horizontal = Spacing.lg, vertical = Spacing.md)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radii.control)).background(tone.soft()).dangerShimmer(tone == Tone.Danger, tone.color()).padding(horizontal = Spacing.lg, vertical = Spacing.md)
             .semantics(mergeDescendants = true) { heading() },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
@@ -250,7 +264,7 @@ private fun SecBlock(sec: Double) {
     val hue = secColor(sec)
     Box(Modifier.sizeIn(minWidth = 64.dp, minHeight = 56.dp).background(hue.copy(alpha = .18f), RoundedCornerShape(Radii.control)).padding(horizontal = 10.dp)
         .semantics(mergeDescendants = true) { contentDescription = "Security ${secLabel(sec)}" }, contentAlignment = Alignment.Center) {
-        Text(secLabel(sec), style = Echelon.type.numLarge.copy(fontSize = 26.sp, lineHeight = 30.sp), color = hue)
+        Text(secLabel(sec), style = Echelon.type.numLarge.copy(fontSize = 26.sp, lineHeight = 30.sp), color = secText(sec))
     }
 }
 
@@ -294,11 +308,15 @@ private fun NextTimer(timers: List<WingTimer>, pilot: Pilot?, now: Long, onOpen:
 private fun Mate(m: MateUi, now: Long, onOpen: () -> Unit) {
     val c = Echelon.colors
     val colors = PilotColors.of(m.pilot.id)
+    // Their mark moves when they do: a comet when where they are (or their app) changes, a ripple when they call.
+    val status = Triple(m.appOpen, m.place?.systemId, m.place?.dockedAt)
     EchelonCard(Modifier.fillMaxWidth(), onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            Box(Modifier.size(10.dp).background(colors.color, RoundedCornerShape(2.dp)))
+            Box(Modifier.size(10.dp).cometTrail(status, colors.color).pingRipple(m.lastPing?.at, colors.color).background(colors.color, RoundedCornerShape(2.dp)))
             Text(m.pilot.displayName, style = MaterialTheme.typography.titleLarge, color = colors.color, modifier = Modifier.weight(1f), maxLines = 1)
-            when (m.appOpen) { true -> Tag("App open", tone = Tone.Ok); false -> Tag("App closed"); null -> {} }
+            Box(Modifier.cometTrail(m.appOpen, colors.color)) {
+                when (m.appOpen) { true -> Tag("App open", tone = Tone.Ok); false -> Tag("App closed"); null -> {} }
+            }
         }
         val p = m.place
         if (p != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
