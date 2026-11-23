@@ -19,6 +19,7 @@ import com.echelon.eve.core.wing.WingAck
 import com.echelon.eve.core.wing.ackWord
 import com.echelon.eve.core.wing.aOrAn
 import com.echelon.eve.core.wing.activityWord
+import com.echelon.eve.ui.format.iskShort
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -78,6 +79,7 @@ data class PushText(val title: String, val body: String, val updates: Boolean = 
                 "plan" -> PushText("$who sent a plan", data["text"]?.takeIf { it.isNotBlank() } ?: "Open the Wing screen to follow it", updates = true, open = OPEN_WING)
                 "ack" -> PushText("$who: ${ackWord(data["ack"] ?: WingAck.SEEN)}", data["text"]?.takeIf { it.isNotBlank() }?.let { "Answering “$it”" } ?: "Answering your call", updates = true, open = OPEN_WING)
                 "session.start" -> PushText("$who started ${aOrAn(activityWord(data["activity"] ?: "wing"))} session", "Open the Wing screen to join in", updates = true, open = OPEN_WING)
+                "session.add" -> PushText("$who added ${data["amount"]?.toDoubleOrNull()?.let { iskShort(it) } ?: "ISK"} to the session", "See the total on the Wing screen", updates = true, open = OPEN_WING)
                 "session.end" -> PushText("$who ended the session", "The summary is on the Wing screen", updates = true, open = OPEN_WING)
                 else -> null
             }

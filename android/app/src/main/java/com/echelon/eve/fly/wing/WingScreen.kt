@@ -20,6 +20,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,6 +59,7 @@ import com.echelon.eve.ui.format.Kind
 import com.echelon.eve.ui.format.ago
 import com.echelon.eve.ui.format.duration
 import com.echelon.eve.ui.format.format
+import com.echelon.eve.ui.format.iskShort
 import com.echelon.eve.ui.format.plural
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.PilotColors
@@ -103,13 +106,15 @@ data class WingUi(
     val session: WingSession? = null, val history: List<WingSession> = emptyList(), val goal: String = "",
     /** Android 13+ without the notification permission: calls can't reach the pilot in the background. */
     val notificationsOff: Boolean = false,
+    /** The local estimates of this phone's running operations (by op id), what EVE's ledger confirms per operation, and a goal to suggest. */
+    val liveOps: Map<String, com.echelon.eve.fly.timers.GasEstimate> = emptyMap(), val confirmed: Map<String, Long> = emptyMap(), val suggestedGoal: Long? = null,
 )
 
 class WingActions(val ping: (String) -> Unit = {}, val custom: (String) -> Unit = {}, val sendCustom: () -> Unit = {}, val shareSystem: (Boolean) -> Unit = {},
     val autopilot: (SharedPlan) -> Unit = {}, val reconnect: () -> Unit = {},
     val share: (Boolean) -> Unit = {}, val activity: (String) -> Unit = {}, val stopRoute: () -> Unit = {}, val follow: (List<Long>) -> Unit = {},
     val ack: (FeedItem, String) -> Unit = { _, _ -> }, val goal: (String) -> Unit = {}, val startSession: () -> Unit = {}, val endSession: () -> Unit = {},
-    val allowNotifications: () -> Unit = {})
+    val allowNotifications: () -> Unit = {}, val addIsk: (amount: Long, note: String) -> Unit = { _, _ -> })
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -263,35 +268,22 @@ private fun ColumnScope.SessionSection(ui: WingUi, now: Long, actions: WingActio
     val pilot = ui.pilot ?: return
     val s = ui.session
     SectionHeader("Session", subtitle = if (s == null) "Fly together and see what each of you brought" else "Started ${ago(s.startedAt, now)} by ${Pilot.of(s.startedBy)?.let { if (it == pilot) "you" else it.displayName } ?: "the wing"}")
-    if (s != null) EchelonCard(Modifier.fillMaxWidth(), tone = Tone.Accent) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            Tag(activityLabel(s.activity), tone = Tone.Accent)
-            Text(s.title ?: (activityLabel(s.activity) + (s.where?.let { " in ${ui.systemName(it) ?: "system $it"}" } ?: "")), style = MaterialTheme.typography.titleSmall, color = c.text, modifier = Modifier.weight(1f))
-            Text(duration((now - s.startedAt).coerceAtLeast(0) / 1000.0), style = Echelon.type.num, color = c.textMuted)
-        }
-        val sum = s.sum
-        s.goal?.takeIf { it > 0 }?.let { goal ->
-            ProgressBar((sum.isk.toFloat() / goal).coerceIn(0f, 1f), Modifier.fillMaxWidth().padding(top = Spacing.sm))
-            Text("${format(sum.isk.toDouble(), Kind.Isk)} of ${format(goal.toDouble(), Kind.Isk)}", style = Echelon.type.label, color = c.textMuted)
-        }
-        listOf(pilot, pilot.wingmate).forEach { who ->
-            val part = s.of(who.id)
-            Row(Modifier.fillMaxWidth().padding(top = Spacing.sm), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                StatusDot(if (part.timers + part.systems.size > 0 || part.isk != 0L || part.units > 0) Tone.Accent else Tone.Neutral)
-                Column(Modifier.weight(1f)) {
-                    Text(if (who == pilot) "You" else who.displayName, style = MaterialTheme.typography.titleSmall, color = PilotColors.of(who.id).color)
-                    Text(tally(part.units, part.timers, part.systems.size), style = MaterialTheme.typography.bodySmall, color = c.textMuted)
-                }
-                RollingNumber(part.isk.toDouble(), kind = Kind.Isk, style = Echelon.type.num, color = c.text)
-            }
-        }
-        SecondaryButton("End session", actions.endSession, Modifier.padding(top = Spacing.sm), enabled = ui.canSend)
+    var adding by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (s != null) {
+        SessionCard(s, pilot, now, ui.systemName, Modifier.fillMaxWidth(), ui.liveOps, ui.confirmed, ui.canSend, onAdd = { adding = true }, onEnd = actions.endSession)
+        if (adding) AddIskSheet({ adding = false }, { amount, note -> actions.addIsk(amount, note); adding = false }, s.adds, now)
     } else EchelonCard(Modifier.fillMaxWidth()) {
-        Text(if (ui.activity == WingStatus.IDLE) "Pick what you are doing above, then start a session together." else "${aOrAn(activityWord(ui.activity)).replaceFirstChar { it.uppercase() }} session counts both pilots’ timers, systems, ISK and units.",
+        Text(if (ui.activity == WingStatus.IDLE) "Pick what you are doing above, then start a session together." else "${aOrAn(activityWord(ui.activity)).replaceFirstChar { it.uppercase() }} session is a goal you reach together over several operations: every gas timer you start is one operation (one site), and what it mines counts toward the goal.",
             style = MaterialTheme.typography.bodySmall, color = c.textMuted)
         OutlinedTextField(ui.goal, { actions.goal(it.take(20)) }, Modifier.fillMaxWidth().padding(top = Spacing.sm), singleLine = true, label = { Text("ISK goal (optional), e.g. 500m") },
+            supportingText = { Text(ui.suggestedGoal?.let { "About ${iskShort(it.toDouble())} for three sites like your last fit and gas." } ?: "Gas and ISK you add by hand count toward it.") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = c.accent, unfocusedBorderColor = c.line, focusedTextColor = c.text, unfocusedTextColor = c.text))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            listOfNotNull(ui.suggestedGoal).plus(listOf(100_000_000L, 250_000_000L, 500_000_000L, 1_000_000_000L)).distinct().forEach { g ->
+                ChoiceChip(iskShort(g.toDouble()), selected = parseAmount(ui.goal) == g, onClick = { actions.goal(formatAmount(g)) })
+            }
+        }
         PrimaryButton("Start ${if (ui.activity == WingStatus.IDLE) "a" else activityWord(ui.activity)} session", actions.startSession, Modifier.padding(top = Spacing.sm), enabled = ui.canSend && ui.activity != WingStatus.IDLE)
     }
     ui.history.take(3).forEach { h ->

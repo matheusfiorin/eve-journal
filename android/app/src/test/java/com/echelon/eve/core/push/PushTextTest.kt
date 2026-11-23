@@ -35,6 +35,7 @@ class PushTextTest {
         "ping.custom" to PushText("Fiofka", "Bring paste", open = WING),
         "plan.share" to PushText("Fiofka sent a plan", "Jita to Amarr", updates = true, open = WING),
         "session.start" to PushText("Fiofka started a mining session", "Open the Wing screen to join in", updates = true, open = WING),
+        "session.add" to PushText("Fiofka added 12M to the session", "See the total on the Wing screen", updates = true, open = WING),
         "ack.onit" to PushText("Decxus: On it", "Answering your call", updates = true, open = WING),
         "ack.cant" to PushText("Decxus: Can’t make it", "Answering “Bring paste”", updates = true, open = WING),
         "ack.plan" to PushText("Decxus: On it", "Answering “Jita to Amarr”", updates = true, open = WING),

@@ -55,6 +55,22 @@ test('an app from PR #4 talks to the room: every frame it sends is accepted and 
   assert.equal(s.proto, PROTOCOL);
 });
 
+test('an app from before ops and adds reads a session that has them, and the room refuses what a newer or older app gets wrong', async () => {
+  const {r, join} = room(), a = join(FIO, 'Fiofka'), b = join(DEC, 'Decxus');
+  await send(r, a, {type: 'session.start', session: {activity: 'mining', goal: 5e8}});
+  await send(r, a, {type: 'session.op', op: {id: 'g1', gas: 30375, startedAt: T0, units: 1, m3: 0.1, value: 36000, futureField: true}});
+  await send(r, b, {type: 'session.add', amount: 5e6, newerField: 1});
+  const s = a.last('session.update').session;
+  // The old fields stay where they were, and the totals only gained keys.
+  for (const k of ['id', 'activity', 'goal', 'startedBy', 'startedAt', 'contrib']) assert.ok(k in s, k);
+  assert.deepEqual([s.contrib[FIO].mined, s.contrib[DEC].added, s.contrib[FIO].isk, s.contrib[FIO].timers], [36000, 5e6, 0, 0]);
+  await send(r, a, {type: 'session.end'});
+  assert.deepEqual(a.last('session.end').session.totals, {isk: 0, units: 0, timers: 0, systems: 0, mined: 36000, added: 5e6, value: 5036000});
+  // An old session in storage (no ops, no adds) has zero totals and takes ops.
+  await send(r, a, {type: 'session.start', session: {activity: 'mining'}});
+  assert.ok(!('ops' in r.snapshot().session) && !('adds' in r.snapshot().session), 'a session without ops looks exactly as before');
+});
+
 test('a client that knows more or less than the room gets an error frame it can ignore, and nothing else changes', async () => {
   const {r, join} = room(), a = join(FIO, 'Fiofka'), b = join(DEC, 'Decxus'), before = b.sent.length;
   for (const type of ['teleport', 'timer.upsert.v9', '', undefined, 42]) await send(r, a, {type, id: 'x', anything: {nested: true}});
@@ -81,6 +97,8 @@ test('the room\'s frames are what the fixtures say (the Kotlin tests read the sa
   await send(r, b, {type: 'ack', id: 'k1', ref: 'p1', kind: 'onit'}); frames.ack = a.last('ack');
   await send(r, b, {type: 'session.start', id: 'ss1', session: {activity: 'mining', goal: 50000000, where: JITA, title: 'Belt run'}}); take('session.start');
   await send(r, b, {type: 'session.contrib', id: 'ss2', contrib: {isk: 1200000, units: 3400}}); take('session.update');
+  await send(r, a, {type: 'session.op', id: 'op1', op: {id: 'gas2', timer: 'gas2', gas: 30375, startedAt: T0, units: 410, m3: 41, value: 14800000}}); take('session.update', 'session.update_op');
+  await send(r, b, {type: 'session.add', id: 'ad1', amount: 12000000, note: 'Sold the paste'}); take('session.update', 'session.update_add');
   frames.state_rich = join(DEC, 'Decxus').sent[0];
   await send(r, a, {type: 'session.end', id: 'ss3'}); take('session.end');
   frames.state_after = join(DEC, 'Decxus').sent[0];
@@ -108,6 +126,8 @@ test('the room\'s pushes say what happened in a shape the app reads, and carry n
   await as(FIO, 'plan.share', {type: 'plan.share', id: 'pl1', plan: {kind: 'haul', title: 'Jita to Amarr', route: [JITA, PERIMETER, AMARR]}});
   await as(FIO, 'status', {type: 'status', status: {system: JITA, destination: AMARR, route: [JITA, AMARR], activity: 'hauling'}});
   await as(FIO, 'session.start', {type: 'session.start', session: {activity: 'mining', where: JITA, title: 'Belt run'}});
+  await as(FIO, 'session.op', {type: 'session.op', op: {id: 'gas2', gas: 30375, startedAt: T0, units: 410, m3: 41, value: 14800000}});
+  await as(FIO, 'session.add', {type: 'session.add', id: 'ad1', amount: 12000000, note: 'Sold the paste'});
   await as(DEC, 'ack.seen', {type: 'ack', ref: 'p1', kind: 'seen'});
   await as(DEC, 'ack.onit', {type: 'ack', ref: 'p1', kind: 'onit'});
   await as(DEC, 'ack.cant', {type: 'ack', ref: 'p2', kind: 'cant'});
@@ -116,7 +136,7 @@ test('the room\'s pushes say what happened in a shape the app reads, and carry n
   // A timer reaching its end tells the owner's wingmate.
   b.closed = true; a.closed = false; mock.timers.setTime(T0 + 61000); await r.alarm(); if (calls.length) out['timer.end'] = last();
   const data = Object.fromEntries(Object.entries(out).map(([k, m]) => [k, m.data]));
-  assert.deepEqual(Object.keys(data), ['timer.start', 'ping.help', 'ping.custom', 'plan.share', 'session.start', 'ack.onit', 'ack.cant', 'ack.plan', 'session.end', 'timer.end'], 'a status and a plain "seen" never push; every other event does');
+  assert.deepEqual(Object.keys(data), ['timer.start', 'ping.help', 'ping.custom', 'plan.share', 'session.start', 'session.add', 'ack.onit', 'ack.cant', 'ack.plan', 'session.end', 'timer.end'], 'a status and a plain "seen" never push; every other event does');
   for (const m of Object.values(out)) assert.equal(m.android.priority, 'high');
   // No location: not the system a ping was sent from, not a status or a plan's route, not a timer's site or a session's system.
   for (const [k, d] of Object.entries(data)) {

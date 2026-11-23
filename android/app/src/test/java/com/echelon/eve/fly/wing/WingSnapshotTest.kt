@@ -51,13 +51,13 @@ class WingSnapshotTest {
     @Test fun flyingTogether() = paparazzi.echelon {
         WingScreen(WingUi(Pilot.Fiofka, WingChannel.Status.Connected, mapOf(DEC to Presence(DEC, true, 2)), feed(pings, plans), here = "Perimeter", systemName = NAMES::get, canSend = true,
             statuses = statuses, jumps = 1, jumpsToMateDestination = 2, sharing = true, activity = WingStatus.MINING, myRoute = listOf(30000144, 30000142),
-            session = session, history = history), NOW, WingActions(), scroll = false)
+            session = SessionFixtures.mid, history = history, liveOps = mapOf("t4" to SessionFixtures.liveEstimate), confirmed = mapOf("t2" to 352L), suggestedGoal = 30_000_000), NOW, WingActions(), scroll = false)
     }
 
     @Test fun sameSystemNoSessionNotificationsOff() = paparazzi.echelon(pilot = PilotColors.Decxus) {
         val st = mapOf(FIO to WingStatus(system = 30002053, docked = false, ship = "Astero", activity = WingStatus.EXPLORING, pilot = FIO, at = NOW - 2 * MIN))
         WingScreen(WingUi(Pilot.Decxus, WingChannel.Status.Connected, mapOf(FIO to Presence(FIO, true)), emptyList(), systemName = NAMES::get, canSend = true,
-            statuses = st, jumps = 0, sharing = false, activity = WingStatus.EXPLORING, goal = "300m", history = history, notificationsOff = true), NOW, WingActions(), scroll = false)
+            statuses = st, jumps = 0, sharing = false, activity = WingStatus.EXPLORING, goal = "300m", history = history, notificationsOff = true, suggestedGoal = 30_000_000), NOW, WingActions(), scroll = false)
     }
 
     @Test fun indicator() = paparazzi.echelon {

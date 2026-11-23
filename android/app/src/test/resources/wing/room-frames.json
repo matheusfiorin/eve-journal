@@ -141,6 +141,105 @@
    }
   }
  },
+ "session.update_op": {
+  "type": "session.update",
+  "id": "op1",
+  "from": 2124810474,
+  "at": 1800000000000,
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {
+    "2124810474": {
+     "timers": 0,
+     "isk": 0,
+     "units": 0,
+     "systems": [],
+     "mined": 14800000,
+     "added": 0
+    },
+    "2124815118": {
+     "timers": 0,
+     "isk": 1200000,
+     "units": 3400,
+     "systems": [],
+     "mined": 0,
+     "added": 0
+    }
+   },
+   "ops": [
+    {
+     "id": "gas2",
+     "by": 2124810474,
+     "timer": "gas2",
+     "gas": 30375,
+     "startedAt": 1800000000000,
+     "units": 410,
+     "m3": 41,
+     "value": 14800000
+    }
+   ]
+  }
+ },
+ "session.update_add": {
+  "type": "session.update",
+  "id": "ad1",
+  "from": 2124815118,
+  "at": 1800000000000,
+  "session": {
+   "id": "uuid-1",
+   "activity": "mining",
+   "goal": 50000000,
+   "where": 30000142,
+   "title": "Belt run",
+   "startedBy": 2124815118,
+   "startedAt": 1800000000000,
+   "contrib": {
+    "2124810474": {
+     "timers": 0,
+     "isk": 0,
+     "units": 0,
+     "systems": [],
+     "mined": 14800000,
+     "added": 0
+    },
+    "2124815118": {
+     "timers": 0,
+     "isk": 1200000,
+     "units": 3400,
+     "systems": [],
+     "mined": 0,
+     "added": 12000000
+    }
+   },
+   "ops": [
+    {
+     "id": "gas2",
+     "by": 2124810474,
+     "timer": "gas2",
+     "gas": 30375,
+     "startedAt": 1800000000000,
+     "units": 410,
+     "m3": 41,
+     "value": 14800000
+    }
+   ],
+   "adds": [
+    {
+     "id": "ad1",
+     "by": 2124815118,
+     "amount": 12000000,
+     "note": "Sold the paste",
+     "at": 1800000000000
+    }
+   ]
+  }
+ },
  "state_rich": {
   "type": "state",
   "from": 0,
@@ -233,13 +332,44 @@
    "startedBy": 2124815118,
    "startedAt": 1800000000000,
    "contrib": {
+    "2124810474": {
+     "timers": 0,
+     "isk": 0,
+     "units": 0,
+     "systems": [],
+     "mined": 14800000,
+     "added": 0
+    },
     "2124815118": {
      "timers": 0,
      "isk": 1200000,
      "units": 3400,
-     "systems": []
+     "systems": [],
+     "mined": 0,
+     "added": 12000000
     }
-   }
+   },
+   "ops": [
+    {
+     "id": "gas2",
+     "by": 2124810474,
+     "timer": "gas2",
+     "gas": 30375,
+     "startedAt": 1800000000000,
+     "units": 410,
+     "m3": 41,
+     "value": 14800000
+    }
+   ],
+   "adds": [
+    {
+     "id": "ad1",
+     "by": 2124815118,
+     "amount": 12000000,
+     "note": "Sold the paste",
+     "at": 1800000000000
+    }
+   ]
   },
   "sessions": []
  },
@@ -257,20 +387,54 @@
    "startedBy": 2124815118,
    "startedAt": 1800000000000,
    "contrib": {
+    "2124810474": {
+     "timers": 0,
+     "isk": 0,
+     "units": 0,
+     "systems": [],
+     "mined": 14800000,
+     "added": 0
+    },
     "2124815118": {
      "timers": 0,
      "isk": 1200000,
      "units": 3400,
-     "systems": []
+     "systems": [],
+     "mined": 0,
+     "added": 12000000
     }
    },
+   "ops": [
+    {
+     "id": "gas2",
+     "by": 2124810474,
+     "timer": "gas2",
+     "gas": 30375,
+     "startedAt": 1800000000000,
+     "units": 410,
+     "m3": 41,
+     "value": 14800000
+    }
+   ],
+   "adds": [
+    {
+     "id": "ad1",
+     "by": 2124815118,
+     "amount": 12000000,
+     "note": "Sold the paste",
+     "at": 1800000000000
+    }
+   ],
    "endedAt": 1800000000000,
    "endedBy": 2124810474,
    "totals": {
     "isk": 1200000,
     "units": 3400,
     "timers": 0,
-    "systems": 0
+    "systems": 0,
+    "mined": 14800000,
+    "added": 12000000,
+    "value": 26800000
    }
   }
  },
@@ -368,20 +532,54 @@
     "startedBy": 2124815118,
     "startedAt": 1800000000000,
     "contrib": {
+     "2124810474": {
+      "timers": 0,
+      "isk": 0,
+      "units": 0,
+      "systems": [],
+      "mined": 14800000,
+      "added": 0
+     },
      "2124815118": {
       "timers": 0,
       "isk": 1200000,
       "units": 3400,
-      "systems": []
+      "systems": [],
+      "mined": 0,
+      "added": 12000000
      }
     },
+    "ops": [
+     {
+      "id": "gas2",
+      "by": 2124810474,
+      "timer": "gas2",
+      "gas": 30375,
+      "startedAt": 1800000000000,
+      "units": 410,
+      "m3": 41,
+      "value": 14800000
+     }
+    ],
+    "adds": [
+     {
+      "id": "ad1",
+      "by": 2124815118,
+      "amount": 12000000,
+      "note": "Sold the paste",
+      "at": 1800000000000
+     }
+    ],
     "endedAt": 1800000000000,
     "endedBy": 2124810474,
     "totals": {
      "isk": 1200000,
      "units": 3400,
      "timers": 0,
-     "systems": 0
+     "systems": 0,
+     "mined": 14800000,
+     "added": 12000000,
+     "value": 26800000
     }
    }
   ]

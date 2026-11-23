@@ -30,7 +30,7 @@ import kotlin.math.roundToLong
 // bonus attribute is multiplied by the skill level).
 
 /** A type as ESI describes it: its name, group, cargo capacity and dogma attributes (id to value). */
-data class DogmaType(val id: Long, val name: String, val groupId: Long, val capacity: Double, val attrs: Map<Int, Double>) {
+data class DogmaType(val id: Long, val name: String, val groupId: Long, val capacity: Double, val attrs: Map<Int, Double>, /** Unit volume in m3 (ESI's `volume`); 0 when ESI gave none. */ val volume: Double = 0.0) {
     fun a(id: Int): Double? = attrs[id]
     fun a(id: Int, default: Double): Double = attrs[id] ?: default
     /** The skills this type requires (requiredSkill1..3). */

@@ -92,6 +92,8 @@ class TimerActions(
     /** Opens the system's exact-alarm switch, or hides its rationale for now. */
     val openExactSettings: () -> Unit = {},
     val dismissExactRationale: () -> Unit = {},
+    /** Says which gas a running gas timer harvests (timer id, gas). */
+    val pickGas: (String, Fullerite) -> Unit = { _, _ -> },
 ) {
     /** Starts [draft], in its system when the route can take one. */
     fun startDraft(draft: TimerDraft) = startIn?.invoke(draft) ?: start(draft.kind, draft.durationMs, draft.label, draft.shared)
@@ -113,6 +115,9 @@ class TimerMap(
     val suggestion: Suggestion? = null,
     /** True while the exact-alarm permission is missing and the rationale card has not been put away. */
     val exactRationale: Boolean = false,
+    /** The flying pilot's running gas operation, and the gas a new gas timer starts with. */
+    val gas: GasLive? = null,
+    val lastGas: Fullerite = Fullerite.C320,
 ) {
     val hereSystem: TimerSystem? get() = here?.let { TimerSystem(it, systems[it]?.name.orEmpty()) }
 
@@ -172,6 +177,7 @@ private fun TimersBoard(pilot: Pilot?, timers: Collection<WingTimer>, now: Long,
 
         SuggestionCard(map.suggestion, map.mining, actions.startSuggestion, actions.dismissSuggestion)
         if (map.exactRationale) ExactAlarmCard(actions.openExactSettings, actions.dismissExactRationale)
+        map.gas?.let { g -> GasHero(g, onPick = { actions.pickGas(g.timerId, it) }); GasHaptics(g.estimate) }
         StartPanel(pilot, map, jumps, groups, open = formOpen ?: timers.isEmpty(), actions)
         if (timers.isEmpty() && map.here == null) {
             EmptyState("Timers you start show here by system, and so do the ones ${pilot.wingmate.displayName} shares.", title = "No timers yet", icon = EchelonIcons.Timer)
@@ -264,6 +270,8 @@ internal fun TimerForm(
     var warnText by rememberSaveable(kindKey) { mutableStateOf(defaultWarnings(kind).joinToString(",")) }
     val warn = warnText.split(',').mapNotNull { it.toLongOrNull() }
     var repeat by rememberSaveable { mutableStateOf(true) }
+    var gasId by rememberSaveable { mutableStateOf(map.lastGas.typeId) }
+    val gas = Fullerite.of(gasId) ?: map.lastGas
     var alsoHold by rememberSaveable { mutableStateOf(false) }
     var label by rememberSaveable { mutableStateOf("") }
     var shared by rememberSaveable { mutableStateOf(true) }
@@ -296,6 +304,7 @@ internal fun TimerForm(
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         kind.presets.forEach { p -> ChoiceChip(short(p), selected = p == length, onClick = { length = p }) }
     }
+    if (kind.isGas) GasChips(gas, { gasId = it.typeId })
     if (kind != TimerKind.Cyno) WarnChips(length, warn, onChange = { warnText = it.joinToString(",") })
     if (kind == TimerKind.Mining || ((kind == TimerKind.Sleeper || kind == TimerKind.Gas) && profile?.kind == Harvest.Gas))
         MiningPanel(map.mining, kind, repeat, { repeat = it }, alsoHold, { alsoHold = it }, onUse = { profile?.let { length = it.cycleMs.coerceAtLeast(10 * SEC) } })
@@ -315,7 +324,7 @@ internal fun TimerForm(
     }
     PrimaryButton("Start ${if (length < 2 * MIN) clock(length) else duration(length / 1000.0)}" + (system?.name?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""), onClick = {
         val fits = profile != null && (kind == TimerKind.Mining || ((kind == TimerKind.Sleeper || kind == TimerKind.Gas) && profile.kind == Harvest.Gas))
-        onStart(TimerDraft(kind, length, label, shared, system, warnings = warn, repeat = repeat && kind == TimerKind.Mining,
+        onStart(TimerDraft(kind, length, label, shared, system, gas = gas.takeIf { kind.isGas }, warnings = warn, repeat = repeat && kind == TimerKind.Mining,
             cycleMs = profile?.cycleMs.takeIf { fits }, holdFullMs = profile?.holdFullMs.takeIf { fits }, fit = profile?.let { "${it.shipName}: ${it.summary}" }.takeIf { fits }))
         // A second timer for the hold filling up, when asked: the one-time end, no repeat.
         if (alsoHold && fits && profile != null) onStart(TimerDraft(TimerKind.Generic, profile.holdFullMs, "Hold full", shared, system, warnings = listOf(MIN).filter { it < profile.holdFullMs }, fit = "${profile.shipName}: ${profile.summary}"))

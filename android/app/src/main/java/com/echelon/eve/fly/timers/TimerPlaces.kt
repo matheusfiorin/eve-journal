@@ -28,6 +28,8 @@ object TimerMeta {
     const val CYCLE = "cycleMs"
     const val HOLD = "holdFullMs"
     const val FIT = "fit"
+    /** The Fullerite a gas timer harvests: its type id (a [Fullerite]). In meta so the wingmate's phone sees which gas it is. */
+    const val GAS = "gas"
 }
 
 /** A solar system a timer is in. [name] may be blank when only the id is known. */
@@ -87,6 +89,8 @@ data class TimerDraft(
     val repeat: Boolean = false,
     /** From the fit: the cycle, the time to fill the hold, and a short description of what they came from. */
     val cycleMs: Long? = null, val holdFullMs: Long? = null, val fit: String? = null,
+    /** The gas of a Sleeper or gas timer; null takes the last one used. */
+    val gas: Fullerite? = null,
 )
 
 /** The meta a draft adds to its timer: the site, warning points, repeat and the mining figures. */
@@ -95,6 +99,7 @@ fun TimerDraft.applyTo(t: WingTimer): WingTimer {
     if (kind == TimerKind.Sleeper) out = out.withSite(GasSleepers.SITE_WH) else if (kind == TimerKind.Gas) out = out.withSite(GasSleepers.SITE_KS)
     if (warnings != null) out = out.withWarnings(warnings)
     if (repeat) out = out.withRepeat(true)
+    if (gas != null && kind.isGas) out = out.withGas(gas)
     val extra = buildMap {
         cycleMs?.let { put(TimerMeta.CYCLE, JsonPrimitive(it)) }
         holdFullMs?.let { put(TimerMeta.HOLD, JsonPrimitive(it)) }

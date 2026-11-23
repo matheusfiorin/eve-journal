@@ -27,6 +27,46 @@ expanders do not widen the hold; the ship mines the whole time (no travel, targe
 that carries it past capacity; one Gas Cloud Harvester/scoop may run per Gas Cloud Harvesting level; drones and mining foremen are
 not counted. A mixed fit is timed on the kind that brings in the most per minute.
 
+## Live gas estimate and operations (`GasOps`, `GasOperations`)
+
+The core loop of a wormhole gas huff: warp to a site, start the Sleeper timer, watch the Fullerite and its ISK value climb, leave when it
+runs out, go to the next site. One timer is one **operation**; a wing-room **session** is the shared goal reached over N operations
+("huff 3 sites to reach 500M"). The pieces:
+
+- `fly/timers/GasOps.kt` (pure, `GasOpsTest`): the flying pilot's `GasRate` from `MiningCalc` (the gas groups of the profile: each
+  group's module count, cycle and m3 per cycle, summed over modules), `GasOps.estimate` (completed cycles since the timer started, no
+  partial cycle; frozen at the timer's end, a pause, or a full hold; units = floor(m3 / unit volume); value = units x price), the price
+  choice, the operation sent to the room, the reporting policy and the ledger reconciliation.
+- Gas types are the nine Fullerites (`Fullerite`). Type ids and unit volumes were read from ESI `/universe/types/{id}` on 23 Nov 2026
+  (group 711, volume = packaged volume): C28 30375 (2 m3), C32 30376 (5), C50 30370 (1), C60 30371 (1), C70 30372 (1), C72 30373 (2),
+  C84 30374 (2), C320 30377 (5), C540 30378 (10). The enum's volume is only a fallback: the live number is ESI's `volume`, kept by the
+  existing types cache (`DogmaCache`, now storing `volume`; entries saved before that are read again once).
+- Price: Jita best buy (the highest buy order at Jita IV - Moon 4, station 60003760, in the market snapshot's The Forge region) when the
+  item is in the app's market data, else ESI `/markets/prices` `average_price` (the corp assets' helper, `CorpRepository.prices`). The
+  card says which one it used ("Jita best buy" or "ESI average"). The Fullerites are in `market/watchlist.json`, so the pipeline scans them
+  and Jita is normally available.
+- The pilot picks the site's gas when starting the timer (`GasChips`, stored in the timer's `meta.gas` so the wingmate's phone knows it);
+  the default is the last one used (`GasChoice`). It can be changed on the running timer (the gas name on the hero is a menu); the
+  estimate then recounts from the timer's start. Mixed sites (two gases) are not modelled: pick the main one.
+- `fly/timers/GasOperations.kt`: `OpSync` (pure of Android, `GasOpSyncTest`) turns the flying pilot's own gas timers into session
+  operations while a session runs (op id = timer id; only timers started after the session began): created at once, updated at most every
+  30 s and only when the units moved (a cycle batch completed), finished (`endedAt`) when the timer ends or is removed. The
+  `GasOperations` wrapper keeps the estimate's inputs fresh (rate from the fit and skills, volumes, prices) and ticks every 5 s.
+  Without a session nothing is sent, and the hero still counts locally.
+- Reconciliation: `SessionReporter` still reports the mining-ledger units. `GasOps.confirmedUnits` reads the ledger rows (ESI mining
+  ledger: a total per type and day) for the days an operation covered and the UI shows "EVE confirms N units". The ledger only confirms:
+  the operation's value is the estimate, never the ledger (no double counting). Two operations of one gas on one day share the day's number.
+- Room protocol (revision 2, additive; `worker/wingroom.js`, `WingCompatTest`, `tests/wingcompat.test.js`): `session.op` upserts an
+  operation by id (owner = sender, 60 per session, numbers validated, no push); `session.add` appends ISK added by hand (50 per session, may be
+  negative, abs <= 1e13, note <= 80 chars; a positive amount sends the wingmate a short push, no locations). The room keeps `session.ops` and
+  `session.adds`, recomputes each pilot's `contrib.mined` and `contrib.added`, and `totals` gain `mined`, `added` and `value = mined + added`
+  (`isk` stays the wallet change). An old app ignores the new fields; an old room answers `unknown_type`.
+- UI: `GasHero` (Cockpit and Timers): "+410 units" and "~14.8M" in rolling digits, the hold gauge with a particle stream into the fill
+  and a flash on each batch, hold %, and the time to a full hold or to the Sleepers, whichever comes first. `SessionCard` (Wing screen):
+  value against the goal in a bar striped by pilot colour with a burst when reached, the split gas / added / wallet, the numbered sites
+  (the live one breathing) and the adds; `SessionMini` in the Cockpit and the Fly hub; the Add ISK sheet (`AddIskForm`, amounts in the
+  `parseIsk` format, a minus corrects, chips +10M/+50M/+100M). Everything animated is drawn in the draw phase from `rememberAmbientClock`.
+
 ## Exact alarms (`TimerAlarms.kt`)
 
 `AlarmScheduler` keeps AlarmManager in step with the timers (on every change, on boot, on the exact-alarm permission change): the

@@ -21,6 +21,8 @@ import com.echelon.eve.core.wing.WingChannel
 import com.echelon.eve.core.wing.WingMessage
 import com.echelon.eve.core.wing.WingPing
 import com.echelon.eve.core.wing.jumpsBetween
+import com.echelon.eve.fly.fly
+import com.echelon.eve.fly.timers.GasOps
 import com.echelon.eve.nav.LocalAppContainer
 import com.echelon.eve.nav.ScreenContext
 import com.echelon.eve.ui.components.rememberNow
@@ -44,7 +46,7 @@ private const val SEEN_WINDOW_MS = 3_600_000L
 @Composable
 fun WingRoute(ctx: ScreenContext) {
     val c = LocalAppContainer.current
-    val now = rememberNow(periodMillis = 30_000)
+    val now = rememberNow(periodMillis = 5_000)
     if (c == null) { WingScreen(WingUi(ctx.pilot, WingChannel.Status.Idle, emptyMap(), emptyList()), now, WingActions()); return }
     val ch = c.wingChannel
     val services = c.wingServices
@@ -63,6 +65,10 @@ fun WingRoute(ctx: ScreenContext) {
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // The live gas of this phone's own operations, smoother than the room's last report, and what the ledger confirms.
+    val gasIn by c.fly.gasOps.inputs.collectAsStateWithLifecycle()
+    val ledger by c.fly.gasOps.ledger.collectAsStateWithLifecycle()
+    val myTimers by c.fly.timers.timers.collectAsStateWithLifecycle()
     var custom by remember { mutableStateOf("") }
     var goal by remember { mutableStateOf("") }
     var shareSystem by remember { mutableStateOf(false) }
@@ -114,7 +120,10 @@ fun WingRoute(ctx: ScreenContext) {
         WingUi(pilot, status, presence, items, custom, shareSystem, here?.let(systemName), systemName, pilot != null && c.sessions.has(pilot.id), sent,
             statuses = statuses, jumps = jumpsBetween(systems, mine, theirs?.system), jumpsToMateDestination = jumpsBetween(systems, mine, theirs?.destination),
             sharing = sharing, activity = activity, myRoute = myRoute, session = session, history = history, goal = goal,
-            notificationsOff = notificationsOff && Build.VERSION.SDK_INT >= 33),
+            notificationsOff = notificationsOff && Build.VERSION.SDK_INT >= 33,
+            liveOps = pilot?.let { p -> myTimers.values.filter { it.owner == p.id }.mapNotNull { t -> GasOps.estimate(t, gasIn, now)?.let { t.id to it } }.toMap() }.orEmpty(),
+            confirmed = pilot?.let { p -> session?.ops.orEmpty().filter { it.by == p.id }.mapNotNull { op -> GasOps.confirmedUnits(ledger, op, now)?.let { op.id to it } }.toMap() }.orEmpty(),
+            suggestedGoal = GasOps.suggestGoal(gasIn, c.fly.timers.lastGasChoice())),
         now,
         WingActions(
             ping = { kind -> ping(WingPing(kind, system = if (shareSystem) here else null)) },
@@ -140,8 +149,19 @@ fun WingRoute(ctx: ScreenContext) {
                     goal = ""; haptics.confirm()
                 }
             },
+            addIsk = { amount, note -> if (pilot != null) { ch.addIsk(pilot, amount, note); haptics.confirm() } },
             endSession = { if (pilot != null) { ch.endSession(pilot); haptics.confirm() } },
             allowNotifications = { if (Build.VERSION.SDK_INT >= 33) ask.launch(Manifest.permission.POST_NOTIFICATIONS) },
         ),
     )
+}
+
+/** The hub's Wing card: the compact session card while one runs, else the plain card. */
+@Composable
+fun WingHubCard(ctx: ScreenContext, onOpen: () -> Unit) {
+    val c = LocalAppContainer.current
+    val session = c?.wingChannel?.session?.collectAsStateWithLifecycle()?.value
+    val pilot = ctx.pilot
+    if (c == null || session == null || pilot == null) { com.echelon.eve.nav.HubCard("Wing", "Calls, shared plans and who is online", com.echelon.eve.ui.EchelonIcons.Wing, onOpen); return }
+    SessionMini(session, pilot, onOpen)
 }

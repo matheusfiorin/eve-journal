@@ -36,6 +36,8 @@ class TimerStore internal constructor(
     private val locate: (Pilot) -> TimerSystem? = { null },
     /** Told every timer list this store holds (boot, each change): the exact alarms follow it. */
     private val onTimers: (Collection<WingTimer>) -> Unit = {},
+    /** The gas the pilot harvested last: a new Sleeper or gas timer starts with it (the site's gas is picked when starting). */
+    private val lastGas: GasChoice = GasChoice.Memory(),
 ) {
     /** What the store needs from the wing room: its timers, and the two sends. */
     interface Room {
@@ -48,7 +50,7 @@ class TimerStore internal constructor(
         override val timers = c.wingChannel.timers
         override fun upsert(timer: WingTimer) { c.wingChannel.upsertTimer(timer) }
         override fun remove(id: String, owner: Pilot) { c.wingChannel.removeTimer(id, owner) }
-    }, onActive = { TimerService.ensure(c.app) }, locate = { p -> TimerLocator(c).systemOf(p) }, onTimers = { resyncAlarms(c.app) })
+    }, onActive = { TimerService.ensure(c.app) }, locate = { p -> TimerLocator(c).systemOf(p) }, onTimers = { resyncAlarms(c.app) }, lastGas = GasChoice.Shared(c.app))
 
     /** The last live location the app read for each pilot (GET /api/live), fresher than the synced snapshot. */
     private val seen = java.util.concurrent.ConcurrentHashMap<Pilot, TimerSystem>()
@@ -77,11 +79,21 @@ class TimerStore internal constructor(
      * goes to the wing room. Returns it.
      */
     fun start(owner: Pilot, kind: TimerKind, durationMs: Long, label: String = "", shared: Boolean = true, system: TimerSystem? = here(owner)): WingTimer =
-        newTimer(UUID.randomUUID().toString(), kind, durationMs, owner, clock(), label, shared, system).also { put(it) }
+        withGas(newTimer(UUID.randomUUID().toString(), kind, durationMs, owner, clock(), label, shared, system)).also { put(it) }
 
     /** Starts what the creation form describes. */
     fun start(owner: Pilot, draft: TimerDraft): WingTimer =
-        draft.applyTo(newTimer(UUID.randomUUID().toString(), draft.kind, draft.durationMs, owner, clock(), draft.label, draft.shared, draft.system)).also { put(it) }
+        withGas(draft.applyTo(newTimer(UUID.randomUUID().toString(), draft.kind, draft.durationMs, owner, clock(), draft.label, draft.shared, draft.system))).also { put(it) }
+
+    /** A Sleeper or gas timer carries its gas: the one picked, else the last used; the choice is remembered for the next site. */
+    private fun withGas(t: WingTimer): WingTimer =
+        if (!TimerKind.of(t.kind).isGas) t else (t.gas ?: lastGas.get()).let { g -> lastGas.set(g); t.withGas(g) }
+
+    /** The gas a new gas timer would start with. */
+    fun lastGasChoice(): Fullerite = lastGas.get()
+
+    /** Changes the gas of a timer (the pilot picked another cloud); the estimate recounts from the timer's start. */
+    fun setGas(id: String, gas: Fullerite) { lastGas.set(gas); change(id) { it.withGas(gas) } }
 
     fun pause(id: String) = change(id) { it.paused(clock()) }
     fun resume(id: String) = change(id) { it.resumed(clock()) }
