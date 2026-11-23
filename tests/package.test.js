@@ -103,6 +103,7 @@ test('Pages deploy waits for the uploaded artifact and reuses its attempt-specif
   assert.ok(prepare.includes(`artifact-name: ${name}`));
   assert.ok(prepare.includes(`name: ${name}`));
   assert.match(prepare,/actions\/upload-pages-artifact@/);
+  assert.match(prepare,/retention-days: 30/);
   assert.doesNotMatch(prepare,/actions\/deploy-pages@/);
   assert.match(deploy,/needs: prepare-pages/);
   assert.match(deploy,/artifact_name: \$\{\{ needs\.prepare-pages\.outputs\.artifact-name \}\}/);

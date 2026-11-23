@@ -90,6 +90,7 @@ jobs:
         with:
           path: _site
           name: pages-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: prepare-pages
