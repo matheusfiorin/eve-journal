@@ -97,13 +97,18 @@ internal fun rememberAppTimers(container: AppContainer, pilot: Pilot, base: Time
     val feed = container.fly.cockpit
     val offered by feed.suggestion.collectAsStateWithLifecycle()
     val all by store.timers.collectAsStateWithLifecycle()
+    val gasIn by container.fly.gasOps.inputs.collectAsStateWithLifecycle()
+    val ledger by container.fly.gasOps.ledger.collectAsStateWithLifecycle()
+    val tick = rememberNow()
+    val gasLive = GasOps.live(pilot, all.values, gasIn, ledger, tick)
     val suggestion = offered?.takeIf { it.worthShowing(all.values, pilot, System.currentTimeMillis()) }
     // The exact-alarm switch is Android's, so look again whenever the screen comes back from Settings.
     var exactOk by remember { mutableStateOf(ExactAlarms.allowed(context)) }
     var exactHidden by rememberSaveable { mutableStateOf(false) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactOk = ExactAlarms.allowed(context); runCatching { resyncAlarms(context) } }
-    val map = remember(systems, here, mate, data, mining, suggestion, exactOk, exactHidden) {
-        TimerMap(systems, here, mate, regionName = { id -> data?.regionName(id) }, mining = mining, suggestion = suggestion, exactRationale = !exactOk && !exactHidden)
+    val map = remember(systems, here, mate, data, mining, suggestion, exactOk, exactHidden, gasLive) {
+        TimerMap(systems, here, mate, regionName = { id -> data?.regionName(id) }, mining = mining, suggestion = suggestion, exactRationale = !exactOk && !exactHidden,
+            gas = gasLive, lastGas = store.lastGasChoice())
     }
     // Android 13+: the ongoing countdown and the alert at zero need the notification permission; ask on the first start.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -121,6 +126,7 @@ internal fun rememberAppTimers(container: AppContainer, pilot: Pilot, base: Time
             },
             place = { id, system -> store.place(id, system); base.place(id, system) },
             warn = store::setWarnings,
+            pickGas = { id, g -> store.setGas(id, g) },
             startSuggestion = {
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
                 suggestion?.let { CockpitControl.startSuggestion(store, pilot, it, mining?.profile); scope.launch { haptics.play(HapticMoment.Start) } }

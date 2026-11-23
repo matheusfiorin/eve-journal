@@ -44,6 +44,12 @@ class CockpitSnapshotTest {
 
     @Test fun cockpit() = paparazzi.echelon { CockpitScreen(CockpitFixtures.ui, now, CockpitActions()) }
 
+    @Test fun cockpitWithALiveGasOperation() = paparazzi.echelon {
+        val gas = com.echelon.eve.fly.timers.GasLive(com.echelon.eve.fly.wing.SessionFixtures.liveEstimate, "Gas site", confirmed = 232, owner = Pilot.Fiofka, timerId = "t4")
+        CockpitScreen(CockpitFixtures.ui.copy(gas = gas, session = com.echelon.eve.fly.wing.SessionFixtures.mid, banner = null, plan = null, status = null,
+            timers = listOf(WingTimer("t4", "sleeper", "Gas site", now - 16 * MIN, 20 * MIN, owner = Pilot.Fiofka.id))), now, CockpitActions())
+    }
+
     @Test fun cockpitNullSecDocked() = paparazzi.echelon {
         CockpitScreen(CockpitFixtures.ui.copy(
             me = CockpitFixtures.me.copy(systemName = "EC-P8R", sec = -0.4, region = "Pure Blind", dockedAt = "a structure", systemId = 30004000),

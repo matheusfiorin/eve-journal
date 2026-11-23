@@ -67,6 +67,16 @@ re-recorded, a flaky test was fixed, the wing-room backend changes have tests, a
 fit and skills, exact alarms, the wormhole suggestion, Corp local alerts, the app shortcut, and an independent Opus
 review of #5.
 
+## Gas operations
+
+The user's core loop is wormhole gas huffing with two pilots and one phone each: start the Sleeper timer at a site, watch the Fullerite and
+its ISK value climb, leave when it runs out, go to the next site. One timer is one operation; a wing session is the shared goal over N
+operations. Added: the room's `session.op` and `session.add` (worker, additive, old apps keep working), the pure live estimate
+(`fly/timers/GasOps.kt`: fit and skills to cycles and m3, ESI unit volumes, Jita best buy else ESI average price, the nine Fullerites with ids
+verified on ESI), operations synced from the pilot's own timers, the session total = gas mined + ISK added by hand with the wallet kept
+separate, and the UI (Cockpit hero, session card with goal bar and sites, Add ISK sheet). Simplifications: one gas per timer, completed
+cycles from the timer's start (no travel or targeting), the mining ledger only confirms. See `android/FLY_TIMERS.md`.
+
 ## Owner actions still open
 1. Tick every scope in `README.md` on the EVE application (developers.eveonline.com): the features release, online,
    and the eight corporation scopes. Then reconnect both pilots in the web app and the Android app.

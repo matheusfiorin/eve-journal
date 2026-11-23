@@ -119,6 +119,24 @@ class TimersTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun gasTimersCarryTheGasThePilotPickedElseTheLastOneUsed() = runTest {
+        val room = FakeRoom(); val d = UnconfinedTestDispatcher(testScheduler)
+        val choice = GasChoice.Memory()
+        val s = TimerStore(kotlinx.coroutines.CoroutineScope(backgroundScope.coroutineContext + d), File(tmp.root, "g.json"), room, { t0 }, {}, io = d, lastGas = choice)
+        // Nothing picked yet: the default; and it reaches the room in the timer's meta.
+        val a = s.start(Pilot.Fiofka, TimerKind.Sleeper, 15 * MIN)
+        assertEquals(GasChoice.DEFAULT, a.gas); assertEquals(GasChoice.DEFAULT.typeId, room.upserts.last().gas!!.typeId)
+        // A picked gas wins and becomes the next default; a plain gas timer takes it too.
+        val b = s.start(Pilot.Fiofka, TimerDraft(TimerKind.Sleeper, 15 * MIN, gas = Fullerite.C540))
+        assertEquals(Fullerite.C540, b.gas); assertEquals(Fullerite.C540, choice.get())
+        assertEquals(Fullerite.C540, s.start(Pilot.Fiofka, TimerKind.Gas, 20 * MIN).gas)
+        // Changing the gas of a running timer reaches the room and the default; other kinds carry none.
+        s.setGas(a.id, Fullerite.C50)
+        assertEquals(Fullerite.C50, s.timers.value.getValue(a.id).gas); assertEquals(Fullerite.C50, room.upserts.last().gas); assertEquals(Fullerite.C50, s.lastGasChoice())
+        assertNull(s.start(Pilot.Fiofka, TimerKind.Mining, MIN).gas); assertNull(s.start(Pilot.Fiofka, TimerDraft(TimerKind.Cyno, MIN, gas = Fullerite.C28)).gas)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun sharedTimersGoToTheRoomPrivateOnesStayHere() = runTest {
         val room = FakeRoom(); var active = 0
         val s = store(this, room, File(tmp.root, "t.json"), active = { active++ })

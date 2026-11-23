@@ -119,6 +119,10 @@ data class CockpitUi(
     /** A timer worth offering now, and what the fit says about mining (for the line under the next timer). */
     val suggestion: Suggestion? = null,
     val mining: MiningUi? = null,
+    /** The flying pilot's live gas operation (hero card) and the running session (compact card, with the value of local estimates not yet reported). */
+    val gas: com.echelon.eve.fly.timers.GasLive? = null,
+    val session: com.echelon.eve.core.wing.WingSession? = null,
+    val sessionLive: Long = 0,
 )
 
 class CockpitActions(
@@ -132,6 +136,7 @@ class CockpitActions(
     val sound: (Boolean) -> Unit = {},
     val startSuggestion: () -> Unit = {},
     val dismissSuggestion: () -> Unit = {},
+    val pickGas: (String, com.echelon.eve.fly.timers.Fullerite) -> Unit = { _, _ -> },
 )
 
 /** The calls the cockpit offers, in the wing feed's words. */
@@ -175,6 +180,8 @@ private fun ColumnScope.Info(ui: CockpitUi, now: Long, actions: CockpitActions, 
     ui.banner?.let { Banner(it) }
     SuggestionCard(ui.suggestion, ui.mining, actions.startSuggestion, actions.dismissSuggestion)
     Place(ui, now, actions, compact)
+    ui.gas?.let { g -> com.echelon.eve.fly.timers.GasHero(g, onPick = { actions.pickGas(g.timerId, it) }); com.echelon.eve.fly.timers.GasHaptics(g.estimate) }
+    ui.session?.let { s -> ui.pilot?.let { p -> com.echelon.eve.fly.wing.SessionMini(s, p, actions.openWing, liveValue = ui.sessionLive) } }
     NextTimer(ui.timers, ui.pilot, now, actions.openTimers, compact, ui.mining?.profile)
     if (withMate) ui.mate?.let { Mate(it, now, actions.openWing) }
 }

@@ -86,6 +86,9 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
     val minings by c.fly.mining.state.collectAsStateWithLifecycle()
     LaunchedEffect(pilot, state.readAt) { if (pilot != null) runCatching { c.fly.mining.load(pilot) } }
     val mining = pilot?.let { minings[it] }
+    val gasIn by c.fly.gasOps.inputs.collectAsStateWithLifecycle()
+    val ledger by c.fly.gasOps.ledger.collectAsStateWithLifecycle()
+    val session by c.wingChannel.session.collectAsStateWithLifecycle()
     val prefs = remember { cockpitPrefs(context) }
     var sound by remember { mutableStateOf(prefs.getBoolean("sound", true)) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -155,6 +158,10 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
         sound = sound,
         suggestion = pilot?.let { p -> offered?.takeIf { it.worthShowing(timers.values, p, now) } },
         mining = mining,
+        gas = pilot?.let { com.echelon.eve.fly.timers.GasOps.live(it, timers.values, gasIn, ledger, now) },
+        session = session,
+        sessionLive = pilot?.let { p -> session?.ops.orEmpty().filter { op -> op.live && op.by == p.id }.sumOf { op ->
+            timers.values.firstOrNull { it.id == op.id }?.let { t -> (com.echelon.eve.fly.timers.GasOps.estimate(t, gasIn, now)?.value ?: op.value) - op.value } ?: 0L } } ?: 0L,
     )
     val actions = CockpitActions(
         refresh = { live.refresh(); haptics.select() },
@@ -194,6 +201,7 @@ private fun CockpitWired(c: AppContainer, ctx: ScreenContext, now: Long) {
             live.dismissSuggestion()
         },
         dismissSuggestion = { live.dismissSuggestion(); haptics.tick() },
+        pickGas = { id, gas -> c.fly.timers.setGas(id, gas); haptics.select() },
     )
     CockpitScreen(ui, now, actions)
 }

@@ -1,6 +1,7 @@
 package com.echelon.eve.fly.timers
 
 import com.echelon.eve.core.model.MarketData
+import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.wing.GasOp
 import com.echelon.eve.core.wing.WingTimer
 import kotlinx.serialization.json.JsonArray
@@ -205,6 +206,27 @@ object GasOps {
         endedAt = stoppedAt ?: t.endsAt.takeIf { t.done(now) },
         units = e?.units ?: 0, m3 = Math.round((e?.m3 ?: 0.0) * 100) / 100.0, value = e?.value ?: 0,
     )
+
+    /**
+     * A goal to suggest when a session starts: [sites] sites of [gas] at the pilot's rate for a Sleeper timer's length, in ISK, rounded
+     * to two significant figures. Null without a fit or a price.
+     */
+    fun suggestGoal(inputs: GasInputs, gas: Fullerite, sites: Int = 3, siteMs: Long = GasSleepers.DEFAULT_MS): Long? {
+        val raw = (estimate(gas, siteMs, inputs)?.value ?: return null) * sites
+        if (raw <= 0) return null
+        val step = Math.pow(10.0, Math.floor(Math.log10(raw.toDouble())) - 1)
+        return (Math.round(raw / step) * step).toLong()
+    }
+
+    /**
+     * What the cockpit and the Timers screen show for [pilot]: their newest gas timer that is counting or paused, with its estimate
+     * and what the mining ledger confirms. Null when there is none, or the fit has no gas harvester yet.
+     */
+    fun live(pilot: Pilot, timers: Collection<WingTimer>, inputs: GasInputs, ledger: List<LedgerRow>, now: Long): GasLive? {
+        val t = timers.filter { it.owner == pilot.id && TimerKind.of(it.kind).isGas && it.gas != null && (it.pausedAt != null || it.endsAt > now) }.maxByOrNull { it.startedAt } ?: return null
+        val e = estimate(t, inputs, now) ?: return null
+        return GasLive(e, t.label, confirmedUnits(ledger, op(t, pilot.id, e, now), now), pilot, t.id)
+    }
 
     // ---- reporting to the room ----
 

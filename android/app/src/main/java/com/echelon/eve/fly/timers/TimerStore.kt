@@ -89,6 +89,9 @@ class TimerStore internal constructor(
     private fun withGas(t: WingTimer): WingTimer =
         if (!TimerKind.of(t.kind).isGas) t else (t.gas ?: lastGas.get()).let { g -> lastGas.set(g); t.withGas(g) }
 
+    /** The gas a new gas timer would start with. */
+    fun lastGasChoice(): Fullerite = lastGas.get()
+
     /** Changes the gas of a timer (the pilot picked another cloud); the estimate recounts from the timer's start. */
     fun setGas(id: String, gas: Fullerite) { lastGas.set(gas); change(id) { it.withGas(gas) } }
 

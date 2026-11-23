@@ -137,6 +137,15 @@ The room's coordination types (worker/README.md, "Coordination types") on top of
 - Top bar: `WingStatusIndicator(onClick = { open Fly → wing })` (wing/WingIndicator.kt) reads the container itself and
   draws nothing without one; `WingIndicator(WingIndicatorState(...))` is the stateless form for screenshots.
 
+### Gas operations (fly.timers, fly.wing, core.wing)
+
+A gas timer (Sleeper or known-space gas) is one operation of the running wing session. `fly/timers/GasOps.kt` is the pure estimate
+(rate from `MiningCalc`, ESI unit volumes through `DogmaCache`, Jita best buy else ESI average price, ledger confirmation);
+`GasOperations`/`OpSync` keep the pilot's operations in the room (`WingChannel.reportOp`, at most every 30 s and at the end);
+`WingChannel.addIsk` adds ISK by hand. The room (`worker/wingroom.js`) owns the sums: `session.ops`, `session.adds`, `contrib.mined/added`,
+`totals.value`. The Cockpit hero, the Timers screen, `SessionCard`/`SessionMini` and the Add ISK sheet read them. Details and the verified
+type ids are in `android/FLY_TIMERS.md`.
+
 ## The Fly feature (fly)
 
 - `FlyFeature` registers `cockpit` first, then `wing`, `timers`, `live`, `fit`, `skills`, `jobs`. Each has a stateless screen
