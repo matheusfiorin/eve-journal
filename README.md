@@ -4,6 +4,8 @@ A wing console for **Fiofka** and **Decxus**, two pilots who fly EVE Online toge
 
 Live: https://matheusfiorin.github.io/eve-journal/
 
+Local setup and checks on Windows: [development environment](docs/DEVELOPMENT.md).
+
 ## What it shows
 
 The first visit asks **who's flying** (Fiofka or Decxus) in a full-screen picker. The browser remembers the choice, every view centres on that pilot, and the wingmate's plans sit right alongside. Switch from the top bar.
