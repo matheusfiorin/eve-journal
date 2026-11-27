@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 /**
@@ -160,7 +163,17 @@ class TimerStore internal constructor(
         scope.launch(io) {
             writing.withLock {
                 val snapshot = local.value.values.toList()
-                runCatching { f.parentFile?.mkdirs(); val tmp = File(f.path + ".tmp"); tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot)); tmp.renameTo(f) }
+                runCatching {
+                    f.parentFile?.mkdirs()
+                    val tmp = File(f.path + ".tmp")
+                    tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot))
+                    // File.renameTo may refuse an existing target on Windows, leaving stale timers on disk.
+                    try {
+                        Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                    } catch (_: AtomicMoveNotSupportedException) {
+                        Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    }
+                }
             }
         }
     }
