@@ -1,5 +1,14 @@
 # Resume notes
 
+## Industrial Intelligence foundation (current feature work)
+
+Approved scope and phase status: docs/briefs/industrial-intelligence.md. The first delivery adds a pure normalized catalog
+contract and synthetic tests; it does not integrate the HTTP SDE collector, change Build or price a production lot.
+Next: capture and validate actual SDE manifests/schemas/records before implementing the source adapter. The environment
+could not resolve sde.evetech.net or registry.npmjs.org; dependency-based suites and live contracts need verification.
+Each functionality now needs its own branch and PR (draft while partial); feature-branch push is authorized, merge is not.
+The notes below predate the Android/Sell changes: inspect code and migrations rather than treating their status as current.
+
 Main is current; nothing else needs pushing. Verify any change with `npm run check`, `npm test` and
 `E2E_PORT=<free port> CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --grep-invert LIVE: --workers 2`.
 Always pick your own E2E_PORT: Playwright reuses whatever server already listens on 8000, possibly another checkout.

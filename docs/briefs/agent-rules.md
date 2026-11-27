@@ -6,8 +6,8 @@ Project: an EVE Online console for two pilots (Fiofka, Decxus). The frontend is 
 RESUME.md and worker/README.md first.
 
 ## Setup
-- Run `git log --oneline -1` first. If HEAD is not the commit named in your task, and `git status` is clean, run
-  `git reset --hard <that commit>` and say so in your report.
+- Run `git log --oneline -1` and `git status` first. Verify the task's base before editing. Use a feature branch in an
+  isolated checkout/worktree; do not reset another checkout or discard changes to match an old task's commit.
 - Run `npm ci` if node_modules is missing.
 
 ## Conventions
@@ -15,7 +15,7 @@ RESUME.md and worker/README.md first.
   and has no developer jargon.
 - New browser modules go under ui/. A new top-level file must also be added to the copy line in
   .github/workflows/pages.yml; tests/package.test.js checks the import graph, the CSP and duplicate ids.
-- New D1 migrations: the last existing one is 0006_refresh_holds.sql. Use the next free number, and add it to the
+- New D1 migrations: inspect worker/migrations/ for the current highest number. Use the next free number, and add it to the
   migration list at the top of tests/worker.test.js.
 - Never weaken, skip or loosen a test to make it pass. Fix the cause. Add tests for new behaviour: unit tests in
   tests/, browser tests in e2e/. The mocked backend is in e2e/fixtures.js.
@@ -31,10 +31,13 @@ RESUME.md and worker/README.md first.
   and report what happened.
 
 ## Finishing
-- Commit in your worktree. You may make several commits. Each message ends with exactly these two lines:
-  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_01P4jJrmLcai2Di9csuDE8sr
-- Do NOT push.
+- The collaborators require one feature branch and PR to main per functionality. Several focused commits may belong
+  to that PR. Pushing the feature branch to open/update its PR is authorized; do not merge or push directly to main.
+- Keep incomplete deliveries or deliveries with outstanding verification in Draft PRs. Explain the exact scope and
+  pending checks. Include the problem/result, key changes, decisions/docs, sources/formulas when relevant, validation,
+  compatibility/privacy, risks, limitations, next step, branch and commit. Use .github/PULL_REQUEST_TEMPLATE.md.
+- Record actual authorship. Never copy a fixed co-author identity or session URL from an unrelated agent/session.
+- Keep decisions and phase status in the feature brief. For Industrial Intelligence, read docs/briefs/industrial-intelligence.md.
 - Report:
   - what you did for each item, and anything left undone with the reason
   - files changed
