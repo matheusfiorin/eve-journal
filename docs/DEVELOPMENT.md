@@ -99,6 +99,10 @@ winget install --id Google.AndroidCLI --exact --source winget
 Após instalar, reabra o terminal e confira `java --version` e `android --version`. Confirme o JDK 21 antes de compilar;
 se outra versão estiver primeiro no PATH, selecione a instalação 21 via `JAVA_HOME` para a sessão de build.
 
+Os testes JVM usam explicitamente en-US para que datas dos goldens sejam reproduzíveis em máquinas de outros idiomas.
+O teste de regressão do campo de quantias muda explicitamente para pt-BR, de-DE e ar-EG, cobrindo a gramática do parser
+fora desse ambiente fixo de screenshots.
+
 O Android CLI permite instalar os componentes necessários em uma pasta separada dos fontes:
 
 ```powershell
@@ -168,3 +172,35 @@ Nenhum teste não executado pode ser declarado aprovado. Atualize a PR com as ve
   ambas também passaram no commit `dff6ab3` da PR do catálogo. Isso é evidência do CI Linux, não de um build Android local.
 - A preparação local Android segue a escolha de ferramentas de terminal: JDK 21 foi instalado e validado. A primeira
   inicialização completa do Android CLI e os pacotes SDK continuam pendentes de download no terminal do colaborador.
+
+### Android local após o primeiro download
+
+Em 27/11/2026 foram verificados Android API 36 revisão 2, Build Tools 36.0.0 e platform-tools 37.0.3. AAPT2 e ADB
+executaram corretamente. O colaborador preencheu `C:\workspace\eve-gradle-cache` com Gradle 9.9.2 e dependências, usando
+Temurin 21.0.13.1+2. O primeiro build gerou um APK, mas terminou com 353 testes e três falhas:
+
+- Atualização persistida de timer: tratada na [PR #10](https://github.com/matheusfiorin/eve-journal/pull/10), com
+  contrato de persistência documentado na própria PR.
+- Quantia formatada com vírgula e reinterpretada com outro valor: tratada na
+  [PR #11](https://github.com/matheusfiorin/eve-journal/pull/11), com a gramática do campo documentada na própria PR.
+- Settings renderizado com data pt-BR enquanto o golden é inglês: ambiente JVM de testes fixado em en-US nesta PR.
+  O limite de comparação das imagens continua em 0,1%; os PNGs de referência foram preservados.
+
+Após reunir as três correções numa cópia de validação, os 21 testes focados passaram, incluindo os dois novos testes
+de regressão. O build completo com `assembleDebug`, `testDebugUnitTest` e `verifyPaparazziDebug` terminou com sucesso:
+**355 testes, zero falhas, zero erros e zero ignorados**, em 6m06s, offline. O APK debug foi gerado na cópia de validação.
+As 82 imagens de referência foram comparadas byte a byte com o checkout original e continuaram iguais.
+Essa execução reúne PRs #8, #10 e #11; não equivale a cada branch isolada ter sido integrada na main.
+
+Na sessão restrita das ferramentas, o attach dinâmico usado pelo agente de screenshots ficou preso ao abrir um pipe
+da JVM. Foi necessário carregar antecipadamente o Byte Buddy 1.18.14 já disponível no cache, via um init script local
+temporário e `-javaagent`, sem nova dependência. O build normal do colaborador não precisou desse ajuste.
+Com esse ambiente, a verificação pode ser executada offline:
+
+```powershell
+.\gradlew.bat --offline --no-daemon --no-configuration-cache -I C:\workspace\eve-paparazzi-agent.init.gradle :app:assembleDebug :app:testDebugUnitTest :app:verifyPaparazziDebug
+```
+
+O init script é específico desta sessão/cache; seu argumento aponta para o JAR do agente instalado. Em uma sessão
+que também precise desse ajuste, encontre a versão efetivamente presente no cache e configure sua inicialização.
+Não regrave os goldens nem desabilite os testes para contornar diferenças de idioma.
