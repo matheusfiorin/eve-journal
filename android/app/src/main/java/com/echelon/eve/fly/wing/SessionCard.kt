@@ -80,6 +80,7 @@ import com.echelon.eve.ui.motion.motionSpec
 import com.echelon.eve.ui.theme.Echelon
 import com.echelon.eve.ui.theme.Radii
 import com.echelon.eve.ui.theme.Spacing
+import java.util.Locale
 import kotlin.math.abs
 
 // The session card: the goal the two pilots reach over N operations. The headline is the value (gas mined by both + ISK added by
@@ -331,7 +332,8 @@ fun formatAmount(v: Long): String {
     return if (v < 0) "-$text" else text
 }
 
-private fun trim(d: Double): String = if (d == d.toLong().toDouble()) d.toLong().toString() else "%.3f".format(d).trimEnd('0').trimEnd('.')
+// This is editable form syntax consumed by parseAmount, whose decimal separator is always a dot.
+private fun trim(d: Double): String = if (d == d.toLong().toDouble()) d.toLong().toString() else "%.3f".format(Locale.ROOT, d).trimEnd('0').trimEnd('.')
 
 /** The sheet over the Wing screen holding [AddIskForm]. */
 @Composable
