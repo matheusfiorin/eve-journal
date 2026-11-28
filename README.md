@@ -97,6 +97,13 @@ Pushing to `main` runs the tests, deploys the Worker and Pages, then runs live s
 
 The page is static ES modules with no build step. `app.js` boots the app and routes between views; `ui/` holds the shell and shared helpers, and each destination owns `ui/screens/<name>.js` (its markup, renderers and listeners) and `styles/<name>.css`. Design tokens live in `styles/tokens.css`. The pure planning modules (`model.js`, `market.js`, `industry.js`, `route.js`, …) stay at the root with their unit tests. Earn and Navigate (the planners, the Star map and its 3D drawing) load on the first visit to one of their views or when the page is idle; their markup is split into `ui/screens/*-markup.js` so the page can build every screen at boot, and `index.html` preloads the boot graph (`tests/package.test.js` keeps the two in step). The Haul plan's route searches run in a module Worker (`ui/haulworker.js`, driven by `ui/haulplan.js`) and fall back to the page if a Worker can't start; the same Worker runs the Sell planner (`sell.js`: where to sell what the ships and hangars hold, and each ship's route), which loads only when it is first used. `tests/planners.test.js` checks the optimised planners against reference versions and carries time budgets on a 5,400-system payload.
 
+## Industrial Intelligence (in development)
+
+Industrial Intelligence is being developed incrementally: [scope, decisions and the normalized catalog contract](docs/briefs/industrial-intelligence.md).
+`industrial-catalog.js` validates that internal contract with synthetic unit tests; it is not yet connected to Build or the SDE HTTP collector.
+The [source validation brief](docs/briefs/industrial-source-validation.md) explains the public diagnostic capture tool,
+its provenance report and the real-data review still required before implementing the source adapter.
+
 ## Security and observability
 
 - **Pipeline signing.** Market uploads are signed with a `PIPELINE_SECRET` GitHub secret (create it once; see `worker/README.md`), so a captured request can't be replayed. Without it the old fixed token still works, with a warning.
