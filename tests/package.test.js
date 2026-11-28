@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile, readdir} from 'node:fs/promises';
 import {posix} from 'node:path';
+import {fileURLToPath} from 'node:url';
 const read=path=>readFile(new URL(`../${path}`,import.meta.url),'utf8');
 const uiFiles=async()=>{const out=[];for(const dir of ['ui','ui/screens'])for(const f of await readdir(new URL(`../${dir}`,import.meta.url)))if(f.endsWith('.js'))out.push(`${dir}/${f}`);return out;};
 // Each screen module's static markup (its `export const markup = {...};` block) is part of the document.
@@ -128,7 +129,7 @@ test('the published page pins its connect-src to the deployed Worker; the source
   const dir=await mkdtemp(`${tmpdir()}/configure-`),html=await read('index.html');
   assert.match(html,/connect-src [^;]*https:\/\/\*\.workers\.dev/);
   await writeFile(`${dir}/index.html`,html);await writeFile(`${dir}/config.json`,'{"backendUrl":""}');
-  const run=url=>spawnSync(process.execPath,[new URL('../scripts/configure-frontend.mjs',import.meta.url).pathname],{cwd:dir,env:{BACKEND_URL:url},encoding:'utf8'});
+  const run=url=>spawnSync(process.execPath,[fileURLToPath(new URL('../scripts/configure-frontend.mjs',import.meta.url))],{cwd:dir,env:{BACKEND_URL:url},encoding:'utf8'});
   assert.notEqual(run('https://evil.example').status,0,'only a workers.dev address is accepted');
   const ok=run('https://eve-journal-api.someone.workers.dev');assert.equal(ok.status,0,ok.stderr);
   const pinned=await rf(`${dir}/index.html`,'utf8'),connect=pinned.match(/connect-src ([^;]+);/)[1].split(' ');

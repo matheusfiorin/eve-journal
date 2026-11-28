@@ -29,7 +29,9 @@ test('the Bridge shows the current fit by slot and copies it as EFT',async({page
  await expect(card).toContainText('Hobgoblin I');
  const copy=card.getByRole('button',{name:'Copy as EFT'});if(isMobile(page))await tall(copy);
  await copy.click();await expect(page.locator('#toasts')).toContainText('Fit copied');
- expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(HERON_FIT);
+ // Windows' text clipboard uses CRLF; compare its complete native representation, including blank lines.
+ const clipboardFit=process.platform==='win32'?HERON_FIT.replaceAll('\n','\r\n'):HERON_FIT;
+ expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(clipboardFit);
  await page.screenshot({path:testInfo.outputPath('fit.png'),fullPage:true});
  expect(errors).toEqual([]);expect(privateEsi).toEqual([]);
 });

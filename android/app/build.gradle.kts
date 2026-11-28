@@ -64,7 +64,13 @@ android {
         unitTests.isReturnDefaultValues = true
         // Paparazzi loads layoutlib's android classes into its JVM, which makes OkHttp in a later test class pick its
         // Android platform: one JVM per test class keeps the two apart.
-        unitTests.all { it.maxHeapSize = "2g"; it.forkEvery = 1 }
+        unitTests.all {
+            it.maxHeapSize = "2g"; it.forkEvery = 1
+            // Golden fixtures use en-US dates, times and number grouping (Locale.getDefault(FORMAT)),
+            // whatever the developer machine's locale.
+            it.systemProperty("user.language", "en")
+            it.systemProperty("user.country", "US")
+        }
     }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
