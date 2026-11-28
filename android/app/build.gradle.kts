@@ -66,7 +66,8 @@ android {
         // Android platform: one JVM per test class keeps the two apart.
         unitTests.all {
             it.maxHeapSize = "2g"; it.forkEvery = 1
-            // The checked-in golden fixtures use English dates, regardless of the developer machine's locale.
+            // Golden fixtures use en-US dates, times and number grouping (Locale.getDefault(FORMAT)),
+            // whatever the developer machine's locale.
             it.systemProperty("user.language", "en")
             it.systemProperty("user.country", "US")
         }
