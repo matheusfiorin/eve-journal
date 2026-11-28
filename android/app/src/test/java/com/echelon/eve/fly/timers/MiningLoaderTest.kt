@@ -70,6 +70,19 @@ class MiningLoaderTest {
         assertEquals(mapOf(22542L to 1), m.low)
     }
 
+    @Test fun newlyFetchedTypesReplaceAnExistingDiskSnapshotAndSurviveRestart() = runTest {
+        val file = java.io.File(tmp.root, "replace-dogma.json")
+        fun response(id: Long) = buildJsonObject { db.getValue(id).forEach { (k, v) -> put(k, v) }; put("volume", 1.0) }
+        val cache = DogmaCache({ response(it) }, file, clock = { 1_000L })
+        cache.get(32880)
+        cache.get(25266)
+        var requests = 0
+        val reopened = DogmaCache({ requests++; null }, file, clock = { 1_000L })
+        assertEquals(setOf(32880L, 25266L), reopened.getAll(listOf(32880, 25266)).keys)
+        assertEquals(0, requests)
+        // This is a Windows rename-replacement regression; a green Linux run alone does not demonstrate it.
+    }
+
     @Test fun theProfileEndToEndForTheUsersVenture() = runTest {
         // Rows as the snapshot keeps them: [type, flag, quantity]; the Venture's two scoops are in high slots 0 and 1.
         val fit = com.echelon.eve.fly.RawFit(32880, EchelonJson.parseToJsonElement("[[25266,27,1],[25266,28,1]]") as JsonArray)
