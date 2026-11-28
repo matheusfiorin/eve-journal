@@ -27,7 +27,7 @@ de Build continua sendo um planejador inicial; este documento não declara que o
 | Etapa | Entrega | Situação |
 |---|---|---|
 | 0A | Escopo e contrato interno normalizado do catálogo, com testes sintéticos | Implementado nesta entrega |
-| 0B | Homologação de respostas/schemas reais da API HTTP SDE e da especificação ESI | Pendente: acesso direto indisponível no ambiente |
+| 0B | Homologação de respostas/schemas reais da API HTTP SDE e da especificação ESI | Em andamento: capturador diagnóstico testado; coleta e revisão de dados reais pendentes por falha DNS no ambiente |
 | 1 | Adaptador SDE, coleta incremental, publicação atômica e cache | Planejado, depende de 0B |
 | 2 | Simulador de um lote: jobs, ME/TE, custos econômicos e capital | Planejado |
 | 3 | Profundidade de mercado, venda imediata/ordem e histórico regional | Planejado |
@@ -93,6 +93,10 @@ nomeadas. Não avançar globalmente a data ESI antes de migrar os consumidores d
 Para encerrar 0B: capturar manifesto, schemas e registros representativos oficiais; registrar release/versões/hashes e
 origem; testar ausência/alteração de campos e comparar o mapeamento com o schema. Só então implementar o adaptador real.
 Estas consultas públicas não exigem credenciais pessoais. Manter os avisos e termos aplicáveis da CCP.
+
+Preparação e critérios detalhados: [validação da fonte](industrial-source-validation.md). O script diagnóstico
+`scripts/capture-industrial-contracts.mjs` preserva respostas e procedência em pasta explícita, fora do pipeline.
+Mesmo uma captura sem erros permanece pendente de revisão. Seus testes HTTP são sintéticos, não fixtures oficiais.
 
 ## Critérios das próximas entregas
 

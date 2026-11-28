@@ -4,8 +4,13 @@
 
 Approved scope and phase status: docs/briefs/industrial-intelligence.md. The first delivery adds a pure normalized catalog
 contract and synthetic tests; it does not integrate the HTTP SDE collector, change Build or price a production lot.
-Next: capture and validate actual SDE manifests/schemas/records before implementing the source adapter. The environment
-could not resolve sde.evetech.net or registry.npmjs.org; dependency-based suites and live contracts need verification.
+Phase 0B has a tested public GET-only diagnostic tool: scripts/capture-industrial-contracts.mjs; instructions and
+acceptance criteria are in docs/briefs/industrial-source-validation.md. Capture actual SDE manifests/schemas/records
+and the ESI specification, then review/map them before implementing the source adapter. Synthetic capture tests do
+not homologate live data. Direct requests still fail with ENOTFOUND for sde.evetech.net and esi.evetech.net; the tool
+preserves an incomplete report and can be run from the user's terminal with an explicit output directory.
+Node dependencies/browsers are now installed. Windows portability and Android timer/amount fixes are separate review
+PRs #8/#10/#11; do not assume their commits are already on main or mixed into this foundation branch.
 Each functionality now needs its own branch and PR (draft while partial); feature-branch push is authorized, merge is not.
 The notes below predate the Android/Sell changes: inspect code and migrations rather than treating their status as current.
 
