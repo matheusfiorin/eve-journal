@@ -1,6 +1,8 @@
 package com.echelon.eve.fly.timers
 
+import android.util.Log
 import com.echelon.eve.AppContainer
+import com.echelon.eve.core.cache.atomicWrite
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.wing.WingCodec
 import com.echelon.eve.core.wing.WingTimer
@@ -17,9 +19,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 /**
@@ -165,15 +164,8 @@ class TimerStore internal constructor(
                 val snapshot = local.value.values.toList()
                 runCatching {
                     f.parentFile?.mkdirs()
-                    val tmp = File(f.path + ".tmp")
-                    tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot))
-                    // File.renameTo may refuse an existing target on Windows, leaving stale timers on disk.
-                    try {
-                        Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-                    } catch (_: AtomicMoveNotSupportedException) {
-                        Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                    }
-                }
+                    atomicWrite(f, WingCodec.json.encodeToString(LIST, snapshot))
+                }.onFailure { Log.w("TimerStore", "timer save failed", it) }
             }
         }
     }

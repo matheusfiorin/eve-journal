@@ -1,6 +1,9 @@
 package com.echelon.eve.core.cache
 
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /**
@@ -58,5 +61,10 @@ class UniverseCache(private val dir: File) {
 internal fun atomicWrite(target: File, text: String) {
     val tmp = File(target.parentFile, "${target.name}.tmp")
     tmp.writeText(text)
-    if (!tmp.renameTo(target)) { target.delete(); tmp.renameTo(target) }
+    // File.renameTo can refuse an existing target on Windows. Never delete the saved file as a fallback.
+    try {
+        Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } catch (_: AtomicMoveNotSupportedException) {
+        Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }
 }

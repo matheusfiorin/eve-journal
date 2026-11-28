@@ -119,6 +119,7 @@ class TimersTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    // Regression for File.renameTo not replacing an existing target on Windows; the old code also passes on Linux/macOS.
     @Test fun replacingAndRemovingSavedTimersSurvivesRestart() = runTest {
         val room = FakeRoom(); val file = File(tmp.root, "replace.json")
         val s = store(this, room, file)
