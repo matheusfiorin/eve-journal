@@ -277,6 +277,13 @@ fun SessionMini(s: WingSession, pilot: Pilot, onOpen: () -> Unit, modifier: Modi
 /** The quick amounts of the Add ISK sheet, in ISK. */
 val QUICK_ADDS = listOf(10_000_000L, 50_000_000L, 100_000_000L)
 
+/** A chip only replaces the field when the resulting amount can still be submitted. */
+internal fun quickAddAmount(text: String, increment: Long): String {
+    if (increment <= 0 || increment > MAX_ADD) return text
+    val next = (parseAmount(text) ?: 0) + increment
+    return if (next != 0L && abs(next) <= MAX_ADD) formatAmount(next) else text
+}
+
 /**
  * The Add ISK form: the amount (the same format as everywhere: "12.5m", "750k"; a leading minus corrects a mistake), a note, chips
  * that add 10M, 50M or 100M to the amount, and a line saying what will happen. [onAdd] gets the amount and the note.
@@ -304,7 +311,7 @@ fun AddIskForm(onAdd: (Long, String) -> Unit, modifier: Modifier = Modifier, ini
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next), colors = fieldColors,
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            QUICK_ADDS.forEach { q -> ChoiceChip("+${iskShort(q.toDouble())}", selected = false, onClick = { amount = formatAmount((parseAmount(amount) ?: 0) + q) }) }
+            QUICK_ADDS.forEach { q -> ChoiceChip("+${iskShort(q.toDouble())}", selected = false, onClick = { amount = quickAddAmount(amount, q) }) }
         }
         OutlinedTextField(
             note, { note = it.take(80) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Note (optional)") },
