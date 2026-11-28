@@ -1,6 +1,8 @@
 package com.echelon.eve.fly.timers
 
+import android.util.Log
 import com.echelon.eve.AppContainer
+import com.echelon.eve.core.cache.atomicWrite
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.wing.WingCodec
 import com.echelon.eve.core.wing.WingTimer
@@ -160,7 +162,10 @@ class TimerStore internal constructor(
         scope.launch(io) {
             writing.withLock {
                 val snapshot = local.value.values.toList()
-                runCatching { f.parentFile?.mkdirs(); val tmp = File(f.path + ".tmp"); tmp.writeText(WingCodec.json.encodeToString(LIST, snapshot)); tmp.renameTo(f) }
+                runCatching {
+                    f.parentFile?.mkdirs()
+                    atomicWrite(f, WingCodec.json.encodeToString(LIST, snapshot))
+                }.onFailure { Log.w("TimerStore", "timer save failed", it) }
             }
         }
     }

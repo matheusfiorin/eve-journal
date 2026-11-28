@@ -119,6 +119,24 @@ class TimersTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    // Regression for File.renameTo not replacing an existing target on Windows; the old code also passes on Linux/macOS.
+    @Test fun replacingAndRemovingSavedTimersSurvivesRestart() = runTest {
+        val room = FakeRoom(); val file = File(tmp.root, "replace.json")
+        val s = store(this, room, file)
+        val original = s.start(Pilot.Fiofka, TimerKind.Generic, HOUR, shared = false)
+        advanceUntilIdle()
+        assertEquals(original, store(this, FakeRoom(), file).timers.value.getValue(original.id))
+        val jita = TimerSystem(30000142, "Jita")
+        s.place(original.id, jita)
+        advanceUntilIdle()
+        assertEquals(jita, store(this, FakeRoom(), file).timers.value.getValue(original.id).system)
+        s.remove(original.id)
+        advanceUntilIdle()
+        assertTrue(store(this, FakeRoom(), file).timers.value.isEmpty())
+        assertTrue(room.upserts.isEmpty()); assertTrue(room.removes.isEmpty())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun gasTimersCarryTheGasThePilotPickedElseTheLastOneUsed() = runTest {
         val room = FakeRoom(); val d = UnconfinedTestDispatcher(testScheduler)
         val choice = GasChoice.Memory()
