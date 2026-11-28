@@ -103,7 +103,6 @@ Industrial Intelligence is being developed incrementally: [scope, decisions and 
 `industrial-catalog.js` validates that internal contract with synthetic unit tests; it is not yet connected to Build or the SDE HTTP collector.
 The [source validation brief](docs/briefs/industrial-source-validation.md) explains the public diagnostic capture tool,
 its provenance report and the real-data review still required before implementing the source adapter.
-New functionality is delivered in a feature PR with documentation and exact validation results; partial deliveries remain drafts.
 
 ## Security and observability
 

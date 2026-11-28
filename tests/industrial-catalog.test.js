@@ -127,8 +127,37 @@ test('duplicate materials, omitted skill lists and invalid skill requirements ca
 
 test('input order does not affect the catalog and frozen source records are never mutated', () => {
   const a = snapshot(); extraHull(a, 10, 'Another hull');
+  const job = a.tables.blueprints.rows[0].manufacturing;
+  job.materials.push({typeId:34, quantity:2}, {typeId:34}, {typeId:0, quantity:9}, null, {quantity:3});
+  job.skills = [{typeId:34, level:5}, {typeId:34, level:2}, {typeId:34, level:6}, {typeId:0, level:1}, null];
   const b = structuredClone(a); for (const table of Object.values(b.tables)) table.rows.reverse();
+  for (const bp of b.tables.blueprints.rows) { bp.manufacturing.materials.reverse(); bp.manufacturing.skills.reverse(); }
   assert.deepEqual(buildIndustrialCatalog(freeze(a)), buildIndustrialCatalog(b));
+});
+
+test('invalid recipe references stay visible as null placeholders and cannot make a recipe ready', () => {
+  const entry = first(s => {
+    s.tables.blueprints.rows[0].manufacturing.materials = [{typeId:0, quantity:17}, null];
+    s.tables.blueprints.rows[0].manufacturing.skills = [{typeId:0, level:2}, {typeId:34, level:6}, null];
+  });
+  assert.equal(entry.status, 'incomplete');
+  assert.deepEqual(entry.materials, [{typeId:null, name:null, quantity:17}, {typeId:null, name:null, quantity:null}]);
+  assert.deepEqual(entry.skills, [{typeId:34, level:null}, {typeId:null, level:2}, {typeId:null, level:null}]);
+  assert.ok(entry.issues.includes('invalid_material_type')); assert.ok(entry.issues.includes('invalid_material_quantity'));
+  assert.ok(entry.issues.includes('invalid_skill'));
+});
+
+test('retrieval time requires a real ISO calendar timestamp with an explicit timezone', () => {
+  for (const value of ['Nov 26 2026 12:05 Z', '2026-11-26 12:05:00Z', '2026-02-30T12:05:00Z',
+    '2026-11-26T24:00:00Z', '2026-11-26T12:05:00', '2026-11-26T12:05:00+24:00']) {
+    assert.throws(() => build(s => s.source.retrievedAt = value), {code:'invalid_source'}, value);
+  }
+  assert.equal(build(s => s.source.retrievedAt = '2026-11-26T09:05:00.125-03:00').source.retrievedAt, '2026-11-26T12:05:00.125Z');
+});
+
+test('absent table objects report invalid_table while actual release mismatches report mixed_release', () => {
+  for (const value of [null, undefined, [], 'table']) assert.throws(() => build(s => s.tables.types = value), {code:'invalid_table'});
+  assert.throws(() => build(s => s.tables.types.release = '20261125T120000Z'), {code:'mixed_release'});
 });
 
 test('raw ZIP or HTTP keys are rejected until an explicit adapter normalizes them', () => {

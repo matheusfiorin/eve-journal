@@ -1,120 +1,110 @@
-# Industrial Intelligence — escopo aprovado e contrato do catálogo
+# Industrial Intelligence: approved scope and normalized catalog
 
-Este documento registra as decisões dos fundadores e orienta as entregas do analisador industrial. O código atual
-de Build continua sendo um planejador inicial; este documento não declara que o novo simulador esteja disponível.
+This brief defines the industrial analyser. The existing Build screen remains the starter planner; the new catalogue
+is not integrated into it and does not yet price production lots.
 
-## Decisões aprovadas
+## Approved decisions
 
-- Web e Android, com um único motor JavaScript reutilizado pela ponte QuickJS. Sem trocar framework, banco ou hospedagem.
-- Instalações configuráveis: compra, fabricação e venda são locais independentes. Validar primeiro uma estação NPC;
-  Kisogo/Jita são possibilidades, não constantes. O nome exato da instalação será informado no primeiro cenário real.
-- Descobrir o catálogo T1 fabricável por metadados/receitas oficiais, sem lista fixa de naves e sem limite por preço de BPO.
-  Habilitar cálculos por regras verificadas. Capitais, facção e especiais têm classificação explícita; capitais não entram
-  automaticamente no primeiro simulador. T2, T3, invenção e produção recursiva ficam fora do MVP.
-- Materiais próprios têm custo de oportunidade: valor líquido de venda, respeitando profundidade e taxas. Separar custo
-  econômico, desembolso e capital imobilizado. Minério bruto não substitui mineral refinado na receita.
-- Logística manual por lote, com origem/destino e valores desconhecidos identificados. Zero somente quando informado.
-  Bônus e taxas pertencem ao perfil da instalação. Risco de transporte é indicador separado.
-- Ranking explicável: lucro econômico, margem, capital, lucro por hora de slot e liquidez regional. Sem pesos ocultos ou
-  participação fixa de mercado; operação deficitária/incompleta não é uma oportunidade positiva.
-- Rascunhos privados; compartilhamento voluntário com a wing e prévia do conteúdo. Preservar as premissas e cotações da
-  revisão compartilhada. Recalcular cria nova revisão. Não anexar automaticamente carteira, estoque ou localização atuais.
-- Cada funcionalidade: branch, commits, Markdown atualizado e PR para `main`. Envio da branch autorizado; merge depende
-  de revisão/autorização. Entregas parciais ou com validação pendente ficam em Draft PR.
+- Web and Android share one JavaScript engine through the existing QuickJS bridge. Keep the current framework,
+  database and hosting.
+- Buying, manufacturing and selling use independently configurable facilities. Validate an NPC station first;
+  Kisogo/Jita are possibilities, not constants. The exact facility belongs to the first real scenario.
+- Discover manufacturable T1 ships through official metadata and recipes, without a fixed ship list or BPO-price cap.
+  Enable calculations only for verified classes. Capitals, faction and special variants have explicit classification;
+  capitals are not automatically enabled. T2/T3, invention and recursive production are outside the MVP.
+- Owned materials have opportunity cost: net sale proceeds subject to depth and fees. Separate economic cost, cash
+  outlay and tied-up capital. Raw ore does not replace refined minerals in a recipe.
+- Enter logistics per lot with origin/destination and explicit unknowns. Zero requires an entered value. Facility
+  bonuses and taxes belong to the facility profile; transport risk remains a separate indicator.
+- Explain rankings through economic profit, margin, capital, profit per slot-hour and regional liquidity. No hidden
+  weights or assumed fixed market share. Losing or incomplete operations are not positive opportunities.
+- Drafts are private. Sharing a revision with the wing is voluntary and has a preview. Preserve its assumptions and
+  quotes; recalculation creates a new revision. Do not automatically attach current wallet, inventory or location.
 
-## Etapas e situação
+## Phases and status
 
-| Etapa | Entrega | Situação |
+| Phase | Delivery | Status |
 |---|---|---|
-| 0A | Escopo e contrato interno normalizado do catálogo, com testes sintéticos | Implementado nesta entrega |
-| 0B | Homologação de respostas/schemas reais da API HTTP SDE e da especificação ESI | Em andamento: oito arquivos reais recebidos e hashes conferidos; quatro schemas bloqueados por redirects, revisão completa pendente |
-| 1 | Adaptador SDE, coleta incremental, publicação atômica e cache | Planejado, depende de 0B |
-| 2 | Simulador de um lote: jobs, ME/TE, custos econômicos e capital | Planejado |
-| 3 | Profundidade de mercado, venda imediata/ordem e histórico regional | Planejado |
-| 4 | Ranking e cenários conservador/base/otimista com premissas explícitas | Planejado |
-| 5 | Interfaces Build na web/Android e planos compartilhados versionados | Planejado |
+| 0A | Internal normalized catalog contract and synthetic tests | Implemented; review corrections preserve invalid references and deterministic ordering |
+| 0B | Real HTTP SDE schemas/records and ESI specification review | Partial: eight real files and hashes checked; schema recapture and complete taxonomy review pending |
+| 1 | SDE adapter, incremental collection, atomic publication and cache | Planned; requires 0B |
+| 2 | One-lot simulator: jobs, ME/TE, economic costs and capital | Planned |
+| 3 | Market depth, immediate sale/orders and regional history | Planned |
+| 4 | Explainable ranking and conservative/base/optimistic assumptions | Planned |
+| 5 | Web/Android Build screens and versioned shared plans | Planned |
 
-## Primeira entrega: `industrial-catalog.js`
+Source capture instructions, immutable provenance and preliminary native-field mapping are in
+[industrial-source-validation.md](industrial-source-validation.md). Capturing files does not homologate their schemas.
+Runtime checks and session evidence belong in the PR description.
 
-`buildIndustrialCatalog(snapshot)` é puro: não consulta APIs, não escreve arquivos, não usa relógio global e não depende
-do DOM. Pode ser usado pelo pipeline, Node e pelos clientes, após integração explícita. O catálogo não alimenta a tela
-Build nem altera o pipeline nesta entrega. Não há novas migrações, endpoints, scopes ou dependências.
+## Internal contract: industrial-catalog.js
 
-**O contrato abaixo é interno, não é o JSON nativo da nova API SDE.** Não passar respostas HTTP/ZIP diretamente para ele.
-Um adaptador futuro deve validar o schema da fonte e converter os campos explicitamente. As fixtures dos testes são
-sintéticas, não capturas oficiais. Nenhum teste desta entrega comprova a compatibilidade de um payload HTTP real.
+`buildIndustrialCatalog(snapshot)` is pure: no HTTP, file writes, global clock or DOM. Its input is an internal
+normalized contract, not native SDE HTTP/ZIP JSON. A future adapter must validate the source schema and explicitly
+map fields. Current unit fixtures are synthetic; they are not evidence of real API compatibility.
 
-### Entrada normalizada
+The module is not imported by Build, bundled for Android or copied into the Pages artifact yet. Add deployment
+packaging when a browser consumer actually imports it. No endpoint, dependency or migration is added.
 
-- `source`: `provider: 'ccp-sde'`, `tenant: 'tranquility'`, `release` no formato `YYYYMMDDTHHMMSSZ`, `retrievedAt` com fuso.
-- `tables`: `types`, `groups`, `categories`, `blueprints`. Cada uma carrega `release`, `version` (string normalizada) e `rows`.
-  Caches reaproveitados devem ser confirmados pelo adaptador como parte da release selecionada; não basta renomear a release.
-- IDs e quantidades são inteiros positivos seguros para JavaScript. IDs duplicados tornam a geração ambígua e são rejeitados.
+### Input
 
-| Registro | Campos internos |
+- `source`: `provider: 'ccp-sde'`, `tenant: 'tranquility'`, unique `release: YYYYMMDDTHHMMSSZ` and a real ISO
+  calendar `retrievedAt` timestamp with an explicit timezone.
+- `tables`: `types`, `groups`, `categories`, `blueprints`, each with `release`, normalized string `version` and
+  `rows`. Reused tables must be confirmed as part of the selected release, not merely relabelled.
+- IDs and quantities are positive safe JavaScript integers. Duplicate record IDs reject the ambiguous generation.
+  A missing table object reports `invalid_table`; an actual release mismatch reports `mixed_release`.
+
+| Record | Internal fields |
 |---|---|
-| Tipo | `id`, `name`, `groupId`, `published`; para naves, `techLevel` e `variant` |
-| Grupo | `id`, `name`, `categoryId`; para naves, `shipClass` |
-| Categoria | `id`, `name`, `kind` (por exemplo `ship`, `material`, `blueprint`) |
-| Blueprint | `id`, `manufacturing: null` ou uma atividade normalizada |
-| Fabricação | `products: [{typeId, quantity}]`, `materials: [{typeId, quantity}]`, `skills: [{typeId, level}]`, `timeSeconds` |
+| Type | `id`, `name`, `groupId`, `published`; ships also need `techLevel` and `variant` |
+| Group | `id`, `name`, `categoryId`; ship groups also need `shipClass` |
+| Category | `id`, `name`, `kind` (such as `ship`, `material`, `blueprint`) |
+| Blueprint | `id`, `manufacturing: null` or a normalized activity |
+| Manufacturing | `products: [{typeId, quantity}]`, `materials: [{typeId, quantity}]`, `skills: [{typeId, level}]`, `timeSeconds` |
 
-`variant` distingue `standard`, `faction`, `special` e desconhecido. `shipClass` distingue `subcapital`, `capital` e
-desconhecido. Esses campos semânticos precisam ser produzidos pelo adaptador a partir de metadados oficiais, incluindo
-dogma quando necessário. Não inferir pelo nome traduzido, preço ou capacidade financeira do piloto.
+`variant` distinguishes `standard`, `faction`, `special` and unknown. `shipClass` distinguishes `subcapital`,
+`capital` and unknown. Derive these semantic fields from official metadata, including dogma when needed, not
+translated names, prices or a pilot's budget. A native `factionID` alone does not establish a faction variant.
 
-### Saída e qualidade
+### Output and quality
 
-- `version: 1`: versão deste contrato, diferente de release SDE e de versão futura das fórmulas.
-- `source`: tenant, release, horário de coleta e versões das quatro tabelas normalizadas.
-- `entries`: ordenadas por produto/blueprint, com quantidades-base, tempo, habilidades e classificação.
-- `status: 'recipe-ready'`: receita estruturalmente completa; **não significa lucro, mercado disponível, homologação no
-  jogo, habilidades possuídas, instalação compatível ou disponibilidade de um exemplar de BPO/BPC**.
-- `status: 'incomplete'`: materiais, classificações, metadados ou requisitos desconhecidos/inválidos; motivos em `issues`.
-- `status: 'unsupported'`: receita completa cuja classe ainda não é habilitada (capitais).
-- `issues` no catálogo: receitas sem produto classificável ou com múltiplas saídas. Não escolher silenciosamente a primeira.
-- `excluded`: contagem de não fabricáveis, não naves, não publicados, não T1 e variantes fora do recorte básico.
-- `counts`: totais por estado. Dados ausentes não viram zero nem resultados financeiros.
+- `version: 1` is the internal contract version, separate from the SDE release and future formula versions.
+- `source` preserves provider, tenant, release, normalized retrieval time and all four table versions.
+- `entries` are ordered by product/blueprint and retain base quantities, time, skills and classification.
+- `recipe-ready` means structurally complete, not profitable, available in a market, verified in game, permitted
+  by the pilot's skills/facility or backed by an owned BPO/BPC.
+- `incomplete` retains missing/invalid metadata with explicit `issues`. Invalid material IDs stay as
+  `{typeId:null, name:null, quantity:...}`; invalid skill IDs/levels stay null in their original slot. Known values
+  are retained. Sorting places nulls last and breaks duplicate-ID ties by quantity or skill level.
+- `unsupported` means complete but not enabled (capitals). Top-level `issues` diagnose missing classification and
+  multi-product recipes; never silently select the first product.
+- `excluded` counts non-manufacturable, non-ship, unpublished, non-T1 and nonstandard records. `counts` reports each
+  entry state. Missing values do not become zero or financial results.
 
-A receita guarda materiais intermediários como entradas de mercado; não expande fabricação recursiva. Várias receitas
-para um produto permanecem distintas por blueprint. Eficiências e runs de exemplares de BPC não pertencem a este catálogo.
+Intermediate components remain market inputs rather than recursive jobs. Multiple recipes remain distinct by
+blueprint. ME/TE and runs of a particular BPC do not belong to this catalogue.
 
-## Fontes e bloqueios de homologação
+## Source constraints and later acceptance criteria
 
-- [SDE HTTP oficial](https://developers.eveonline.com/docs/services/static-data/)
-- [Anúncio de 19/11/2026](https://developers.eveonline.com/blog/the-sde-over-http-static-data-dynamically)
-- [ESI e datas de compatibilidade](https://developers.eveonline.com/docs/services/esi/overview/)
+[SDE HTTP](https://developers.eveonline.com/docs/services/static-data/),
+[HTTP SDE announcement](https://developers.eveonline.com/blog/the-sde-over-http-static-data-dynamically),
+[ESI compatibility dates](https://developers.eveonline.com/docs/services/esi/overview/).
 
-Resolver `latest` uma vez, manter a release para todas as tabelas, usar ETag/versão e publicar só uma geração consistente.
-Build não é identificador único de release. Apenas as duas releases mais recentes são retidas pelo serviço; conservar o
-subconjunto normalizado e hashes necessários à reprodução. Não atribuir o novo schema ao ZIP: `_key` mudou para chaves
-nomeadas. Não avançar globalmente a data ESI antes de migrar os consumidores de dados estáticos.
+Resolve latest once, preserve table versions/ETags and publish only a consistent generation. Build numbers are not
+unique release IDs. Only the current and previous SDE releases are retained; preserve reproducible subsets and hashes.
+HTTP keys are named fields, not ZIP `_key`. Do not globally advance ESI compatibility dates before migrating consumers.
 
-Para encerrar 0B: capturar manifesto, schemas e registros representativos oficiais; registrar release/versões/hashes e
-origem; testar ausência/alteração de campos e comparar o mapeamento com o schema. Só então implementar o adaptador real.
-Estas consultas públicas não exigem credenciais pessoais. Manter os avisos e termos aplicáveis da CCP.
+To finish 0B, inspect official manifests, schemas and representative records; record source/release/versions/hashes;
+test missing/changed fields and the explicit mapping. Public probes need no personal credentials. Keep CCP notices.
 
-Preparação e critérios detalhados: [validação da fonte](industrial-source-validation.md). O script diagnóstico
-`scripts/capture-industrial-contracts.mjs` preserva respostas e procedência em pasta explícita, fora do pipeline.
-Mesmo uma captura sem erros permanece pendente de revisão. Seus testes HTTP são sintéticos, não fixtures oficiais.
-
-## Critérios das próximas entregas
-
-- Preço ajustado, índice, material ou livro desconhecido produz resultado incompleto, nunca custo zero presumido.
-- Quantidades/arredondamento por job; BPC por exemplar; tempo de slot separado de prazo decorrido e de prazo de venda.
-- EIV com materiais-base e preços ajustados; parâmetros tributários com fonte/data. Resolver a divergência documental
-  Alpha no cliente antes de homologar o perfil. Pesquisa e fabricação não compartilham taxas por suposição.
-- Compra/venda por profundidade e regras de elegibilidade. Histórico é regional; preço anunciado não é receita realizada.
-- Definir denominadores de margem e ROI; investimento em BPO separado de despesas operacionais.
-- Reconciliar um lote real no EVE antes de divulgar ranking. Não ajustar constantes para esconder divergências.
-- Preservar as regras atuais de consentimento. O motor básico funciona com dados públicos e parâmetros manuais.
-
-## Validação e registro de cada PR
-
-Testes específicos em `tests/industrial-catalog.test.js`; rodar também os checks de sintaxe e a suíte Node. Mudanças de
-interface exigem E2E; mudanças da ponte Android exigem regenerar o bundle, testes de paridade e verificações Android.
-Executar a suíte completa de navegador conforme as regras do projeto quando as dependências estiverem disponíveis.
-Registrar resultados reais e impedimentos; não omitir, enfraquecer ou declarar testes não executados como aprovados.
-
-O relatório da PR deve informar base/escopo, comportamento entregue, arquivos relevantes, decisões, testes, limitações e
-próximo passo. A primeira PR é parcial até homologar a fonte e integrar o coletor; ela não entrega ainda a análise financeira.
+- Unknown adjusted price, cost index, material or book yields incomplete output, never assumed zero cost.
+- Round quantities per job; model each BPC instance. Separate slot time, elapsed production and sale delay.
+- EIV uses base materials and adjusted prices. Tax parameters require sources/dates; resolve the Alpha discrepancy
+  in the game client before approving that profile. Research and manufacturing do not inherit the same tax by assumption.
+- Orders require depth and eligibility. History is regional and an advertised price is not realised revenue.
+- Define margin/ROI denominators; separate BPO investment from operating expense.
+- Reconcile a real lot in EVE before publishing a ranking; do not tune constants to conceal discrepancies.
+- Preserve consent rules. The basic engine works with public data and manual parameters.
+- Catalog changes require its unit tests and the Node suite. Browser/Android integration adds the corresponding
+  import/package checks, parity tests and UI/Android verification.

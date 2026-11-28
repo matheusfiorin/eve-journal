@@ -5,6 +5,15 @@ const TABLES = ['types', 'groups', 'categories', 'blueprints'];
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const text = s => typeof s === 'string' && s.trim().length > 0;
 const compare = (a, b) => a.productTypeId - b.productTypeId || a.blueprintTypeId - b.blueprintTypeId;
+const nullable = (a, b) => a === b ? 0 : a === null ? 1 : b === null ? -1 : a - b;
+const ISO = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+function validRetrievedAt(value) {
+  if (typeof value !== 'string' || !ISO.test(value) || !Number.isFinite(Date.parse(value))) return false;
+  // Date.parse accepts some impossible calendar dates by rolling them into the next month.
+  const day = value.slice(0, 10), at = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === day;
+}
 
 export class CatalogError extends Error {
   constructor(code, detail) { super(`Industrial catalog: ${detail}`); this.name = 'CatalogError'; this.code = code; }
@@ -19,7 +28,8 @@ function validRelease(release) {
 }
 
 function records(table, name, release) {
-  if (!plain(table) || table.release !== release) fail('mixed_release', `${name} must belong to the selected release.`);
+  if (!plain(table)) fail('invalid_table', `${name} must be an object.`);
+  if (table.release !== release) fail('mixed_release', `${name} must belong to the selected release.`);
   if (!text(table.version) || !Array.isArray(table.rows)) fail('invalid_table', `${name} needs a version and rows.`);
   const index = new Map();
   for (const row of table.rows) {
@@ -35,8 +45,7 @@ export function buildIndustrialCatalog(snapshot = {}) {
   if (!plain(snapshot)) fail('invalid_source', 'a normalized snapshot is required.');
   const {source, tables} = snapshot;
   if (!plain(source) || source.provider !== 'ccp-sde' || source.tenant !== 'tranquility'
-      || !validRelease(source.release) || !text(source.retrievedAt) || !/(Z|[+-]\d{2}:\d{2})$/.test(source.retrievedAt)
-      || !Number.isFinite(Date.parse(source.retrievedAt))) fail('invalid_source', 'source needs a provider, tenant, release and retrieval time.');
+      || !validRelease(source.release) || !validRetrievedAt(source.retrievedAt)) fail('invalid_source', 'source needs a provider, tenant, release and retrieval time.');
   if (!plain(tables) || TABLES.some(name => !Object.prototype.hasOwnProperty.call(tables, name))) fail('missing_table', 'types, groups, categories and blueprints are required.');
   const indexes = Object.fromEntries(TABLES.map(name => [name, records(tables[name], name, source.release)]));
   const {types, groups, categories, blueprints} = indexes;
@@ -72,30 +81,37 @@ export function buildIndustrialCatalog(snapshot = {}) {
     const inputs = [], materialIds = new Set();
     if (!Array.isArray(job.materials) || !job.materials.length) faults.add('missing_materials');
     for (const material of Array.isArray(job.materials) ? job.materials : []) {
-      if (!positive(material?.typeId)) { faults.add('invalid_material_type'); continue; }
-      if (materialIds.has(material.typeId)) faults.add('duplicate_material');
-      materialIds.add(material.typeId);
-      const item = types.get(material.typeId);
-      if (!item || !text(item.name)) faults.add('missing_material_type');
-      if (!positive(material.quantity)) faults.add('invalid_material_quantity');
-      inputs.push({typeId:material.typeId, name:text(item?.name) ? item.name : null, quantity:positive(material.quantity) ? material.quantity : null});
+      const typeId = positive(material?.typeId) ? material.typeId : null, item = types.get(typeId);
+      if (typeId === null) faults.add('invalid_material_type');
+      else {
+        if (materialIds.has(typeId)) faults.add('duplicate_material');
+        materialIds.add(typeId);
+        if (!item || !text(item.name)) faults.add('missing_material_type');
+      }
+      if (!positive(material?.quantity)) faults.add('invalid_material_quantity');
+      inputs.push({typeId, name:text(item?.name) ? item.name : null, quantity:positive(material?.quantity) ? material.quantity : null});
     }
     const skills = [], skillIds = new Set();
     // An empty list is valid; an omitted list is unknown, not proof that a blueprint needs no skills.
     if (!Array.isArray(job.skills)) faults.add('missing_skills');
     for (const skill of Array.isArray(job.skills) ? job.skills : []) {
-      if (!positive(skill?.typeId) || !Number.isInteger(skill.level) || skill.level < 1 || skill.level > 5) { faults.add('invalid_skill'); continue; }
-      if (skillIds.has(skill.typeId)) faults.add('duplicate_skill');
-      skillIds.add(skill.typeId);
-      if (!types.has(skill.typeId)) faults.add('missing_skill_type');
-      skills.push({typeId:skill.typeId, level:skill.level});
+      const typeId = positive(skill?.typeId) ? skill.typeId : null;
+      const level = Number.isInteger(skill?.level) && skill.level >= 1 && skill.level <= 5 ? skill.level : null;
+      if (typeId === null || level === null) faults.add('invalid_skill');
+      if (typeId !== null) {
+        if (skillIds.has(typeId)) faults.add('duplicate_skill');
+        skillIds.add(typeId);
+        if (!types.has(typeId)) faults.add('missing_skill_type');
+      }
+      skills.push({typeId, level});
     }
     const problems = [...faults, ...unsupported].sort();
     entries.push({blueprintTypeId:bp.id, productTypeId:type.id, name:text(type.name) ? type.name : null,
       groupId:group.id, groupName:text(group.name) ? group.name : null, categoryId:category.id,
       shipClass:group.shipClass ?? null, unitsPerRun:positive(output.quantity) ? output.quantity : null,
       baseSeconds:positive(job.timeSeconds) ? job.timeSeconds : null,
-      materials:inputs.sort((a, b) => a.typeId - b.typeId), skills:skills.sort((a, b) => a.typeId - b.typeId),
+      materials:inputs.sort((a, b) => nullable(a.typeId, b.typeId) || nullable(a.quantity, b.quantity)),
+      skills:skills.sort((a, b) => nullable(a.typeId, b.typeId) || nullable(a.level, b.level)),
       status:faults.size ? 'incomplete' : unsupported.size ? 'unsupported' : 'recipe-ready', issues:problems});
   }
   entries.sort(compare);

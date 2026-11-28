@@ -1,104 +1,73 @@
-# Industrial Intelligence: validação da fonte (0B)
+# Industrial Intelligence: source validation (0B)
 
-Situação: captura real parcial recebida; **homologação pendente**. Os oito arquivos recebidos tiveram seus hashes
-conferidos; faltam os quatro schemas bloqueados por redirects e a revisão completa de cobertura/classificação.
-Os testes do capturador usam respostas HTTP sintéticas, identificadas como tal no código. O contrato normalizado em
-`industrial-catalog.js` continua interno; ele não recebe JSON nativo da CCP sem um adaptador explícito.
+Status: partial real capture received; full schema and taxonomy review is pending. Eight files have verified hashes.
+The four SDE schemas were blocked by the initial redirect rule; recapture with the corrected tool is required.
+The internal catalog contract is not native CCP JSON. A source adapter is a later step.
 
-## Fontes e decisões
+## Official sources and capture contract
 
-- [SDE HTTP oficial](https://developers.eveonline.com/docs/services/static-data/): manifesto em
-  `https://sde.evetech.net/tranquility/latest/`, schemas `<table>.schema.json` e registros `<table>/<key>.json`.
-  Resolver o manifesto uma vez e fixar todas as consultas seguintes na sua `release`. Build number não identifica
-  uma release; somente as duas gerações mais recentes são retidas. A versão de cada tabela pertence ao manifesto.
-- [Anúncio da API](https://developers.eveonline.com/blog/the-sde-over-http-static-data-dynamically).
-- [ESI e compatibilidade](https://developers.eveonline.com/docs/services/esi/overview/): a captura diagnóstica usa
-  `2026-11-19` no header `X-Compatibility-Date` e no parâmetro `compatibility_date`. Isso não muda a data ESI dos
-  consumidores existentes. A rota `https://esi.evetech.net/meta/openapi.json?compatibility_date=2026-11-19` usa o endereço
-  OpenAPI 3.1 vinculado no [anúncio oficial da migração](https://developers.eveonline.com/blog/changing-specs-from-swagger-to-openapi).
-  O conteúdo nessa data ainda precisa ser obtido e revisado; o endereço documentado não comprova um schema homologado.
-  O script aceita JSON e `application/openapi+json`. Não usar Swagger antigo como substituto: sua remoção foi
-  [anunciada pela CCP](https://developers.eveonline.com/blog/goodbye-swagger-removing-the-last-remnants).
+- [HTTP SDE](https://developers.eveonline.com/docs/services/static-data/): resolve
+  `https://sde.evetech.net/tranquility/latest/` once, then use the exact release for schemas and record probes.
+  Build numbers do not identify releases; only the current and previous releases are retained.
+- [SDE announcement](https://developers.eveonline.com/blog/the-sde-over-http-static-data-dynamically).
+- [ESI compatibility](https://developers.eveonline.com/docs/services/esi/overview/): the diagnostic tool uses
+  `2026-11-19` in the header and query parameter, without changing existing consumers' compatibility dates.
+  The [OpenAPI migration announcement](https://developers.eveonline.com/blog/changing-specs-from-swagger-to-openapi)
+  links to `https://esi.evetech.net/meta/openapi.json`. The capture adds `?compatibility_date=2026-11-19`.
+  Do not substitute [removed Swagger specs](https://developers.eveonline.com/blog/goodbye-swagger-removing-the-last-remnants).
 
-`scripts/capture-industrial-contracts.mjs` faz apenas GET público, sem SSO, tokens, dados dos pilotos ou escrita no
-pipeline. Não é o coletor incremental de produção. Não publica snapshots nem marca a fonte como homologada.
-Segue somente redirects dentro da origem oficial; depois do manifesto, rejeita mudança de identidade dos recursos.
-Para schemas SDE, aceita também o destino exato `/blobs/<versão da tabela no manifesto>.schema.json`. Essa exceção
-não vale para registros nem permite outro hash, query, origem ou release. O SHA-256 dos bytes do schema é calculado
-separadamente: a versão da tabela não é apresentada como hash do schema.
-Se uma release desaparecer durante a coleta, preserva a falha; uma nova execução começa outra captura, sem misturar dados.
+`scripts/capture-industrial-contracts.mjs` makes public GET requests without SSO, pilot data or pipeline writes.
+It does not normalize records, publish a snapshot or homologate schemas.
 
-## Executar a captura
-
-Com Node instalado, na cópia da branch de trabalho:
-
-```powershell
-node scripts/capture-industrial-contracts.mjs --output 'C:\workspace\eve-sde-captures'
+```sh
+node scripts/capture-industrial-contracts.mjs --output ../industrial-captures
 ```
 
-O diretório de saída é obrigatório. Cada execução cria uma subpasta exclusiva e preserva os arquivos anteriores.
-Também aceita `--release YYYYMMDDTHHMMSSZ` para fixar uma release conhecida e `--record typeDogma:587` para acrescentar
-uma sonda e o schema da tabela correspondente (até 24 sondas adicionais). IDs são inteiros positivos seguros.
-Esses nomes e IDs são sondas de investigação; a existência e o conteúdo efetivo precisam ser confirmados no manifesto.
+The output root is required. Each run creates a unique subdirectory without overwriting earlier evidence.
+`--release YYYYMMDDTHHMMSSZ` pins a known retained release; repeated `--record TABLE:ID` adds up to 24 probes and
+their table schemas. If a release disappears, start another capture instead of mixing generations.
 
-A coleta inicial pede schemas de `types`, `groups`, `categories` e `blueprints`; os registros de referência são
-`types:587`, `types:691`, `blueprints:691`, `groups:25`, `categories:6` e `categories:9`. É um conjunto pequeno para
-inspeção inicial, **não uma lista permitida de naves nem cobertura completa das classificações aprovadas**.
-Rifter/type 587 é o exemplo da documentação SDE; as demais sondas não foram verificadas ao vivo nesta entrega.
-É necessário ampliar as amostras após examinar o manifesto e os schemas reais, incluindo dogma/taxonomia quando necessário.
+Initial schemas are types/groups/categories/blueprints. Initial record probes are types:587, types:691,
+blueprints:691, groups:25, categories:6 and categories:9. These are investigation examples, not a ship allowlist or
+complete classification coverage. Add missing recipe references and representative classes after inspecting the source.
 
-## Evidências preservadas
+## Resource identity and provenance
 
-O arquivo `capture-report.json` registra:
+The manifest selects the release and each table version. SDE resources record their table/version/release alongside
+the requested/final URL, redirects, UTC retrieval time, byte count, SHA-256 and selected public cache/content headers.
+The original manifest preserves the native metadata. A missing table version leaves the capture incomplete.
 
-- URL pedida e final, redirects, horário UTC de cada recurso e release escolhida;
-- nome e versão da tabela do manifesto nos recursos SDE; tabela ausente ou sem versão deixa a captura incompleta;
-- tamanho, SHA-256 e headers públicos selecionados (`ETag`, `Last-Modified`, tipo/codificação, cache e data ESI);
-- erros HTTP, de rede, limites ou JSON inválido. Um JSON inválido recebido dentro do limite é salvo para análise;
-- `status: captured` somente se todas as sondas terminarem sem erro, sempre com `homologation: pending-review`.
+Only same-origin redirects are followed. A schema can additionally resolve to exactly
+`https://sde.evetech.net/blobs/<that table's manifest version>.schema.json`; another hash, query, origin or release
+is rejected. Record requests do not receive this exception. The table version is not claimed to be the hash of schema
+bytes: the saved schema has its own independently calculated digest.
 
-O hash corresponde aos bytes exatos do arquivo salvo, após a descompressão feita pelo Fetch; não é um hash dos bytes
-gzip transportados. O manifesto original é preservado para inspecionar versões e links sem adivinhar seu formato.
-Cookies e headers de autenticação não entram no relatório. Limites: 30 segundos por requisição, no máximo seis saltos,
-8 MiB descomprimidos por recurso e 32 MiB de arquivos de resposta por captura. Não há repetição automática de 429.
-Falhas de rede produzem relatório incompleto e exit code 1. Erros locais de escrita encerram a execução com erro.
+Hashes cover the exact saved bytes after Fetch decompression, not the gzip/brotli transport. Invalid JSON within
+the size limit is retained for inspection. Cookies and authentication headers are not recorded. Limits are 30 seconds
+per request, six redirect iterations, 8 MiB decoded per response and 32 MiB saved response bytes per run; no automatic
+429 retry. Network/HTTP/validation failures produce an incomplete report and exit code 1; local write errors abort.
 
-Não commitar capturas em massa. Após revisão, selecionar fixtures mínimas e oficiais, mantendo fontes, release,
-versões de tabela e hashes reproduzíveis. Arquivos capturados não são executados pelo script.
+Even `status: captured` keeps `homologation: pending-review`. Select minimal official fixtures after review;
+do not commit bulk captures or treat successful downloads as schema compatibility.
 
-## Critérios para encerrar 0B
+## First real capture: immutable evidence
 
-1. Obter arquivos reais sem falhas, conferir URLs, release única, hashes e versões das tabelas no manifesto.
-2. Inspecionar schemas e chaves nomeadas; mapear nome/publicação, grupos/categorias, receitas, produtos, materiais,
-   quantidades, habilidades e tempo para o contrato interno. Ausência de atividade não vira receita vazia válida.
-3. Identificar metadados oficiais para T1/T2/T3, facção/especiais e capital/subcapital; acrescentar amostras reais
-   representativas e casos negativos. Não derivar classificação de nomes traduzidos, preço ou uma lista fixa de naves.
-4. Confirmar na especificação ESI os contratos públicos que serão necessários para preços ajustados, índices,
-   instalações, livros e histórico; registrar unidades, paginação, validade, limites e dependências por etapa.
-5. Selecionar fixtures reais com procedência e testes de campos ausentes/alterados e do mapeamento. Somente então
-   declarar 0B concluída e iniciar o adaptador, cache e publicação atômica da etapa 1.
+Captured by the collaborator at `2026-11-28T00:37:06.039Z`, release `20261127T110709Z`, build `3754864`.
+All eight file hashes were recalculated and matched. The manifest, six SDE records and OpenAPI were received.
 
-Capturar arquivos não encerra esses critérios. A captura inicial não testa ainda todas as tabelas, registros de classes
-de naves ou respostas operacionais ESI. Não foi alterada a tela Build, o bundle Android, as fórmulas ou o banco.
+The collaborator supplied an HTTP 302 Location for types.schema.json:
+`/blobs/3dc7b00c365b3ad41774beffb27a741036745e8eae3f8b4ae0aff70f57fbc8d4.schema.json`.
+It matches the types table version. The initial exact-URL rule was too restrictive; the corrected tool binds this
+schema alias to the selected manifest version. Raw captured files are preserved in the capture directory.
 
-## Primeira captura real: análise parcial
-
-Captura executada pelo colaborador em `2026-11-28T00:37:06.039Z`, release `20261127T110709Z`, build `3754864`.
-O relatório e os oito arquivos locais foram lidos e seus SHA-256 recalculados: todos conferem. Manifesto, seis registros
-SDE e OpenAPI foram obtidos. Os quatro schemas retornaram redirects que a regra de identidade estrita bloqueou.
-O colaborador confirmou HTTP 302 para `types.schema.json`, com `Location` igual a
-`/blobs/3dc7b00c365b3ad41774beffb27a741036745e8eae3f8b4ae0aff70f57fbc8d4.schema.json`, exatamente a versão
-de `types` no manifesto. A regra inicial era restritiva demais: a correção vincula essa exceção à versão da tabela
-selecionada, mantendo o bloqueio dos demais destinos. Recaptura e análise dos schemas reais continuam necessárias.
-
-| Tabela | Versão no manifesto da release capturada |
+| Table | Manifest version |
 |---|---|
 | `types` | `3dc7b00c365b3ad41774beffb27a741036745e8eae3f8b4ae0aff70f57fbc8d4` |
 | `groups` | `82e6a9786ac87d5390cb585850ae343530d53455ae82f602a35f6f633a6dbe35` |
 | `categories` | `d18645f30d42450d55a25d8e8cd1c9f57e16fd491c97b00f2233d5daec10fa43` |
 | `blueprints` | `cb15f95c63521cd3226716044514417a72dadf9fbca266f6eee328840a4ca3af` |
 
-| Arquivo | SHA-256 dos bytes salvos |
+| Saved file | SHA-256 |
 |---|---|
 | `sde-manifest.json` | `fa18b25dd11cc2fc45fe009b0879429ffa8f8ce76b52b98aa9b56a39d2a1b996` |
 | `types-587.json` | `c4ea36237e2dc2526b2c55d20339b451657e164b76fab7d79b1a38b379678e5f` |
@@ -109,42 +78,33 @@ selecionada, mantendo o bloqueio dos demais destinos. Recaptura e análise dos s
 | `categories-9.json` | `76048c72285886d65dbbd3cbe1e11cc3b39a9403b7be0813923e49e9f7af5fff` |
 | `esi-openapi.json` | `2fb6fe45c1e8f1830f97d86f266472bb1f237b58aa70d749b4ba8112ff5a1e04` |
 
-Constatações dos registros, ainda sem homologação por schema:
+## Preliminary mapping, pending schema review
 
-- Manifesto: `tables` é um objeto por nome, com `version`, `record.schemaUrl`, `record.urlTemplate` e
-  `jsonl.recordSchemaUrl`. Na captura, esses links usam a release explícita. Preservar as versões completas ao mapear.
-- IDs nativos: `typeID`, `groupID`, `categoryID`, `blueprintTypeID`; nomes são objetos por idioma. Conversão explícita
-  para os nomes internos é necessária. Não presumir disponibilidade de português nas traduções.
-- Rifter/type 587 tem `techLevel: 1`, `metaGroupID: 1`, `metaLevel: 0` e `factionID: 500002`.
-  **Não usar a mera presença de factionID para excluir como variante de facção.** Ainda validar a taxonomia oficial.
-- Receita: `activities.manufacturing`, com `materials`, `products`, `skills` e `time`; itens usam `typeID`.
-  Na amostra do blueprint 691, o produto é 587 (quantidade 1), materiais são 34/35/36/37, habilidade 3380 e time 6000.
-  Faltam os registros referenciados e a confirmação dos schemas/unidades; não calcular custos com dados incompletos.
-- ESI: OpenAPI `3.1.0`, `info.version` e header `X-Compatibility-Date` iguais a `2026-11-19`. A especificação recebida
-  descreve `/industry/systems`, `/industry/facilities`, `/markets/prices`, `/markets/{region_id}/orders` e
-  `/markets/{region_id}/history`. Isso não equivale a ter recebido respostas operacionais dessas rotas.
-- Na especificação, `adjusted_price`, `average_price` e `tax` da instalação são opcionais. Ausência continua desconhecida,
-  nunca zero. Ordens regionais usam `page`, `X-Pages`, volume restante, volume mínimo e alcance; preservar essas condições.
+- `tables` is keyed by table name, with `version`, `record.schemaUrl`, `record.urlTemplate` and
+  `jsonl.recordSchemaUrl`. Selected links in this manifest use the exact release.
+- Native IDs are `typeID`, `groupID`, `categoryID` and `blueprintTypeID`; names are language objects.
+  Explicit normalization is necessary; do not assume Portuguese translations exist.
+- Rifter/type 587 has techLevel 1, metaGroupID 1, metaLevel 0 and factionID 500002. A factionID's presence alone must
+  not classify a standard T1 hull as a faction variant. Official taxonomy still needs validation.
+- Blueprint 691 uses `activities.manufacturing`, with materials/products/skills/time and item `typeID` fields.
+  It produces one type 587, needs types 34/35/36/37 and skill 3380, and has time 6000. Capture referenced records
+  and confirm schema semantics/units before using it in calculations.
+- The received OpenAPI is 3.1.0, with info.version and response compatibility header equal to 2026-11-19.
+  It describes industry systems/facilities, market prices, regional orders and regional history; operational
+  responses from those routes have not been captured by this tool.
+- Adjusted/average prices and facility tax are optional in that specification. Missing values remain unknown,
+  never zero. Regional orders have page/X-Pages, remaining/minimum volume and range constraints.
 
-Arquivos brutos continuam na pasta de captura local; este registro não altera seus bytes nem inventa fixtures oficiais.
+## Completing 0B
 
-## Verificação desta preparação
+1. Obtain complete real files, confirm one release, all table versions, resource identities and hashes.
+2. Inspect schema keys/required/optional fields and explicitly map publication, names, classifications, recipes,
+   quantities, skills and time. An absent activity is not a complete empty recipe.
+3. Establish official metadata for T1/T2/T3, faction/special and capital/subcapital, including dogma when needed.
+   Add representative real positive and negative records, without classifying by translated names or prices.
+4. Confirm ESI units, pagination, freshness, limits and dependencies for the later pricing/index/facility/book/history stages.
+5. Select minimal real fixtures with provenance, then test missing/changed fields and mapping against the schema.
+   Only then finish 0B and begin the source adapter, incremental cache and atomic publication.
 
-- `node --test tests/industrial-capture.test.js tests/industrial-catalog.test.js`: 30/30 aprovados em Node 24.22.3 e 26.13.1.
-  Testes incluem release fixa, redirects inconsistentes, hashes/bytes, headers, dados inválidos, limites, erros e preservação.
-  A correção acrescentou quatro testes: blob vinculado à versão, rejeição de destinos divergentes, exceção exclusiva
-  para schemas e rejeição de tabelas sem versão. As simulações reproduzem a estrutura observada, sem alegar ser capturas.
-- Tentativa pública real em 28/11/2026 UTC (27/11 no Brasil): SDE e ESI retornaram `ENOTFOUND`; zero recursos capturados,
-  release desconhecida, status incompleto. Isso não comprova indisponibilidade dos serviços fora deste ambiente.
-- Antes da alteração, a cópia isolada com LF tinha 417 testes Node: 416 aprovados e uma falha Windows preexistente em
-  `tests/package.test.js:126` (`URL.pathname` gera `C:\C:\...`). A correção está na PR #8, separada desta funcionalidade.
-- Suíte Node após a correção: 432 testes, 431 aprovados, a mesma falha e zero ignorados (Node 24.22.3).
-- Sintaxe: 78 arquivos de produção/scripts aprovados via `node --check`, além do novo arquivo de testes. O comando
-  `npm run check` desta base usa um laço Bash e falha no shell Windows; a alternativa portátil está na PR #8.
-- Navegador: servidor exclusivo na porta 8137, Chromium, `--grep-invert LIVE: --trace off --workers 2`, suíte completa
-  com 248 casos: 233 aprovados, 13 skips previstos e duas falhas conhecidas de clipboard CRLF no Windows, em
-  `e2e/pilotfeed.spec.js:21` (desktop/mobile). Não houve falha adicional ou flaky. A expectativa nativa é corrigida na #8.
-- Não foram repetidas compilação/testes Android nesta alteração restrita a ferramenta Node e documentação. O bundle
-  não mudou; a suíte Node inclui a verificação do bundle. Verificações anteriores das correções Android pertencem às PRs #10/#11.
-- Resultados e limitações também ficam na PR da fundação. Não alterar expectativas ou misturar as correções das PRs
-  #8, #10 e #11 para ocultar falhas desta base.
+Current capture tests use synthetic HTTP fixtures. Catalog tests use synthetic internal records. Runtime results and
+environment-specific diagnostics belong in the PR description, not in this source contract.
