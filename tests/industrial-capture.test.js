@@ -8,6 +8,8 @@ import {createHash} from 'node:crypto';
 import {captureIndustrialContracts,parseCaptureArgs,ESI_DATE} from '../scripts/capture-industrial-contracts.mjs';
 
 const RELEASE='20261119T120000Z', OTHER='20261120T120000Z', SDE='https://sde.evetech.net';
+const VERSIONS={types:'a'.repeat(64),groups:'b'.repeat(64),categories:'c'.repeat(64),blueprints:'d'.repeat(64),typeDogma:'e'.repeat(64)};
+const tables=()=>Object.fromEntries(Object.entries(VERSIONS).map(([name,version])=>[name,{version}]));
 const json=(value,headers={})=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json',...headers}});
 async function options(t,override={}){
   const base=resolve(tmpdir()), outputRoot=await mkdtemp(join(base,'eve-industrial-capture-test-'));
@@ -19,7 +21,7 @@ async function options(t,override={}){
   });
   return {outputRoot,now:()=>new Date('2026-11-27T22:00:00Z'),fetchImpl:async url=>
     url.endsWith('/latest/')?new Response(null,{status:302,headers:{location:`/tranquility/${RELEASE}/`}}):
-    url.endsWith(`/${RELEASE}/`)?json({release:RELEASE,tables:{}}):json({synthetic:true}),...override};
+    url.endsWith(`/${RELEASE}/`)?json({release:RELEASE,tables:tables()}):json({synthetic:true}),...override};
 }
 test('capture pins the release, saves exact bytes and hashes, and leaves homologation pending',async t=>{
   const opts=await options(t), original=opts.fetchImpl, calls=[];
@@ -55,6 +57,42 @@ test('explicit release skips latest; extra probes are deduplicated and get their
   assert.ok(!calls.some(x=>x.includes('/latest/')));
   assert.equal(calls.filter(x=>x.endsWith('/typeDogma/587.json')).length,1);
   assert.ok(calls.includes(`${SDE}/tranquility/${RELEASE}/typeDogma.schema.json`));
+});
+test('schema redirects accept only the blob bound to the selected manifest table version',async t=>{
+  const opts=await options(t), original=opts.fetchImpl,calls=[];
+  opts.fetchImpl=(url,init)=>{
+    calls.push(url);
+    if(url.endsWith('/types.schema.json'))return new Response(null,{status:302,headers:{location:`/blobs/${VERSIONS.types}.schema.json`}});
+    return original(url,init);
+  };
+  const {report}=await captureIndustrialContracts(opts), schema=report.resources.find(x=>x.file==='types.schema.json');
+  assert.equal(report.status,'captured');assert.equal(schema.url,`${SDE}/blobs/${VERSIONS.types}.schema.json`);
+  assert.equal(schema.tableVersion,VERSIONS.types);assert.equal(schema.release,RELEASE);
+  assert.equal(schema.redirects.length,1);assert.ok(calls.includes(schema.url));
+  assert.notEqual(schema.sha256,schema.tableVersion,'table version is not the hash of schema bytes');
+  assert.equal(report.resources.find(x=>x.file==='types-587.json').tableVersion,VERSIONS.types);
+});
+test('schema blob redirects reject other table versions, mutable aliases and changed URLs',async t=>{
+  for(const target of [`/blobs/${VERSIONS.groups}.schema.json`,'/blobs/latest.schema.json',`/blobs/${VERSIONS.types}.schema.json?other=1`,`https://example.com/blobs/${VERSIONS.types}.schema.json`]){
+    const opts=await options(t), original=opts.fetchImpl,calls=[];
+    opts.fetchImpl=(url,init)=>{calls.push(url);return url.endsWith('/types.schema.json')?new Response(null,{status:302,headers:{location:target}}):original(url,init);};
+    const {report}=await captureIndustrialContracts(opts);
+    assert.equal(report.status,'incomplete');assert.equal(report.failures[0].code,'unsafe_redirect');
+    assert.ok(!calls.includes(new URL(target,SDE).href));
+  }
+});
+test('record redirects cannot use the schema blob exception',async t=>{
+  const opts=await options(t), original=opts.fetchImpl;
+  opts.fetchImpl=(url,init)=>url.endsWith('/types/587.json')?new Response(null,{status:302,headers:{location:`/blobs/${VERSIONS.types}.schema.json`}}):original(url,init);
+  const {report}=await captureIndustrialContracts(opts);
+  assert.equal(report.status,'incomplete');assert.equal(report.failures[0].code,'unsafe_redirect');
+});
+test('missing table versions cannot produce an apparently complete capture',async t=>{
+  const opts=await options(t), original=opts.fetchImpl;
+  opts.fetchImpl=(url,init)=>url.endsWith(`/${RELEASE}/`)?json({release:RELEASE,tables:{}}):original(url,init);
+  const {report}=await captureIndustrialContracts(opts);
+  assert.equal(report.status,'incomplete');assert.equal(report.resources.length,2);
+  assert.deepEqual(report.failures.map(x=>x.code),Array(4).fill('invalid_table_version'));
 });
 test('inconsistent or invalid manifest stops SDE probes, retaining evidence for review',async t=>{
   for(const release of [OTHER,'20260230T120000Z',null]){

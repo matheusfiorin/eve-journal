@@ -24,13 +24,18 @@ function record(value){
   if(parts.length!==2||typeof table!=='string'||!/^[a-zA-Z][a-zA-Z0-9]*$/.test(table)||!/^\d+$/.test(String(id))||!Number.isSafeInteger(Number(id))||Number(id)<1)fail('invalid_record','Records must be table:positiveInteger.');
   return [table,Number(id)];
 }
-function safeURL(value,initial,manifest){
+function safeURL(value,initial,manifest,schemaVersion=null){
   let url,original;try{url=new URL(value);original=new URL(initial);}catch{fail('unsafe_redirect','Invalid public resource URL.');}
   if(url.origin!==original.origin||url.protocol!=='https:'||url.username||url.password||url.hash)fail('unsafe_redirect','Redirect left the approved public origin.');
   if(manifest){
     const m=/^\/tranquility\/(latest|\d{8}T\d{6}Z)\/$/.exec(url.pathname);
     if(!m||url.search||(m[1]!=='latest'&&!validRelease(m[1])))fail('unsafe_redirect','Unexpected SDE manifest location.');
-  }else if(url.href!==original.href)fail('unsafe_redirect','Redirect changed the pinned resource identity.');
+  }else{
+    // The release-specific schema URL aliases a blob identified by that table's manifest version.
+    // This is a table version, NOT an assertion that the schema bytes hash to the same value.
+    const blob=schemaVersion&&/^[a-f0-9]{64}$/.test(schemaVersion)?`${SDE}/blobs/${schemaVersion}.schema.json`:null;
+    if(url.href!==original.href&&url.href!==blob)fail('unsafe_redirect','Redirect changed the pinned resource identity.');
+  }
   return url.href;
 }
 async function bytesOf(response,maxBytes){
@@ -42,10 +47,10 @@ async function bytesOf(response,maxBytes){
   }finally{reader.releaseLock();}
   return Buffer.concat(chunks);
 }
-async function download(initial,{fetchImpl,manifest=false,maxBytes}){
+async function download(initial,{fetchImpl,manifest=false,maxBytes,schemaVersion=null}){
   let url=initial;const redirects=[];
   for(let i=0;i<6;i++){
-    url=safeURL(url,initial,manifest);
+    url=safeURL(url,initial,manifest,schemaVersion);
     let response;
     try{response=await fetchImpl(url,{method:'GET',redirect:'manual',credentials:'omit',signal:AbortSignal.timeout(30000),
       headers:{...HEADERS,...(new URL(url).origin===ESI?{'X-Compatibility-Date':ESI_DATE}:{})}});}
@@ -54,7 +59,7 @@ async function download(initial,{fetchImpl,manifest=false,maxBytes}){
       const location=response.headers.get('location');await response.body?.cancel();
       if(!location)fail('unsafe_redirect','Redirect did not provide a location.');
       let target;try{target=new URL(location,url).href;}catch{fail('unsafe_redirect','Invalid redirect location.');}
-      const next=safeURL(target,initial,manifest);redirects.push({url,status:response.status,to:next});url=next;continue;
+      const next=safeURL(target,initial,manifest,schemaVersion);redirects.push({url,status:response.status,to:next});url=next;continue;
     }
     if(response.status!==200){await response.body?.cancel();fail('http_error',`HTTP ${response.status}; Retry-After: ${response.headers.get('retry-after')??'absent'}.`);}
     let bytes;try{bytes=await bytesOf(response,maxBytes);}catch(error){
@@ -83,14 +88,15 @@ export async function captureIndustrialContracts({outputRoot,fetchImpl=globalThi
     bodyRepresentation:'Fetch-decoded response bytes; SHA-256 hashes the exact saved file, not gzip transport bytes.',
     resources:[],failures:[]};
   let totalBytes=0;
-  async function capture(file,url,manifest=false){
+  async function capture(file,url,{manifest=false,table=null,schema=false}={}){
     try{
       const remaining=32*1024*1024-totalBytes;
       if(remaining<=0)fail('size_limit','Capture exceeded the total size limit.');
-      const data=await download(url,{fetchImpl,manifest,maxBytes:Math.min(8*1024*1024,remaining)});totalBytes+=data.bytes.length;
+      const data=await download(url,{fetchImpl,manifest,schemaVersion:schema?table?.version:null,maxBytes:Math.min(8*1024*1024,remaining)});totalBytes+=data.bytes.length;
       await writeFile(join(outputDir,file),data.bytes,{flag:'wx'});
       const resource={file,requestedUrl:url,url:data.url,status:data.status,retrievedAt:now().toISOString(),
-        bytes:data.bytes.length,sha256:hash(data.bytes),headers:data.headers,redirects:data.redirects};report.resources.push(resource);
+        bytes:data.bytes.length,sha256:hash(data.bytes),headers:data.headers,redirects:data.redirects,
+        ...(table?{table:table.name,tableVersion:table.version,release:report.release}:{})};report.resources.push(resource);
       let json;try{json=JSON.parse(data.bytes.toString('utf8').replace(/^\uFEFF/,''));}catch{fail('invalid_json',`${file} is not JSON; raw bytes were preserved.`);}
       return {json,resource};
     }catch(error){
@@ -98,15 +104,22 @@ export async function captureIndustrialContracts({outputRoot,fetchImpl=globalThi
       report.failures.push({file,url,code:error.code,message:error.message});return null;
     }
   }
-  const manifest=await capture('sde-manifest.json',`${SDE}/tranquility/${release??'latest'}/`,true);
+  const manifest=await capture('sde-manifest.json',`${SDE}/tranquility/${release??'latest'}/`,{manifest:true});
   if(manifest){
     const found=manifest.json?.release, pathRelease=/\/tranquility\/(\d{8}T\d{6}Z)\/$/.exec(new URL(manifest.resource.url).pathname)?.[1];
     if(!plain(manifest.json)||!validRelease(found)||(release&&found!==release)||(pathRelease&&pathRelease!==found)){
       report.failures.push({file:'sde-manifest.json',code:'invalid_release',message:'Manifest release is absent, invalid or inconsistent with its URL. Review the saved manifest.'});
     }else{
-      report.release=found;const base=`${SDE}/tranquility/${found}/`;
-      for(const table of tables)await capture(`${table}.schema.json`,`${base}${table}.schema.json`);
-      for(const [table,id] of records)await capture(`${table}-${id}.json`,`${base}${table}/${id}.json`);
+      report.release=found;const base=`${SDE}/tranquility/${found}/`, sources=new Map();
+      for(const name of tables){
+        const version=manifest.json.tables?.[name]?.version;
+        if(typeof version!=='string'||!version.trim()){
+          report.failures.push({file:`${name}.schema.json`,code:'invalid_table_version',message:'Selected table has no manifest version; no resource identity can be established.'});continue;
+        }
+        const table={name,version};sources.set(name,table);
+        await capture(`${name}.schema.json`,`${base}${name}.schema.json`,{table,schema:true});
+      }
+      for(const [name,id] of records)if(sources.has(name))await capture(`${name}-${id}.json`,`${base}${name}/${id}.json`,{table:sources.get(name)});
     }
   }
   await capture('esi-openapi.json',`${ESI}/meta/openapi.json?compatibility_date=${ESI_DATE}`);

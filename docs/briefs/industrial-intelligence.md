@@ -27,7 +27,7 @@ de Build continua sendo um planejador inicial; este documento não declara que o
 | Etapa | Entrega | Situação |
 |---|---|---|
 | 0A | Escopo e contrato interno normalizado do catálogo, com testes sintéticos | Implementado nesta entrega |
-| 0B | Homologação de respostas/schemas reais da API HTTP SDE e da especificação ESI | Em andamento: capturador diagnóstico testado; coleta e revisão de dados reais pendentes por falha DNS no ambiente |
+| 0B | Homologação de respostas/schemas reais da API HTTP SDE e da especificação ESI | Em andamento: oito arquivos reais recebidos e hashes conferidos; quatro schemas bloqueados por redirects, revisão completa pendente |
 | 1 | Adaptador SDE, coleta incremental, publicação atômica e cache | Planejado, depende de 0B |
 | 2 | Simulador de um lote: jobs, ME/TE, custos econômicos e capital | Planejado |
 | 3 | Profundidade de mercado, venda imediata/ordem e histórico regional | Planejado |
