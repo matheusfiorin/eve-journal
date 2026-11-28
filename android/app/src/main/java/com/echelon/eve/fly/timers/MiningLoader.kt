@@ -2,6 +2,7 @@ package com.echelon.eve.fly.timers
 
 import com.echelon.eve.AppContainer
 import com.echelon.eve.core.api.EchelonJson
+import com.echelon.eve.core.cache.atomicWrite
 import com.echelon.eve.core.esi.eveNames
 import com.echelon.eve.core.model.Pilot
 import com.echelon.eve.core.model.Ship
@@ -76,7 +77,7 @@ class DogmaCache(private val fetch: suspend (Long) -> JsonObject?, private val f
                 put("at", clock())
                 put("types", buildJsonObject { memory.values.forEach { t -> put(t.id.toString(), encode(t)) } })
             }
-            f.parentFile?.mkdirs(); val tmp = File(f.path + ".tmp"); tmp.writeText(body.toString()); tmp.renameTo(f)
+            f.parentFile?.mkdirs(); atomicWrite(f, body.toString())
         }
     }
 
